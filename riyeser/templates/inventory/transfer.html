@@ -1,0 +1,27 @@
+{% extends "base.html" %}{% block title %}{{ t.number }}{% endblock %}
+{% block content %}
+{% set cls = {'draft':'quote','sent':'open','partial':'open','received':'paid','cancelled':'void'}[t.status] %}
+<div class="head"><div><h1>Transfer {{ t.number }} <span class="badge {{ cls }}">{{ status[t.status] }}</span></h1>
+<p class="sub">{{ t.from_name }} → {{ t.to_name }}{% if t.note %} · {{ t.note }}{% endif %}</p></div>
+<div class="actions"><a class="btn" href="{{ url_for('inventory.transfers') }}">All transfers</a><a class="btn" href="{{ url_for('inventory.transfer_docket', tid=t.id) }}" target="_blank" rel="noopener">Print docket</a>
+{% if can_edit and t.status == 'draft' %}<a class="btn" href="{{ url_for('inventory.transfer_edit', tid=t.id) }}">Edit</a>{% endif %}</div></div>
+<div class="steps card" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:14px 18px">
+{% for k, n in [('draft', 'Draft'), ('sent', 'Sent: in transit'), ('received', 'Received')] %}{% set on = (k == 'draft') or (k == 'sent' and t.status in ('sent','partial','received')) or (k == 'received' and t.status == 'received') %}
+<span class="badge {{ 'paid' if on else '' }}" style="font-size:13.5px;padding:5px 12px">{{ loop.index }} · {{ n }}{% if k == 'received' and t.status == 'partial' %} (part){% endif %}</span>{% if not loop.last %}<span class="muted">→</span>{% endif %}{% endfor %}
+<span class="muted" style="margin-left:auto;font-size:13px">Made {{ t.created_at[:16] }} by {{ users.get(t.created_by, '') }}{% if t.sent_at %} · sent {{ t.sent_at[:16] }} by {{ users.get(t.sent_by, '') }}{% endif %}{% if t.received_at %} · received {{ t.received_at[:16] }}{% endif %}</span></div>
+{% if t.status in ('sent', 'partial') and can_edit %}<form method="post" action="{{ url_for('inventory.transfer_receive', tid=t.id) }}">{% endif %}
+<div class="tbl"><table>
+<tr><th>SKU</th><th>Item</th><th class="n">Sent</th><th class="n">Received</th>{% if t.status in ('sent','partial') %}<th class="n">Still in transit</th>{% if can_edit %}<th class="n" style="width:150px">Receive now</th>{% endif %}{% endif %}{% if lines|selectattr('qty_returned')|list %}<th class="n">Sent back</th>{% endif %}</tr>
+{% for l in lines %}<tr><td>{{ l.sku }}</td><td>{{ l.name }}</td><td class="n">{{ '%g'|format(l.qty) }}</td><td class="n">{{ '%g'|format(l.qty_received) }}</td>
+{% if t.status in ('sent','partial') %}<td class="n">{{ '%g'|format(l.left) }}</td>{% if can_edit %}<td class="n">{% if l.left > 0 %}<input name="recv_{{ l.id }}" value="{{ '%g'|format(l.left) }}" inputmode="decimal" class="right" aria-label="Receive {{ l.sku }}">{% endif %}</td>{% endif %}{% endif %}
+{% if lines|selectattr('qty_returned')|list %}<td class="n">{{ '%g'|format(l.qty_returned) }}</td>{% endif %}</tr>{% endfor %}
+</table></div>
+{% if t.status in ('sent', 'partial') and can_edit %}
+<div class="actions" style="justify-content:flex-end;margin-top:12px"><button class="btn pri">Receive at {{ t.to_name }}</button></div></form>
+<form method="post" action="{{ url_for('inventory.transfer_return', tid=t.id) }}" onsubmit="return confirm('Close this transfer and put what didn\'t arrive back at {{ t.from_name }}?')" style="margin-top:8px;text-align:right">
+<button class="btn sm">Close: send what didn't arrive back to {{ t.from_name }}</button></form>{% endif %}
+{% if t.status == 'draft' and can_edit %}<div class="actions" style="justify-content:flex-end;margin-top:12px">
+<form method="post" action="{{ url_for('inventory.transfer_cancel', tid=t.id) }}"><button class="btn danger">Cancel transfer</button></form>
+<form method="post" action="{{ url_for('inventory.transfer_send', tid=t.id) }}"><button class="btn pri">Send now</button></form></div>{% endif %}
+<p class="muted" style="font-size:13px">Transfers move stock only: the Inventory account and its value don't change.</p>
+{% endblock %}

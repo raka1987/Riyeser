@@ -22,7 +22,7 @@ from ..terminals import ENTRY_MODES
 bp = Blueprint("pos", __name__, url_prefix="/pos")
 
 METHODS = {"cash": "Cash", "card": "Card / EFTPOS"}
-METHOD_LABELS = {**METHODS, "split": "Split payment", "online": "Paid online"}
+METHOD_LABELS = {**METHODS, "split": "Split payment", "online": "Paid online", "bill": "Split bill"}
 WALK_IN = "Walk-in Customer"
 
 
@@ -518,17 +518,50 @@ BIG_CHANGE = 1000_00    # more than $1,000 change, is checked first
 
 
 def _items(db):
+    """Everything the till can sell. A product with variants is one tile (kind 'product', with its options); each
+    variant (its own SKU, barcode, price and stock) is in the list too, so scanning its barcode adds it directly.
+    With more than one location, stock is given per location (the till shows its own location's)."""
+    from ..locations import several, levels, stores
     rows = db.execute("SELECT i.*, t.rate, (SELECT 1 FROM item_photos p WHERE p.item_id=i.id) has_photo"
                       " FROM items i LEFT JOIN tax_codes t ON t.id=i.sale_tax_code_id"
-                      " WHERE i.active=1 AND i.is_sold=1 ORDER BY COALESCE(i.category,'~'), i.name").fetchall()
+                      " WHERE i.active=1 AND (i.is_sold=1 OR i.has_variants=1)"
+                      " ORDER BY COALESCE(i.category,'~'), i.name").fetchall()
+    parents = {r["id"]: r for r in rows if r["has_variants"]}
+    rows = [r for r in rows if r["has_variants"] or not r["parent_id"] or r["parent_id"] in parents]
     cats = sorted({r["category"] for r in rows if r["category"]})
-    tiles = tile_labels(rows)
+    tiles = tile_labels([r for r in rows if not r["parent_id"]])
     color = {c: PALETTE[i % len(PALETTE)] for i, c in enumerate(cats)}
-    return [dict(id=r["id"], sku=r["sku"], name=r["name"], price=_price_inc(r, r["rate"]), rate=r["rate"] or 0,
-                 tile=tiles[r["id"]], barcodes=[b.strip().lower() for b in (r["barcodes"] or "").split(",") if b.strip()],
+    per_loc = {l["id"]: levels(db, l["id"]) for l in stores(db)} if several(db) else None
+    out, kids = [], {}
+    for r in rows:
+        if r["parent_id"]:
+            kids.setdefault(r["parent_id"], []).append(r)
+    for r in rows:
+        if r["has_variants"] and not kids.get(r["id"]):
+            continue  # a product whose variants are all inactive
+        par = parents.get(r["parent_id"]) if r["parent_id"] else None
+        d = dict(id=r["id"], sku=r["sku"], name=r["name"], price=_price_inc(r, r["rate"]), rate=r["rate"] or 0,
+                 tile=tiles.get(r["id"]) or (tiles.get(par["id"]) if par else ""),
+                 barcodes=[b.strip().lower() for b in (r["barcodes"] or "").split(",") if b.strip()],
                  cat=r["category"] or "Other", color=color.get(r["category"], "#475467"),
-                 fav=bool(r["pos_favourite"]), photo=bool(r["has_photo"]),
-                 stock=r["qty_on_hand"] if r["is_inventoried"] else None) for r in rows], cats
+                 fav=bool(r["pos_favourite"]), photo=bool(r["has_photo"] or (par and par["has_photo"])),
+                 stock=r["qty_on_hand"] if r["is_inventoried"] else None, parent=r["parent_id"])
+        if per_loc and r["is_inventoried"]:
+            d["stocks"] = {str(l): round(v.get(r["id"], 0), 6) for l, v in per_loc.items()}
+        if r["parent_id"]:
+            try:
+                d["vals"] = json.loads(r["variant_values"] or "[]")
+            except ValueError:
+                d["vals"] = []
+        if r["has_variants"]:
+            from .variants import options_of
+            opts = options_of(r)
+            ks = kids[r["id"]]
+            prices = [_price_inc(k, k["rate"]) for k in ks]
+            d.update(kind="product", options=opts, kids=[k["id"] for k in ks], price=min(prices),
+                     price_to=max(prices), stock=None)
+        out.append(d)
+    return out, cats
 
 
 @bp.route("/")
@@ -544,7 +577,12 @@ def register():
     if _sees_low_stock():
         low = db.execute("SELECT COUNT(*) FROM items WHERE is_inventoried=1 AND active=1 AND is_sold=1"
                          " AND qty_on_hand<=reorder_level").fetchone()[0]
+    from ..locations import several, stores
+    till_locs = {t["id"]: t["location_id"] for t in tills}
+    drawers = {t["id"]: dict(mode=t["drawer_mode"], raw=bool(t["raw_receipts"])) for t in tills}
     return render_template("pos/front.html", items_json=json.dumps(items), cats=cats, customers=customers, low_count=low,
+                           till_locs=till_locs, drawers=drawers, multi_loc=several(db),
+                           locations={l["id"]: l["name"] for l in stores(db)},
                            walk_in=WALK_IN, methods=METHODS, mode=mode, features=sorted(features),
                            tills=tills, shifts=shifts, floats=floats, card_payments=card_ctx(db),
                            **approval_ctx(db))
@@ -552,7 +590,9 @@ def register():
 
 @bp.route("/photo/<int:iid>")
 def photo(iid):
-    row = get_db().execute("SELECT mime, data FROM item_photos WHERE item_id=?", (iid,)).fetchone()
+    db = get_db()
+    row = db.execute("SELECT mime, data FROM item_photos WHERE item_id=?", (iid,)).fetchone() or db.execute(
+        "SELECT p.mime, p.data FROM item_photos p JOIN items i ON i.parent_id=p.item_id WHERE i.id=?", (iid,)).fetchone()
     if not row:
         abort(404)
     return current_app.response_class(row["data"], mimetype=row["mime"],
@@ -580,24 +620,31 @@ def setup():
             on = {k for k in f.getlist("feature") if k in allowed}
         saved[mode] = sorted(on)
         db.execute("UPDATE company SET pos_mode=?, pos_features=? WHERE id=1", (mode, json.dumps(saved)))
+        from ..locations import stores, default_id
+        locs = {l["id"] for l in stores(db)}
+        pick = lambda v: int(v) if v and v.isdigit() and int(v) in locs else default_id(db)
         for t in _tills(db):
             name = (f.get(f"till_name_{t['id']}") or "").strip()[:40]
             if f.get(f"till_remove_{t['id']}") and len(_tills(db)) > 1:
                 db.execute("UPDATE pos_tills SET active=0 WHERE id=?", (t["id"],))
             elif name:
-                db.execute("UPDATE pos_tills SET name=?, location=? WHERE id=?",
-                           (name, (f.get(f"till_loc_{t['id']}") or "").strip()[:60] or None, t["id"]))
+                db.execute("UPDATE pos_tills SET name=?, location=?, location_id=? WHERE id=?",
+                           (name, (f.get(f"till_loc_{t['id']}") or "").strip()[:60] or None,
+                            pick(f.get(f"till_stock_{t['id']}")) if f.get(f"till_stock_{t['id']}") is not None
+                            else t["location_id"], t["id"]))
         if (f.get("new_till") or "").strip():
-            db.execute("INSERT INTO pos_tills (name, location) VALUES (?,?)",
-                       (f["new_till"].strip()[:40], (f.get("new_till_loc") or "").strip()[:60] or None))
+            db.execute("INSERT INTO pos_tills (name, location, location_id) VALUES (?,?,?)",
+                       (f["new_till"].strip()[:40], (f.get("new_till_loc") or "").strip()[:60] or None,
+                        pick(f.get("new_till_stock"))))
         audit(db, "pos_setup", f"{mode}: {', '.join(sorted(on)) or 'no extras'}")
         db.commit()
         flash(f"POS setup saved: {MODES[mode]['name']}." if f.get("mode_changed") != "1" else
               f"Switched to {MODES[mode]['name']}. Sensible features are on; adjust them below.", "ok")
         return redirect(url_for("pos.setup"))
     mode, on = pos_config(db)
+    from ..locations import stores
     return render_template("pos/setup.html", modes=MODES, mode=mode, on=on, tills=_tills(db),
-                           can_change=perms.can("setup", perms.FULL))
+                           can_change=perms.can("setup", perms.FULL), stock_locations=stores(db))
 
 
 @bp.route("/mode", methods=["POST"])
@@ -616,12 +663,15 @@ def _clean_lines(raw):
     for l in raw or []:
         out.append(dict(item_id=int(l["item_id"]), qty=float(l.get("qty") or 1),
                         discount_pct=min(max(float(l.get("discount_pct") or 0), 0), 100),
-                        note=str(l.get("note") or "")[:120]))
+                        note=str(l.get("note") or "")[:120], uid=str(l.get("uid") or "")[:24] or None))
+        if out[-1]["qty"] <= 0:
+            raise ValueError("Quantities must be more than 0.")
     return out
 
 
 def _order_json(db, o):
-    lines = json.loads(o["lines"])
+    from .pos_kitchen import lines_of, label
+    lines = lines_of(o)
     names = {r["id"]: r for r in db.execute("SELECT i.id, i.name, i.sell_price, t.rate FROM items i LEFT JOIN tax_codes t"
                                             " ON t.id=i.sale_tax_code_id")}
     total = 0
@@ -630,23 +680,32 @@ def _order_json(db, o):
         l["name"] = it["name"] if it else "?"
         l["price"] = _price_inc(it, it["rate"]) if it else 0
         total += round(l["qty"] * l["price"] * (1 - l["discount_pct"] / 100))
+    bill = None
+    if o["status"] == "billing":
+        from .pos_tables import bill_json
+        b = db.execute("SELECT * FROM pos_bills WHERE order_id=? AND status='open' ORDER BY id DESC LIMIT 1",
+                       (o["id"],)).fetchone()
+        bill = bill_json(db, b) if b else None
     return dict(id=o["id"], order_type=o["order_type"], table_no=o["table_no"], customer_id=o["customer_id"],
                 note=o["note"], lines=lines, total=total, kitchen_sent_at=o["kitchen_sent_at"],
-                created_at=o["created_at"], updated_at=o["updated_at"])
+                created_at=o["created_at"], updated_at=o["updated_at"], status=o["status"], label=label(o), bill=bill)
 
 
 @bp.route("/orders")
 def orders():
     db = get_db()
-    rows = db.execute("SELECT * FROM pos_orders WHERE status='open' ORDER BY id").fetchall()
+    rows = db.execute("SELECT * FROM pos_orders WHERE status IN ('open','billing') ORDER BY id").fetchall()
     return jsonify([_order_json(db, o) for o in rows])
 
 
 @bp.route("/order", methods=["POST"])
 def save_order():
+    """Save (hold) an order, and with kitchen: true send what's new on it to the kitchen."""
+    from .pos_kitchen import reconcile, void_on_screen, send_to_kitchen, lines_of, event
     db = get_db()
     d = request.get_json(silent=True) or {}
     try:
+        write_txn(db)
         lines = _clean_lines(d.get("lines"))
         if not lines:
             raise ValueError("Add at least one item.")
@@ -654,42 +713,58 @@ def save_order():
         table = (str(d.get("table_no") or "").strip()[:10]) or None
         if otype == "dine_in" and not table:
             raise ValueError("Choose a table for a dine-in order.")
-        vals = (otype, table, opt_int(d.get("customer_id")), json.dumps(lines), (d.get("note") or "")[:200])
         oid = opt_int(d.get("id"))
+        voids = []
         if oid:
-            if not db.execute("SELECT 1 FROM pos_orders WHERE id=? AND status='open'", (oid,)).fetchone():
-                raise ValueError("That order is no longer open.")
+            o = db.execute("SELECT * FROM pos_orders WHERE id=? AND status='open'", (oid,)).fetchone()
+            if not o:
+                raise ValueError("That order is no longer open (it may be being paid as a split bill).")
+            lines, voids = reconcile(lines_of(o), lines)
+        else:
+            lines, _ = reconcile([], lines)
+        if otype == "dine_in" and db.execute("SELECT 1 FROM pos_orders WHERE status IN ('open','billing') AND"
+                                             " order_type='dine_in' AND table_no=? AND id IS NOT ?",
+                                             (table, oid)).fetchone():
+            raise ValueError(f"Table {table} already has an open order. Open it, or merge the tables.")
+        vals = (otype, table, opt_int(d.get("customer_id")), json.dumps(lines), (d.get("note") or "")[:200])
+        if oid:
             db.execute("UPDATE pos_orders SET order_type=?, table_no=?, customer_id=?, lines=?, note=?,"
                        " updated_at=datetime('now','localtime') WHERE id=?", vals + (oid,))
         else:
             oid = db.execute("INSERT INTO pos_orders (order_type, table_no, customer_id, lines, note, user_id)"
                              " VALUES (?,?,?,?,?,?)", vals + (g.user["id"],)).lastrowid
+        if voids:
+            void_on_screen(db, voids)
+            event(db, oid, "void", dict(lines=[dict(uid=u, qty=q) for u, q in voids]))
+        send_no, printing = None, []
         if d.get("kitchen"):
-            db.execute("UPDATE pos_orders SET kitchen_sent_at=datetime('now','localtime') WHERE id=?", (oid,))
+            o = db.execute("SELECT * FROM pos_orders WHERE id=?", (oid,)).fetchone()
+            lines, send_no, printing = send_to_kitchen(db, o, lines)
+            if send_no:
+                db.execute("UPDATE pos_orders SET lines=?, kitchen_sent_at=datetime('now','localtime') WHERE id=?",
+                           (json.dumps(lines), oid))
         db.commit()
     except (ValueError, KeyError, TypeError) as e:
         db.rollback()
         return jsonify(ok=False, error=str(e)), 400
-    return jsonify(ok=True, id=oid, docket_url=url_for("pos.docket", oid=oid))
+    o = db.execute("SELECT * FROM pos_orders WHERE id=?", (oid,)).fetchone()
+    return jsonify(ok=True, id=oid, order=_order_json(db, o), sent=bool(send_no), nothing_new=bool(d.get("kitchen"))
+                   and not send_no, docket_url=url_for("pos.docket", oid=oid, send=send_no) if printing else None)
 
 
 @bp.route("/order/<int:oid>/cancel", methods=["POST"])
 def cancel_order(oid):
+    from .pos_kitchen import lines_of, void_on_screen, event
     db = get_db()
-    db.execute("UPDATE pos_orders SET status='cancelled', updated_at=datetime('now','localtime')"
-               " WHERE id=? AND status='open'", (oid,))
-    audit(db, "pos_order_cancel", str(oid))
+    o = db.execute("SELECT * FROM pos_orders WHERE id=? AND status='open'", (oid,)).fetchone()
+    if o:
+        db.execute("UPDATE pos_orders SET status='cancelled', updated_at=datetime('now','localtime') WHERE id=?", (oid,))
+        sent = [(l["uid"], l["qty"]) for l in lines_of(o) if l.get("sent")]
+        if sent:
+            void_on_screen(db, sent)
+        event(db, oid, "cancel", dict(sent_voided=len(sent)))
     db.commit()
     return jsonify(ok=True)
-
-
-@bp.route("/docket/<int:oid>")
-def docket(oid):
-    db = get_db()
-    o = db.execute("SELECT * FROM pos_orders WHERE id=?", (oid,)).fetchone()
-    if not o:
-        abort(404)
-    return render_template("pos/docket.html", o=_order_json(db, o), user=g.user)
 
 
 def _tenders_from(data, total, provider):
@@ -786,7 +861,7 @@ def _post_card_extras(db, txn, today, number, contact_id):
                       reference=number, contact_id=contact_id)
 
 
-def _sale_reply(db, sid, low=None, repeat=False):
+def _sale_reply(db, sid, low=None, repeat=False, drawer=None):
     s = _sale(db, sid)
     tenders = db.execute("SELECT * FROM pos_tenders WHERE sale_id=? ORDER BY id", (sid,)).fetchall()
     txns = [T.get(db, t["terminal_txn_id"]) for t in tenders if t["terminal_txn_id"]]
@@ -794,9 +869,89 @@ def _sale_reply(db, sid, low=None, repeat=False):
     cash_in = any(t["method"] == "cash" for t in tenders)
     return jsonify(ok=True, sale_id=sid, total=s["total"], change=s["change_given"], low_stock=low or [],
                    repeat=repeat, cashout=cashout, drawer=bool(cash_in or cashout), method=s["method"],
+                   drawer_opened=bool(drawer and drawer["opened"]), drawer_error=drawer["error"] if drawer else None,
                    cards=[dict(scheme=x["card_scheme"], last4=x["card_last4"], auth=x["auth_code"],
                                amount=x["amount"], total=x["approved_amount"], tip=x["tip"]) for x in txns],
                    receipt_url=url_for("pos.receipt", sid=sid))
+
+
+def build_sale_lines(db, raw):
+    """The lines of a till sale (or a table's bill) from what the till sent, at today's prices."""
+    lines = []
+    for l in raw or []:
+        item = db.execute("SELECT i.*, t.rate FROM items i LEFT JOIN tax_codes t ON t.id=i.sale_tax_code_id"
+                          " WHERE i.id=? AND i.active=1 AND i.is_sold=1", (int(l["item_id"]),)).fetchone()
+        qty = float(l.get("qty") or 0)
+        if not item or qty <= 0:
+            raise PostingError("The sale has an invalid item or quantity.")
+        disc = min(max(float(l.get("discount_pct") or 0), 0), 100)
+        note = str(l.get("note") or "").strip()[:120]
+        lines.append(dict(item_id=item["id"], qty=qty, unit_price=_price_inc(item, item["rate"]),
+                          discount_pct=disc, tax_code_id=item["sale_tax_code_id"],
+                          description=f"{item['name']} ({note})" if note else item["name"]))
+    if not lines:
+        raise PostingError("Add at least one item.")
+    return lines
+
+
+def discount_approval(db, lines, data):
+    """A discount above the limit needs a manager (owners and managers approve their own)."""
+    rules = approval_rules(db)
+    top = max(l["discount_pct"] for l in lines)
+    if rules["discount"] and top > rules["discount_limit"]:
+        if self_approves():
+            return self_approval(db, "discount", "sale", round(top), "Discount at the till")
+        return use_approval(db, data.get("approval_id"), "discount", min_amount=round(top))["id"]
+    return None
+
+
+def valid_till(db, till):
+    till = opt_int(till)
+    if till and not db.execute("SELECT 1 FROM pos_tills WHERE id=? AND active=1", (till,)).fetchone():
+        return None
+    return till
+
+
+def sale_reference(data):
+    if data.get("order_type") == "dine_in" and data.get("table_no"):
+        return f"POS Table {str(data['table_no'])[:10]}"
+    if data.get("order_type") == "takeaway":
+        return "POS Takeaway"
+    return "POS"
+
+
+def check_card_txns(db, tenders):
+    """Each card payment must be approved, for this amount, and not used before."""
+    for t in tenders:
+        if t["txn_id"]:
+            x = T.get(db, t["txn_id"])
+            if not x or x["status"] != "approved" or x["kind"] != "payment" or x["sale_id"] \
+                    or x["resolution"] == "refunded":
+                raise PostingError("That card payment wasn't approved, or it's already on another sale.")
+            if x["amount"] != t["amount"]:
+                raise PostingError("The card amount doesn't match what the card machine approved.")
+
+
+def record_tenders(db, sid, doc_id, cid, tenders, today, number, checkout, part_id=None):
+    """Record each way the customer paid against the sale's invoice, with the card machine's extras."""
+    for t in tenders:
+        if t["amount"]:
+            t["payment_id"] = record_payment(db, "in", cid, linked(db, "pos_" + t["method"]), today,
+                                             [(doc_id, t["amount"])], reference="POS",
+                                             memo=f"POS {METHODS[t['method']]}")
+        db.execute("INSERT INTO pos_tenders (sale_id, method, amount, tendered, change_given, payment_id,"
+                   " terminal_txn_id, part_id) VALUES (?,?,?,?,?,?,?,?)",
+                   (sid, t["method"], t["amount"], t["tendered"], t["change"], t.get("payment_id"), t["txn_id"],
+                    part_id))
+        if t["txn_id"]:
+            try:
+                x = T.claim_for_sale(db, t["txn_id"], sid, checkout)
+            except T.TerminalError as e:
+                raise PostingError(str(e))
+            eid = _post_card_extras(db, x, today, number, cid)
+            if eid:
+                db.execute("UPDATE pos_terminal_txns SET extras_entry_id=? WHERE id=?", (eid, x["id"]))
+    return next((t.get("payment_id") for t in tenders if t.get("payment_id")), None)
 
 
 @bp.route("/sale", methods=["POST"])
@@ -807,57 +962,32 @@ def sale():
         from ..plan import capped_message
         return jsonify(ok=False, error=capped_message("pos")), 402
     checkout = str(data.get("checkout_ref") or "").strip()[:64] or None
-    if checkout:  # the same sale sent again (double tap, lost reply): never finalise twice
+    if checkout:  # the same sale sent again (double tap, lost reply): never finalise twice (nor open the drawer)
         done = db.execute("SELECT id FROM pos_sales WHERE checkout_ref=?", (checkout,)).fetchone()
         if done:
             return _sale_reply(db, done["id"], repeat=True)
     try:
         if data.get("tenders") is None and data.get("method") not in METHODS:
             raise PostingError("Choose how the customer paid.")
-        lines = []
-        for l in data.get("lines") or []:
-            item = db.execute("SELECT i.*, t.rate FROM items i LEFT JOIN tax_codes t ON t.id=i.sale_tax_code_id"
-                              " WHERE i.id=? AND i.active=1 AND i.is_sold=1", (int(l["item_id"]),)).fetchone()
-            qty = float(l.get("qty") or 0)
-            if not item or qty <= 0:
-                raise PostingError("The sale has an invalid item or quantity.")
-            disc = min(max(float(l.get("discount_pct") or 0), 0), 100)
-            note = str(l.get("note") or "").strip()[:120]
-            lines.append(dict(item_id=item["id"], qty=qty, unit_price=_price_inc(item, item["rate"]),
-                              discount_pct=disc, tax_code_id=item["sale_tax_code_id"],
-                              description=f"{item['name']} ({note})" if note else item["name"]))
-        if not lines:
-            raise PostingError("Add at least one item.")
+        lines = build_sale_lines(db, data.get("lines"))
+        till = valid_till(db, data.get("till_id"))
+        from ..locations import till_location
+        loc = till_location(db, till)  # the stock comes off the till's location
         from ..ledger import check_stock, StockShort
         try:
-            check_stock(db, lines, bool(data.get("sell_anyway")))  # S25
+            check_stock(db, lines, bool(data.get("sell_anyway")), location_id=loc)  # S25
         except StockShort as e:
             return jsonify(ok=False, error=str(e), confirm_stock=e.confirm,
                            confirm_key="sell_anyway" if e.confirm else None), 409
         big = max(l["qty"] for l in lines)
         if big > BIG_QTY and not data.get("confirm_big"):
             return jsonify(ok=False, error=f"{big:g} of one item is a lot. Is that right?", confirm_key="confirm_big"), 409
-        # A discount above the limit needs a manager (owners and managers approve their own).
-        rules = approval_rules(db)
-        top = max(l["discount_pct"] for l in lines)
-        discount_approval = None
-        if rules["discount"] and top > rules["discount_limit"]:
-            if self_approves():
-                discount_approval = self_approval(db, "discount", "sale", round(top), "Discount at the till")
-            else:
-                discount_approval = use_approval(db, data.get("approval_id"), "discount", min_amount=round(top))["id"]
-        till = opt_int(data.get("till_id"))
-        if till and not db.execute("SELECT 1 FROM pos_tills WHERE id=? AND active=1", (till,)).fetchone():
-            till = None
+        disc_approval = discount_approval(db, lines, data)
         cid = opt_int(data.get("customer_id")) or walk_in_customer(db)
         today = date.today().isoformat()
-        ref = "POS"
-        if data.get("order_type") == "dine_in" and data.get("table_no"):
-            ref = f"POS Table {str(data['table_no'])[:10]}"
-        elif data.get("order_type") == "takeaway":
-            ref = "POS Takeaway"
         doc_id = save_document(db, "sale", dict(contact_id=cid, date=today, due_date=today, tax_inclusive=True,
-                                                reference=ref, notes=(data.get("note") or "")[:200]),
+                                                reference=sale_reference(data), notes=(data.get("note") or "")[:200],
+                                                location_id=loc),
                                lines, "open")
         total = db.execute("SELECT total FROM documents WHERE id=?", (doc_id,)).fetchone()["total"]
         tenders = [] if total == 0 else _tenders_from(data, total, T.provider_for(db, till))
@@ -866,14 +996,7 @@ def sale():
             db.rollback()
             return jsonify(ok=False, error=f"Change of ${cash_t['change'] / 100:,.2f}? Check the cash tendered.",
                            confirm_key="confirm_big"), 409
-        for t in tenders:  # each card payment must be approved, for this amount, and not used before
-            if t["txn_id"]:
-                x = T.get(db, t["txn_id"])
-                if not x or x["status"] != "approved" or x["kind"] != "payment" or x["sale_id"] \
-                        or x["resolution"] == "refunded":
-                    raise PostingError("That card payment wasn't approved, or it's already on another sale.")
-                if x["amount"] != t["amount"]:
-                    raise PostingError("The card amount doesn't match what the card machine approved.")
+        check_card_txns(db, tenders)
         if total == 0:  # M28: a free item (staff meal, giveaway) with a reason; nothing to pay
             why = str(data.get("reason") or "").strip()[:120]
             if not why:
@@ -882,37 +1005,21 @@ def sale():
                                reason_key="reason"), 409
             db.execute("UPDATE documents SET status='paid', notes=TRIM(COALESCE(notes,'') || ' Free: ' || ?) WHERE id=?",
                        (why, doc_id))
-        for t in tenders:
-            if t["amount"]:
-                t["payment_id"] = record_payment(db, "in", cid, linked(db, "pos_" + t["method"]), today,
-                                                 [(doc_id, t["amount"])], reference="POS",
-                                                 memo=f"POS {METHODS[t['method']]}")
         methods_used = {t["method"] for t in tenders}
         method = (methods_used.pop() if len(methods_used) == 1 else "split") if tenders else \
             (data.get("method") if data.get("method") in METHODS else "cash")
         tendered = sum(t["tendered"] for t in tenders) if tenders else 0
         change = cash_t["change"] if cash_t else 0
         shift = open_shift(db, till) if till else None
-        first_pid = next((t.get("payment_id") for t in tenders if t.get("payment_id")), None)
-        sid = db.execute("INSERT INTO pos_sales (document_id, payment_id, method, tendered, change_given, user_id,"
-                         " till_id, shift_id, checkout_ref) VALUES (?,?,?,?,?,?,?,?,?)",
-                         (doc_id, first_pid, method, tendered, change, g.user["id"], till,
+        sid = db.execute("INSERT INTO pos_sales (document_id, method, tendered, change_given, user_id,"
+                         " till_id, shift_id, checkout_ref) VALUES (?,?,?,?,?,?,?,?)",
+                         (doc_id, method, tendered, change, g.user["id"], till,
                           shift["id"] if shift else None, checkout)).lastrowid
         number = db.execute("SELECT number FROM documents WHERE id=?", (doc_id,)).fetchone()[0]
-        for t in tenders:
-            db.execute("INSERT INTO pos_tenders (sale_id, method, amount, tendered, change_given, payment_id,"
-                       " terminal_txn_id) VALUES (?,?,?,?,?,?,?)",
-                       (sid, t["method"], t["amount"], t["tendered"], t["change"], t.get("payment_id"), t["txn_id"]))
-            if t["txn_id"]:
-                try:
-                    x = T.claim_for_sale(db, t["txn_id"], sid, checkout)
-                except T.TerminalError as e:
-                    raise PostingError(str(e))
-                eid = _post_card_extras(db, x, today, number, cid)
-                if eid:
-                    db.execute("UPDATE pos_terminal_txns SET extras_entry_id=? WHERE id=?", (eid, x["id"]))
-        if discount_approval:
-            db.execute("UPDATE pos_approvals SET ref=? WHERE id=?", (f"sale {sid}", discount_approval))
+        first_pid = record_tenders(db, sid, doc_id, cid, tenders, today, number, checkout)
+        db.execute("UPDATE pos_sales SET payment_id=? WHERE id=?", (first_pid, sid))
+        if disc_approval:
+            db.execute("UPDATE pos_approvals SET ref=? WHERE id=?", (f"sale {sid}", disc_approval))
         oid = opt_int(data.get("order_id"))
         if oid:
             db.execute("UPDATE pos_orders SET status='paid', sale_id=?, updated_at=datetime('now','localtime')"
@@ -928,9 +1035,13 @@ def sale():
     except (PostingError, ValueError, KeyError, TypeError) as e:
         db.rollback()
         return jsonify(ok=False, error=str(e) or "Could not complete the sale."), 400
+    drawer = None
+    if cash_t or any(t["txn_id"] and (T.get(db, t["txn_id"])["cashout"] or 0) for t in tenders):
+        from .pos_drawer import open_drawer
+        drawer = open_drawer(db, till, "sale", sid)  # once: a repeat of this sale returned above
     from .reorder import low_after_sale
-    low = low_after_sale(db, [l["item_id"] for l in lines]) if _sees_low_stock() else []  # a warning, never a block
-    return _sale_reply(db, sid, low)
+    low = low_after_sale(db, [l["item_id"] for l in lines], loc) if _sees_low_stock() else []  # a warning only
+    return _sale_reply(db, sid, low, drawer=drawer)
 
 
 def _sees_low_stock():
@@ -958,8 +1069,15 @@ def receipt(sid):
                          " x.provider FROM pos_tenders t LEFT JOIN pos_terminal_txns x ON x.id=t.terminal_txn_id"
                          " WHERE t.sale_id=? ORDER BY t.id", (sid,)).fetchall()
     tenders = [dict(t, receipt=json.loads(t["receipt_lines"]) if t["receipt_lines"] else []) for t in tenders]
+    part, parts = None, []
+    bill = db.execute("SELECT * FROM pos_bills WHERE sale_id=? ORDER BY id DESC LIMIT 1", (sid,)).fetchone()
+    if bill:  # a split bill: one guest's receipt (?part=) shows their part and how they paid it
+        parts = db.execute("SELECT * FROM pos_bill_parts WHERE bill_id=? ORDER BY n", (bill["id"],)).fetchall()
+        part = next((p for p in parts if p["id"] == opt_int(request.args.get("part"))), None)
+        if part:
+            tenders = [t for t in tenders if t["part_id"] == part["id"]]
     return render_template("pos/receipt.html", s=s, lines=lines, methods=METHOD_LABELS, tenders=tenders,
-                           entry_modes=ENTRY_MODES)
+                           entry_modes=ENTRY_MODES, part=part, parts=parts)
 
 
 def day_summary(db, day):
@@ -1162,7 +1280,9 @@ def refund(sid):
             mv = db.execute("SELECT unit_cost FROM stock_movements WHERE source_type='invoice' AND source_id=? AND"
                             " item_id=? ORDER BY id LIMIT 1", (s["document_id"], item["id"])).fetchone()
             cost = mv["unit_cost"] if mv else item["avg_cost"]
-            stock_in(db, item["id"], q, cost, today, "pos_refund", eid, f"Refund {s['number']}")
+            stock_in(db, item["id"], q, cost, today, "pos_refund", eid, f"Refund {s['number']}",
+                     location_id=db.execute("SELECT location_id FROM documents WHERE id=?",
+                                            (s["document_id"],)).fetchone()[0])  # back where it was sold
             amt = round_cents(cost * q)
             if amt:
                 for acct, dr, cr in ((item["asset_account_id"] or linked(db, "inventory"), amt, 0),
@@ -1184,7 +1304,15 @@ def refund(sid):
     except (PostingError, ValueError, TypeError) as e:
         db.rollback()
         return jsonify(ok=False, error=str(e)), 400
-    return jsonify(ok=True, refund_id=rid, amount=total)
+    drawer = None
+    if method == "cash":  # the money comes out of the drawer
+        from .pos_drawer import open_drawer
+        drawer = open_drawer(db, till or s["till_id"], "refund", rid)
+    return jsonify(ok=True, refund_id=rid, amount=total, drawer_opened=bool(drawer and drawer["opened"]),
+                   drawer_error=drawer["error"] if drawer else None)
 
 
 from . import pos_card  # noqa: E402,F401  card terminal routes (riyeser/views/pos_card.py)
+from . import pos_drawer  # noqa: E402,F401  the cash drawer and ESC/POS receipts (riyeser/views/pos_drawer.py)
+from . import pos_kitchen  # noqa: E402,F401  kitchen stations, dockets per send (riyeser/views/pos_kitchen.py)
+from . import pos_tables  # noqa: E402,F401  move, merge and split tables (riyeser/views/pos_tables.py)

@@ -1,0 +1,14 @@
+{% extends "base.html" %}{% block title %}Import variants{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Import variants (CSV)</h1><p class="sub">Add or update product variants from a spreadsheet. The easiest way: export first, change the file in Excel, then import it here.</p></div>
+<div class="actions"><a class="btn" href="{{ url_for('inventory.variants_export') }}">Export CSV (template)</a></div></div>
+<form method="post" enctype="multipart/form-data" class="card">
+<label for="file"><b>CSV file</b></label><input id="file" type="file" name="file" accept=".csv,text/csv" required style="max-width:420px">
+<p class="muted" style="font-size:13px">Columns: {% for c in cols %}<code>{{ c }}</code>{{ ', ' if not loop.last }}{% endfor %}.</p>
+<ul class="muted" style="font-size:13px;margin:0 0 12px;padding-left:20px">
+<li>A row matches an existing variant by its <code>sku</code>, or by its product and choices. Anything else is added as a new variant.</li>
+<li>A <code>product_sku</code> that doesn't exist yet is made as a new product (give its name in <code>product</code>).</li>
+<li><code>on_hand</code> is only used for new variants (as opening stock at its cost). Stock of variants already there isn't changed by an import: use a stocktake.</li>
+<li>If any row has a problem, nothing is imported and the problems are listed.</li></ul>
+<button class="btn pri">Import</button></form>
+{% endblock %}

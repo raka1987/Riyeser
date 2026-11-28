@@ -1,0 +1,14 @@
+{% extends "base.html" %}{% block title %}{{ loc.name }}{% endblock %}
+{% block content %}
+<div class="head"><div><h1>{{ loc.name }}</h1><p class="sub">Stock at this location, and its own reorder levels. Leave a level blank to use the item's usual level. Low stock (choose this location there) and the till's low-stock warnings use these levels.</p></div>
+<div class="actions"><a class="btn" href="{{ url_for('inventory.locations') }}">All locations</a><a class="btn" href="{{ url_for('inventory.low', loc=loc.id) }}">Low stock here</a><a class="btn" href="{{ url_for('inventory.count', loc=loc.id) }}">Stocktake here</a></div></div>
+<form method="post">
+<div class="tbl"><table>
+<tr><th>SKU</th><th>Item</th><th class="n">Here</th><th class="n">Item's level</th><th class="n">Level here</th><th class="n">Reorder up to here</th></tr>
+{% for i in items %}<tr><td>{{ i.sku }}</td><td>{{ i.name }}</td><td class="n">{{ '%g'|format(i.here) }}</td><td class="n">{{ '%g'|format(i.reorder_level) }}</td>
+<td class="n"><input name="level_{{ i.id }}" value="{{ '%g'|format(i.own_level) if i.own_level is not none }}" inputmode="decimal" class="right" aria-label="Reorder level here for {{ i.sku }}" placeholder="{{ '%g'|format(i.reorder_level) }}"></td>
+<td class="n"><input name="upto_{{ i.id }}" value="{{ '%g'|format(i.own_up_to) if i.own_up_to is not none }}" inputmode="decimal" class="right" aria-label="Reorder up to here for {{ i.sku }}"></td></tr>
+{% else %}<tr><td colspan="6">No stock items yet.</td></tr>{% endfor %}
+</table></div>
+<p class="actions" style="justify-content:flex-end"><button class="btn pri">Save levels</button></p></form>
+{% endblock %}

@@ -390,6 +390,8 @@ def migrate(db):
     _estimate_tables(db)  # Riyeser Estimate: measurements, plans and trade templates
     from .countries import ensure_schema as _country_settings
     _country_settings(db)  # Country and tax settings (riyeser/countries.py); NULL country = Australian, as before
+    from .pos_schema import ensure_schema as _pos_extras
+    _pos_extras(db)  # POS 2.11: variants, stock locations and transfers, split bills, cash drawer, kitchen screen
     db.commit()
 
 

@@ -104,7 +104,21 @@ def split_inclusive(amount, rate):
 
 
 # ================================================================== inventory
-def stock_in(db, item_id, qty, unit_cost, date, source_type, source_id=None, memo=None):
+def _loc(db, location_id):
+    from .locations import resolve
+    return resolve(db, location_id)
+
+
+def _move(db, item_id, date, qty, unit_cost, source_type, source_id, memo, location_id):
+    """One stock movement, at a location (the default one when none is given), keeping that location's count."""
+    from .locations import add_level
+    loc = _loc(db, location_id)
+    db.execute("INSERT INTO stock_movements (item_id, date, qty, unit_cost, source_type, source_id, memo, location_id)"
+               " VALUES (?,?,?,?,?,?,?,?)", (item_id, date, qty, unit_cost, source_type, source_id, memo, loc))
+    add_level(db, item_id, loc, qty)
+
+
+def stock_in(db, item_id, qty, unit_cost, date, source_type, source_id=None, memo=None, location_id=None):
     write_txn(db)
     item = db.execute("SELECT * FROM items WHERE id=?", (item_id,)).fetchone()
     old_q, old_c = item["qty_on_hand"], item["avg_cost"]
@@ -117,8 +131,7 @@ def stock_in(db, item_id, qty, unit_cost, date, source_type, source_id=None, mem
     # purchase's cost, so the difference goes to cost of sales and the Inventory account still matches (F13).
     correction = round_cents(old_q * old_c + qty * unit_cost - new_q * new_c) if old_q < 0 else 0
     db.execute("UPDATE items SET qty_on_hand=?, avg_cost=? WHERE id=?", (new_q, new_c, item_id))
-    db.execute("INSERT INTO stock_movements (item_id, date, qty, unit_cost, source_type, source_id, memo)"
-               " VALUES (?,?,?,?,?,?,?)", (item_id, date, qty, unit_cost, source_type, source_id, memo))
+    _move(db, item_id, date, qty, unit_cost, source_type, source_id, memo, location_id)
     if correction:
         _stock_value_entry(db, item, date, correction, item["expense_account_id"] or linked(db, "cogs"),
                            "Stock cost correction (sold before bought)")
@@ -139,15 +152,14 @@ def last_cost(item):
     return item["avg_cost"] if item["avg_cost"] and item["avg_cost"] > 0 else float(item["buy_price"] or 0)
 
 
-def stock_out(db, item_id, qty, date, source_type, source_id=None, memo=None):
+def stock_out(db, item_id, qty, date, source_type, source_id=None, memo=None, location_id=None):
     """Remove qty at average cost; returns total cost in cents. With nothing on hand to average (selling before
     buying), the last known cost is used, so cost of sales is never left at $0 (F13)."""
     write_txn(db)
     item = db.execute("SELECT * FROM items WHERE id=?", (item_id,)).fetchone()
     cost = last_cost(item)
     db.execute("UPDATE items SET qty_on_hand=qty_on_hand-?, avg_cost=? WHERE id=?", (qty, cost, item_id))
-    db.execute("INSERT INTO stock_movements (item_id, date, qty, unit_cost, source_type, source_id, memo)"
-               " VALUES (?,?,?,?,?,?,?)", (item_id, date, -qty, cost, source_type, source_id, memo))
+    _move(db, item_id, date, -qty, cost, source_type, source_id, memo, location_id)
     return round_cents(cost * qty)
 
 
@@ -163,15 +175,16 @@ def _unstock_bill(db, m, doc):
         new_c = item["avg_cost"]
         too_high = round_cents(remaining - max(new_q, 0) * new_c)
     db.execute("UPDATE items SET qty_on_hand=?, avg_cost=? WHERE id=?", (max(new_q, 0), new_c, item["id"]))
-    db.execute("INSERT INTO stock_movements (item_id, date, qty, unit_cost, source_type, source_id, memo)"
-               " VALUES (?,?,?,?,?,?,?)", (item["id"], doc["date"], -m["qty"], m["unit_cost"], "void", doc["id"],
-                                           "Void " + doc["number"]))
+    _move(db, item["id"], doc["date"], -m["qty"], m["unit_cost"], "void", doc["id"], "Void " + doc["number"],
+          m["location_id"] if "location_id" in m.keys() else None)
+    # (the total is kept at 0 when it would go below: the default location, worked out from the total, follows)
     if too_high:
         _stock_value_entry(db, item, doc["date"], too_high, linked(db, "stock_adjust"),
                            f"Stock value after voiding {doc['number']}")
 
 
-def stock_adjust(db, item_id, date, qty_change, unit_cost=None, memo="Inventory adjustment", account_id=None):
+def stock_adjust(db, item_id, date, qty_change, unit_cost=None, memo="Inventory adjustment", account_id=None,
+                 location_id=None):
     write_txn(db)
     item = db.execute("SELECT * FROM items WHERE id=?", (item_id,)).fetchone()
     if not item or not item["is_inventoried"]:
@@ -189,9 +202,9 @@ def stock_adjust(db, item_id, date, qty_change, unit_cost=None, memo="Inventory 
         lines = [dict(account_id=adj_acct, debit=value), dict(account_id=asset, credit=value)]
     eid = post_entry(db, date, f"{memo}: {item['sku']} {qty_change:+g}", "stock_adj", lines)
     if qty_change > 0:
-        stock_in(db, item_id, qty_change, cost, date, "stock_adj", eid, memo)
+        stock_in(db, item_id, qty_change, cost, date, "stock_adj", eid, memo, location_id=location_id)
     else:
-        stock_out(db, item_id, -qty_change, date, "stock_adj", eid, memo)
+        stock_out(db, item_id, -qty_change, date, "stock_adj", eid, memo, location_id=location_id)
     db.execute("UPDATE journal_entries SET source_id=? WHERE id=?", (eid, eid))
     audit(db, "stock_adjust", f"{item['sku']} {qty_change:+g}")
     _settle_if_sold_out(db, {item_id}, date, memo)
@@ -374,6 +387,8 @@ def save_document(db, side, header, lines, status, doc_id=None):
             (side, status, number, header["contact_id"], header["date"], header.get("due_date"),
              header.get("reference"), header.get("notes"), 1 if header.get("tax_inclusive") else 0,
              subtotal, tax_total, total, kind)).lastrowid
+    if header.get("location_id"):  # where the stock comes from / goes to (a till's location); else the default
+        db.execute("UPDATE documents SET location_id=? WHERE id=?", (header["location_id"], doc_id))
     for l in clean:
         db.execute("INSERT INTO document_lines (document_id, item_id, description, qty, unit_price, discount_pct,"
                    " account_id, tax_code_id, job_id, net_amount, tax_amount) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
@@ -393,8 +408,11 @@ class StockShort(PostingError):
         self.confirm = confirm
 
 
-def check_stock(db, lines, sell_anyway=False):
-    """Refuse a sale of more stock than is on hand unless sell_anyway (and the item allows it)."""
+def check_stock(db, lines, sell_anyway=False, location_id=None):
+    """Refuse a sale of more stock than is on hand unless sell_anyway (and the item allows it). With a location (a
+    till's), what counts is what's at that location: an item sold out there is short even if another has some."""
+    from .locations import several, qty_at, name_of
+    at = location_id if location_id and several(db) else None
     want = defaultdict(float)
     for l in lines:
         if l.get("item_id"):
@@ -402,13 +420,15 @@ def check_stock(db, lines, sell_anyway=False):
     msgs, block = [], False
     for iid, q in want.items():
         it = db.execute("SELECT * FROM items WHERE id=?", (iid,)).fetchone()
-        if not it or not it["is_inventoried"] or q <= 0 or q <= it["qty_on_hand"] + 1e-9:
+        have = qty_at(db, iid, at) if it and at else (it["qty_on_hand"] if it else 0)
+        if not it or not it["is_inventoried"] or q <= 0 or q <= have + 1e-9:
             continue
+        where = f" at {name_of(db, at)}" if at else ""
         if it["block_oversell"]:
             block = True
-            msgs.append(f"Only {max(it['qty_on_hand'], 0):g} {it['name']} in stock, and it can't be sold below 0.")
+            msgs.append(f"Only {max(have, 0):g} {it['name']} in stock{where}, and it can't be sold below 0.")
         else:
-            msgs.append(f"Only {max(it['qty_on_hand'], 0):g} {it['name']} in stock (selling {q:g}).")
+            msgs.append(f"Only {max(have, 0):g} {it['name']} in stock{where} (selling {q:g}).")
     if block:
         raise StockShort(" ".join(msgs), confirm=False)
     if msgs and not sell_anyway:
@@ -457,7 +477,8 @@ def post_document(db, doc_id):
         if not item["is_inventoried"]:
             continue
         if sale:
-            cost = stock_out(db, item["id"], l["qty"], doc["date"], "invoice", doc_id, doc["number"])
+            cost = stock_out(db, item["id"], l["qty"], doc["date"], "invoice", doc_id, doc["number"],
+                             location_id=doc["location_id"])
             if cost:  # negative on a credit note: the goods come back, so cost of sales goes the other way
                 cogs_lines.append(dict(account_id=item["expense_account_id"] or linked(db, "cogs"),
                                        debit=max(cost, 0), credit=max(-cost, 0), job_id=l["job_id"],
@@ -466,7 +487,8 @@ def post_document(db, doc_id):
                                        debit=max(-cost, 0), credit=max(cost, 0), memo=f"COGS {item['sku']}"))
         else:
             unit = l["net_amount"] / l["qty"] if l["qty"] else 0
-            stock_in(db, item["id"], l["qty"], unit, doc["date"], "bill", doc_id, doc["number"])
+            stock_in(db, item["id"], l["qty"], unit, doc["date"], "bill", doc_id, doc["number"],
+                     location_id=doc["location_id"])
     if cogs_lines:
         for cl in cogs_lines:
             db.execute("INSERT INTO journal_lines (entry_id, account_id, debit, credit, job_id, memo)"
@@ -528,7 +550,8 @@ def void_document(db, doc_id):
         reverse_entry(db, doc["entry_id"])
         for m in moves:
             if m["qty"] < 0:
-                stock_in(db, m["item_id"], -m["qty"], m["unit_cost"], doc["date"], "void", doc_id, "Void " + doc["number"])
+                stock_in(db, m["item_id"], -m["qty"], m["unit_cost"], doc["date"], "void", doc_id, "Void " + doc["number"],
+                         location_id=m["location_id"])
             else:
                 _unstock_bill(db, m, doc)
     db.execute("UPDATE documents SET status='void' WHERE id=?", (doc_id,))

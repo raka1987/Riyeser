@@ -1,0 +1,23 @@
+{% extends "base.html" %}{% block title %}Stock locations{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Stock locations</h1>
+<p class="sub">Where you keep stock: shops, a storeroom, a warehouse, a van. Each till sells from its own location (set in POS setup). Move stock between locations with a transfer.</p></div>
+<div class="actions"><a class="btn" href="{{ url_for('inventory.transfers') }}">Transfers{% if open_transfers %} <span class="badge open">{{ open_transfers }} in transit</span>{% endif %}</a>
+<a class="btn pri" href="{{ url_for('inventory.transfer_edit') }}">New transfer</a></div></div>
+<div class="card" style="background:var(--brand-l);border-color:#c7dbf3;color:#1e3a5f"><b>Transfers don't change your books.</b> The stock is still yours wherever it is, so the Inventory account and its value stay the same. Only the count at each location changes.</div>
+<form method="post">
+<div class="tbl"><table>
+<tr><th>Location</th><th>Address or note</th><th class="n">Units</th><th class="n">Value at cost</th><th>Tills</th><th>Active</th><th></th></tr>
+{% for l in rows %}<tr>
+<td><input name="name_{{ l.id }}" value="{{ l.name }}" maxlength="60" aria-label="Location name" style="min-width:160px">{% if l.is_default %} <span class="badge">Default</span>{% endif %}</td>
+<td><input name="address_{{ l.id }}" value="{{ l.address or '' }}" maxlength="120" aria-label="Address" placeholder="e.g. 12 Beach Rd"></td>
+<td class="n">{{ '%g'|format(l.units) }}</td><td class="n">{{ l.value|money }}</td>
+<td>{{ l.tills|join(', ') }}</td>
+<td>{% if l.is_default %}<span class="muted">Always</span>{% else %}<label class="check" style="margin:0"><input type="checkbox" name="active_{{ l.id }}" value="1" {{ 'checked' if l.active }}> On</label>{% endif %}</td>
+<td><a class="btn sm" href="{{ url_for('inventory.location_view', lid=l.id) }}">Stock &amp; levels</a> <a class="btn sm" href="{{ url_for('inventory.count', loc=l.id) }}">Stocktake</a></td></tr>{% endfor %}
+<tr><td><input name="new_name" maxlength="60" placeholder="+ Add a location, e.g. Warehouse" aria-label="New location" style="min-width:160px"></td><td><input name="new_address" maxlength="120" placeholder="Address (optional)" aria-label="New location address"></td><td colspan="5"></td></tr>
+</table></div>
+{% if in_transit %}<p class="muted">{{ '%g'|format(in_transit) }} units are in transit between locations.</p>{% endif %}
+<p class="actions" style="justify-content:flex-end"><button class="btn pri">Save locations</button></p>
+</form>
+{% endblock %}

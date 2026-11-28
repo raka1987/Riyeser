@@ -45,12 +45,29 @@ def suggested_qty(item, coming=0):
     return max(math.ceil(target_level(item) - item["qty_on_hand"] - (coming or 0) - 1e-9), 0)
 
 
-def low_stock(db, limit=None):
-    """Stocked items at or below their reorder level, with what's on order, a suggested order and a supplier."""
+def low_stock(db, limit=None, location_id=None):
+    """Stocked items at or below their reorder level, with what's on order, a suggested order and a supplier.
+    With a location: what's at that location, against that location's own levels where it has them (else the
+    item's). Purchase orders arrive at the default location, so "on order" only counts there."""
+    from ..locations import levels, location_reorder, default_id
     coming = on_order(db)
-    rows = db.execute("SELECT i.*, c.name supplier_name FROM items i LEFT JOIN contacts c ON c.id=i.supplier_id"
-                      " WHERE i.is_inventoried=1 AND i.active=1 AND i.qty_on_hand<=i.reorder_level"
-                      " ORDER BY i.sku" + (f" LIMIT {int(limit)}" if limit else "")).fetchall()
+    if location_id:
+        here, own = levels(db, location_id), location_reorder(db, location_id)
+        if location_id != default_id(db):
+            coming = {}
+        rows = []
+        for i in db.execute("SELECT i.*, c.name supplier_name FROM items i LEFT JOIN contacts c ON"
+                            " c.id=i.supplier_id WHERE i.is_inventoried=1 AND i.active=1 ORDER BY i.sku").fetchall():
+            lv, up = own.get(i["id"], (None, None))
+            d = dict(i, qty_on_hand=here.get(i["id"], 0), reorder_level=i["reorder_level"] if lv is None else lv,
+                     reorder_up_to=i["reorder_up_to"] if lv is None and up is None else up)
+            if d["qty_on_hand"] <= d["reorder_level"]:
+                rows.append(d)
+        rows = rows[:int(limit)] if limit else rows
+    else:
+        rows = db.execute("SELECT i.*, c.name supplier_name FROM items i LEFT JOIN contacts c ON c.id=i.supplier_id"
+                          " WHERE i.is_inventoried=1 AND i.active=1 AND i.qty_on_hand<=i.reorder_level"
+                          " ORDER BY i.sku" + (f" LIMIT {int(limit)}" if limit else "")).fetchall()
     out = []
     for i in rows:
         sup = i["supplier_id"] or last_supplier(db, i["id"])
@@ -59,14 +76,22 @@ def low_stock(db, limit=None):
     return out
 
 
-def low_after_sale(db, item_ids):
-    """The items in a sale that are now at or below their reorder level: 'Coffee beans (2 left)'."""
+def low_after_sale(db, item_ids, location_id=None):
+    """The items in a sale that are now at or below their reorder level: 'Coffee beans (2 left)'. With more than
+    one location, it's the till's location that counts (with that location's own level when it has one)."""
+    from ..locations import several, qty_at, location_reorder
+    at = location_id if location_id and several(db) else None
+    own = location_reorder(db, at) if at else {}
     out = []
     for iid in dict.fromkeys(item_ids):
-        i = db.execute("SELECT name, qty_on_hand, reorder_level FROM items WHERE id=? AND is_inventoried=1"
-                       " AND qty_on_hand<=reorder_level", (iid,)).fetchone()
-        if i:
-            out.append(f"{i['name']} ({max(i['qty_on_hand'], 0):g} left)")
+        i = db.execute("SELECT name, qty_on_hand, reorder_level FROM items WHERE id=? AND is_inventoried=1",
+                       (iid,)).fetchone()
+        if not i:
+            continue
+        have = qty_at(db, iid, at) if at else i["qty_on_hand"]
+        level = own[iid][0] if iid in own and own[iid][0] is not None else i["reorder_level"]
+        if have <= level:
+            out.append(f"{i['name']} ({max(have, 0):g} left)")
     return out
 
 
@@ -78,7 +103,10 @@ def _can_order():
 @bp.route("/low-stock")
 def low():
     db = get_db()
-    rows = low_stock(db)
+    from ..locations import several, stores, store_id
+    locs = stores(db) if several(db) else []
+    loc = store_id(db, opt_int(request.args.get("loc"))) if locs and request.args.get("loc") else None
+    rows = low_stock(db, location_id=loc)
     suppliers = db.execute("SELECT id, name FROM contacts WHERE kind='supplier' AND active=1 ORDER BY name").fetchall()
     names = {s["id"]: s["name"] for s in suppliers}
     for r in rows:
@@ -95,7 +123,8 @@ def low():
             Choice("sup", "Supplier", [(str(s["id"]), s["name"]) for s in suppliers] + [("-", "(No supplier)")],
                    test=lambda r, v, t: (not r["order_supplier"]) if v == "-" else str(r["order_supplier"]) == v)]))
     rows = lst.apply(rows)
-    return render_template("inventory/low.html", rows=rows, suppliers=suppliers, can_order=_can_order(), lst=lst)
+    return render_template("inventory/low.html", rows=rows, suppliers=suppliers, can_order=_can_order(), lst=lst,
+                           locations=locs, loc=loc)
 
 
 @bp.route("/low-stock/order", methods=["GET", "POST"])

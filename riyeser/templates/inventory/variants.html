@@ -1,0 +1,52 @@
+{% extends "base.html" %}{% block title %}Variants · {{ p.sku }}{% endblock %}
+{% block content %}
+<style>
+.vopts{display:grid;grid-template-columns:minmax(140px,200px) minmax(0,1fr);gap:10px 14px;align-items:center}
+.vopts .hd{font-size:12.5px;color:var(--muted);font-weight:600}
+.vchips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}.vchips span{background:var(--brand-l);color:var(--brand);border-radius:999px;padding:2px 10px;font-size:12.5px;font-weight:600}
+.tbl.vtbl td input.sku{min-width:150px;width:150px}.tbl.vtbl td input.bc{min-width:160px;width:160px}.tbl.vtbl td input.m{width:96px;min-width:88px}
+.vtbl td.lbl{font-weight:600}.vtbl tr.off td{opacity:.55}
+.bulk{display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin:0 0 12px}.bulk label{font-size:12.5px;color:var(--muted);font-weight:600;display:block}
+.bulk input{width:120px}
+@media (max-width:700px){.vopts{grid-template-columns:1fr}.vopts .hd:nth-child(2){display:none}}
+</style>
+<div class="head"><div><h1>Variants: {{ p.name }}</h1>
+<p class="sub">Up to {{ max_options }} options, for example Size and Colour. Every combination is its own item with its own SKU, barcode, price, cost and stock. At the till, tapping {{ p.name }} opens a quick picker, and scanning a variant's barcode adds it straight away.</p></div>
+<div class="actions"><a class="btn" href="{{ url_for('inventory.edit', iid=p.id) }}">Product details</a><a class="btn" href="{{ url_for('inventory.variants_export') }}">Export CSV</a><a class="btn" href="{{ url_for('inventory.variants_import') }}">Import CSV</a></div></div>
+
+<form method="post" class="card"><input type="hidden" name="what" value="generate">
+<h2 style="margin-top:0">1 · Options</h2>
+<div class="vopts"><div class="hd">Option</div><div class="hd">Choices (separated by commas)</div>
+{% for n in range(1, max_options + 1) %}{% set o = opts[n - 1] if opts|length >= n else None %}
+<input name="opt_name_{{ n }}" value="{{ o.name if o }}" maxlength="30" placeholder="{{ ['Size', 'Colour', 'Material'][n - 1] }}" aria-label="Option {{ n }} name" {{ 'readonly' if o and rows }}>
+<div><input name="opt_values_{{ n }}" value="{{ o['values']|join(', ') if o }}" placeholder="{{ ['S, M, L, XL', 'Navy, White, Black', 'Cotton, Linen'][n - 1] }}" aria-label="Option {{ n }} choices"></div>{% endfor %}
+</div>
+{% if not p.has_variants and p.is_inventoried and p.qty_on_hand %}<div style="margin-top:14px"><label for="stock_to"><b>{{ p.sku }} has {{ '%g'|format(p.qty_on_hand) }} on hand.</b> Which variant is that stock? Type its choices in order, separated by | (for example <code>Navy|M</code>).</label>
+<input id="stock_to" name="stock_to" required placeholder="Navy|M" style="max-width:260px"></div>{% endif %}
+<p class="muted" style="font-size:13px;margin:12px 0 0">{% if rows %}You can add more choices (new combinations are made). Choices already used can't be taken away: switch those variants off below instead.{% else %}New variants start with this product's price ({{ p.sell_price|money }} ex tax) and cost ({{ p.buy_price|money }}). {{ 'They track stock.' if flags.stock else "They don't track stock (tick \"I inventory this item\" on the product first if they should)." }}{% endif %}</p>
+<p class="actions" style="justify-content:flex-end"><button class="btn pri">Generate combinations</button></p></form>
+
+{% if rows %}
+<form method="post" class="card"><input type="hidden" name="what" value="save">
+<h2 style="margin-top:0">2 · Each variant ({{ rows|length }})</h2>
+<div class="bulk"><div><label for="allPrice">Set every price (ex tax)</label><input id="allPrice" inputmode="decimal" placeholder="{{ p.sell_price|cents }}"></div>
+<div><label for="allCost">Set every cost</label><input id="allCost" inputmode="decimal" placeholder="{{ p.buy_price|cents }}"></div>
+<button type="button" class="btn sm" id="applyAll">Apply to all</button>{% if rate %}<span class="muted" style="font-size:13px">Prices are ex tax; the till adds {{ '%g'|format(rate) }}%.</span>{% endif %}</div>
+<div class="tbl vtbl"><table>
+<tr><th>Variant</th><th>SKU</th><th>Barcodes</th><th class="n">Price (ex tax)</th><th class="n">Cost</th><th class="n">Reorder level</th>{% if flags.stock %}<th class="n">On hand</th>{% if per_loc %}{% for l in per_loc.stores %}<th class="n">{{ l.name }}</th>{% endfor %}{% endif %}{% endif %}<th>Active</th></tr>
+{% for v in rows %}<tr class="{{ '' if v.active else 'off' }}"><td class="lbl"><a href="{{ url_for('inventory.view', iid=v.id) }}">{{ v.label }}</a></td>
+<td><input class="sku" name="sku_{{ v.id }}" value="{{ v.sku }}" maxlength="40" aria-label="SKU for {{ v.label }}"></td>
+<td><input class="bc" name="barcodes_{{ v.id }}" value="{{ v.barcodes or '' }}" aria-label="Barcodes for {{ v.label }}" placeholder="Scan or type"></td>
+<td class="n"><input class="m right" data-price name="price_{{ v.id }}" value="{{ v.sell_price|cents }}" inputmode="decimal" aria-label="Price for {{ v.label }}"></td>
+<td class="n"><input class="m right" data-cost name="cost_{{ v.id }}" value="{{ v.buy_price|cents }}" inputmode="decimal" aria-label="Cost for {{ v.label }}"></td>
+<td class="n"><input class="m right" name="reorder_{{ v.id }}" value="{{ '%g'|format(v.reorder_level) }}" inputmode="decimal" aria-label="Reorder level for {{ v.label }}"></td>
+{% if flags.stock %}<td class="n">{% if v.id in moved %}{{ '%g'|format(v.qty_on_hand) }}{% else %}<input class="m right" name="opening_{{ v.id }}" inputmode="decimal" placeholder="Opening" aria-label="Opening stock for {{ v.label }}">{% endif %}</td>
+{% if per_loc %}{% for q in per_loc.qty[v.id] %}<td class="n">{{ '%g'|format(q) }}</td>{% endfor %}{% endif %}{% endif %}
+<td><label class="check" style="margin:0"><input type="checkbox" name="active_{{ v.id }}" value="1" {{ 'checked' if v.active }}> On</label></td></tr>{% endfor %}
+</table></div>
+<p class="muted" style="font-size:13px">Opening stock can be typed once, for a variant that has never had stock. After that, use a stocktake or a stock adjustment (on the variant's page), so the books stay right.</p>
+<p class="actions" style="justify-content:flex-end"><button class="btn pri">Save variants</button></p></form>
+<script>document.getElementById('applyAll').onclick=()=>{const p=document.getElementById('allPrice').value.trim(),c=document.getElementById('allCost').value.trim();
+  if(p)document.querySelectorAll('[data-price]').forEach(i=>i.value=p);if(c)document.querySelectorAll('[data-cost]').forEach(i=>i.value=c);};</script>
+{% endif %}
+{% endblock %}

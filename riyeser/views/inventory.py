@@ -6,7 +6,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 
 from ..db import get_db, to_cents, audit, linked
 from ..ledger import stock_adjust
-from . import lookups, opt_int, opt_float, guarded
+from . import lookups, opt_int, opt_float, guarded, once
 
 bp = Blueprint("inventory", __name__, url_prefix="/inventory")
 
@@ -51,8 +51,12 @@ def edit(iid=None):
     cats = [r[0] for r in db.execute("SELECT DISTINCT category FROM items WHERE category IS NOT NULL ORDER BY 1")]
     has_photo = bool(iid and db.execute("SELECT 1 FROM item_photos WHERE item_id=?", (iid,)).fetchone())
     suppliers = db.execute("SELECT id, name FROM contacts WHERE kind='supplier' AND active=1 ORDER BY name").fetchall()
+    vflags = None
+    if item and item["has_variants"]:
+        from .variants import _flags
+        vflags = _flags(item)
     return render_template("inventory/edit.html", item=item, defaults=defaults, categories=cats, has_photo=has_photo,
-                           suppliers=suppliers, **lookups(db))
+                           suppliers=suppliers, vflags=vflags, **lookups(db))
 
 
 @guarded
@@ -98,6 +102,8 @@ def _save(iid):
         raise ValueError("\"Reorder up to\" can't be below 0.")
     db.execute("UPDATE items SET reorder_up_to=?, supplier_id=? WHERE id=?",
                (up_to or None, opt_int(f.get("supplier_id")), iid))
+    from .variants import propagate
+    propagate(db, iid)  # a product with variants: they follow its category, accounts, tax and name
     _save_photo(db, iid, f)
     audit(db, "save_item", vals[0])
     flash(f"Item {vals[0]} saved.", "ok")
@@ -158,16 +164,24 @@ def adjust(iid):
 
 @bp.route("/count", methods=["GET", "POST"])
 def count():
-    """Stocktake: enter counted quantities, post the differences."""
+    """Stocktake: enter counted quantities, post the differences. With more than one location, it's the count at
+    one location (chosen at the top), compared with what Riyeser has there."""
     db = get_db()
-    items = db.execute("SELECT * FROM items WHERE is_inventoried=1 AND active=1 ORDER BY sku").fetchall()
+    from .. import locations as LOC
+    locs = LOC.stores(db) if LOC.several(db) else []
+    loc = LOC.store_id(db, opt_int(request.values.get("loc"))) if locs else None
+    here = LOC.levels(db, loc) if loc else None
+    items = [dict(i, qty_on_hand=here.get(i["id"], 0)) if here is not None else i for i in db.execute(
+        "SELECT * FROM items WHERE is_inventoried=1 AND active=1 ORDER BY sku").fetchall()]
     if request.method == "POST":
-        return _save_count(items)
-    return render_template("inventory/count.html", items=items, **lookups(db))
+        return _save_count(items, loc)
+    return render_template("inventory/count.html", items=items, locations=locs, loc=loc,
+                           loc_name=LOC.name_of(db, loc) if loc else None, **lookups(db))
 
 
 @guarded
-def _save_count(items):
+@once
+def _save_count(items, loc=None):
     db = get_db()
     n = 0
     for it in items:
@@ -182,12 +196,16 @@ def _save_count(items):
             raise ValueError(f"{it['sku']}: a count can't be below 0.")  # F13
         diff = round(counted - it["qty_on_hand"], 4)
         if diff:
-            stock_adjust(db, it["id"], request.form["date"], diff, None, "Stocktake")
+            from .. import locations as LOC
+            stock_adjust(db, it["id"], request.form["date"], diff, None,
+                         f"Stocktake at {LOC.name_of(db, loc)}" if loc else "Stocktake", location_id=loc)
             n += 1
     from ..ledger import settle_stock_rounding
     settle_stock_rounding(db, request.form["date"], "stocktake")   # a stocktake also clears leftover cents
-    flash(f"Stocktake posted: {n} adjustments.", "ok")
+    flash(f"Stocktake posted: {n} adjustments." if n else "Stocktake done: every count matched.", "ok")
     return redirect(url_for("inventory.index"))
 
 
 from . import reorder  # noqa: E402,F401  (low stock and reordering: its routes are on this blueprint)
+from . import stock_locations  # noqa: E402,F401  (locations, transfers)
+from . import variants  # noqa: E402,F401  (product variants: options, combinations, CSV)

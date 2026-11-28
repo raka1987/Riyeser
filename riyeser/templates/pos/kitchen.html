@@ -1,0 +1,49 @@
+{% extends "base.html" %}{% block title %}Kitchen & screens{% endblock %}
+{% block content %}
+<style>
+.kgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.kaddr{font:600 18px/1.4 ui-monospace,Consolas,monospace;background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:8px 12px;display:inline-block;margin:4px 0;word-break:break-all}
+.kcode{font:800 40px/1 ui-monospace,Consolas,monospace;letter-spacing:8px;color:var(--brand);margin:6px 0}
+.kst td select{min-width:150px}
+@media (max-width:900px){.kgrid{grid-template-columns:1fr}}
+</style>
+<div class="head"><div><h1>Kitchen &amp; screens</h1><p class="sub">Choose where each station's orders go: a printed docket, the kitchen screen, or both. Items already sent are never sent again, even when they move to another table.</p></div>
+<div class="actions"><a class="btn" href="{{ url_for('pos.setup') }}">POS setup</a><a class="btn" href="{{ url_for('kds.board') }}" target="_blank" rel="noopener">Open the kitchen screen</a></div></div>
+<form method="post" class="card"><input type="hidden" name="what" value="stations">
+<fieldset {{ 'disabled' if not can_change }} style="border:0;padding:0;margin:0;min-width:0">
+<h2 style="margin-top:0">1 · Stations</h2>
+<div class="tbl kst"><table><tr><th>Station</th><th>Orders go to</th><th>On</th></tr>
+{% for s in stations %}<tr><td><input name="name_{{ s.id }}" value="{{ s.name }}" maxlength="30" aria-label="Station name"></td>
+<td><select name="output_{{ s.id }}" aria-label="Where {{ s.name }} orders go">{% for k, n in outputs.items() %}<option value="{{ k }}" {{ 'selected' if s.output == k }}>{{ n }}</option>{% endfor %}</select></td>
+<td>{% if loop.first %}<span class="muted">Always</span>{% else %}<label class="check" style="margin:0"><input type="checkbox" name="active_{{ s.id }}" value="1" {{ 'checked' if s.active }}> On</label>{% endif %}</td></tr>{% endfor %}
+<tr><td><input name="new_name" maxlength="30" placeholder="+ Add a station, e.g. Bar" aria-label="New station"></td><td><select name="new_output" aria-label="Where the new station's orders go">{% for k, n in outputs.items() %}<option value="{{ k }}" {{ 'selected' if k == 'screen' }}>{{ n }}</option>{% endfor %}</select></td><td></td></tr></table></div>
+<h2>2 · Which station makes what</h2>
+<p class="sub" style="margin-top:-6px">By menu category. A category not listed here goes to {{ stations[0].name if stations else 'the first station' }}.</p>
+{% if cats %}<div class="tbl kst"><table><tr><th>Category</th><th>Station</th></tr>
+{% for c in cats %}<tr><td>{{ c }}</td><td><select name="cat::{{ c }}" aria-label="Station for {{ c }}"><option value="">{{ stations[0].name if stations else '' }} (usual)</option>{% for s in stations if s.active %}<option value="{{ s.id }}" {{ 'selected' if mapped.get(c) == s.id }}>{{ s.name }}</option>{% endfor %}</select></td></tr>{% endfor %}</table></div>
+{% else %}<p class="muted">Give your menu items a category (Products) to send them to different stations.</p>{% endif %}
+<h2>3 · Kitchen screen timers</h2>
+<div class="fields" style="max-width:560px"><div><label for="amber">Amber after (minutes)</label><input id="amber" name="amber" value="{{ ks.amber }}" inputmode="numeric"></div>
+<div><label for="red">Red after (minutes)</label><input id="red" name="red" value="{{ ks.red }}" inputmode="numeric"></div></div>
+{% if can_change %}<p class="actions" style="justify-content:flex-end"><button class="btn pri">Save kitchen settings</button></p>{% endif %}
+</fieldset></form>
+
+<div class="kgrid">
+<div class="card"><h2 style="margin-top:0">Kitchen screens on this network</h2>
+<p class="sub" style="margin:0 0 10px">A tablet or PC in the kitchen opens the kitchen screen in its web browser, on the same Wi-Fi or network as this PC. The network address shows the kitchen screen only: no prices, sales or settings.</p>
+{% if listener.running %}<p style="margin:0 0 6px"><span class="badge paid">On</span> Open this on the kitchen tablet:</p>{% for a in addresses %}<div class="kaddr">{{ a }}</div>{% else %}<p class="muted">This PC has no network address right now. Check its Wi-Fi or network cable.</p>{% endfor %}
+{% if can_change %}<form method="post" style="margin-top:10px"><input type="hidden" name="what" value="lan"><input type="hidden" name="on" value="0"><button class="btn sm">Turn off</button></form>{% endif %}
+{% else %}<p style="margin:0 0 10px"><span class="badge">Off</span> {% if listener.error %}<span style="color:var(--err)">{{ listener.error }}</span>{% else %}Only this PC can open the kitchen screen.{% endif %}</p>
+{% if can_change %}<form method="post"><input type="hidden" name="what" value="lan"><input type="hidden" name="on" value="1"><button class="btn pri">Turn on kitchen screens on this network</button></form>{% endif %}
+<p class="muted" style="font-size:12.5px;margin:10px 0 0">Windows may ask to allow Riyeser POS on private networks: choose Allow. Port {{ listener.port }}.</p>{% endif %}
+</div>
+<div class="card"><h2 style="margin-top:0">Pair a kitchen screen</h2>
+<p class="sub" style="margin:0 0 8px">On the tablet, open the address, then type this code. A code works for one screen, for 10 minutes.</p>
+{% if pair %}<div class="kcode" aria-label="Pairing code">{{ pair[:3] }} {{ pair[3:] }}</div>{% endif %}
+{% if can_change %}<form method="post"><input type="hidden" name="what" value="pair"><button class="btn{{ '' if pair else ' pri' }}">{{ 'Make a new code' if pair else 'New pairing code' }}</button></form>{% endif %}
+<h3 style="margin:16px 0 6px;font-size:15px">Paired screens</h3>
+{% for d in devices %}<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line)"><div><b>{{ d.name }}</b><br><small class="muted">Paired {{ d.created_at[:16] }}{% if d.last_seen %} · last seen {{ d.last_seen[:16] }}{% endif %}</small></div>
+{% if can_change %}<form method="post" onsubmit="return confirm('Sign {{ d.name }} out? It will need a new code.')"><input type="hidden" name="what" value="revoke"><input type="hidden" name="device_id" value="{{ d.id }}"><button class="btn sm danger">Sign out</button></form>{% endif %}</div>
+{% else %}<p class="muted" style="margin:0">None yet. People signed in to Riyeser POS whose user has the <b>Kitchen screen</b> permission can also open it.</p>{% endfor %}
+</div></div>
+{% endblock %}

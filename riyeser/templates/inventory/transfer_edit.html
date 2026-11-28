@@ -1,0 +1,30 @@
+{% extends "base.html" %}{% block title %}{{ t.number if t else 'New transfer' }}{% endblock %}
+{% block content %}
+<div class="head"><div><h1>{{ 'Transfer ' ~ t.number if t else 'New transfer' }}</h1><p class="sub">Choose where the stock comes from and where it's going, then the items. Save it as a draft, or send it now.</p></div></div>
+<form method="post" class="card" id="trForm">
+<div class="fields">
+<div><label for="from_id">From</label><select id="from_id" name="from_id">{% for l in stores %}<option value="{{ l.id }}" {{ 'selected' if (t and t.from_id == l.id) or (not t and loop.first) }}>{{ l.name }}</option>{% endfor %}</select></div>
+<div><label for="to_id">To</label><select id="to_id" name="to_id">{% for l in stores %}<option value="{{ l.id }}" {{ 'selected' if (t and t.to_id == l.id) or (not t and loop.index == 2) }}>{{ l.name }}</option>{% endfor %}</select></div>
+<div class="wide"><label for="note">Note (optional)</label><input id="note" name="note" maxlength="200" value="{{ t.note or '' if t }}" placeholder="e.g. Weekend restock for the market stall"></div>
+</div>
+<div class="tbl" style="margin-top:16px"><table id="trLines">
+<tr><th>Item</th><th class="n">At the sending location</th><th class="n" style="width:140px">Send</th><th></th></tr>
+{% set rows = lines if lines else [None, None, None] %}
+{% for l in rows %}<tr><td><select name="line_item" aria-label="Item" style="min-width:260px"><option value="">Choose an item…</option>{% for i in items %}<option value="{{ i.id }}" {{ 'selected' if l and l.item_id == i.id }}>{{ i.sku }} · {{ i.name }}</option>{% endfor %}</select></td>
+<td class="n" data-have>—</td><td class="n"><input name="line_qty" value="{{ '%g'|format(l.qty) if l }}" inputmode="decimal" class="right" aria-label="Quantity to send"></td><td><button type="button" class="btn sm" data-del aria-label="Remove line">Remove</button></td></tr>{% endfor %}
+</table></div>
+<p><button type="button" class="btn sm" id="addLine">+ Add a line</button></p>
+<div class="actions" style="justify-content:flex-end"><a class="btn" href="{{ url_for('inventory.transfer_view', tid=t.id) if t else url_for('inventory.transfers') }}">Cancel</a>
+<button class="btn" name="then" value="draft">Save draft</button><button class="btn pri" name="then" value="send">Send now</button></div>
+</form>
+<script>
+(function(){const LV={{ levels|tojson }},tb=document.getElementById('trLines'),src=document.getElementById('from_id');
+  const tpl=tb.rows[1].cloneNode(true);
+  function have(){[...tb.querySelectorAll('tr')].slice(1).forEach(r=>{const id=r.querySelector('select').value,c=r.querySelector('[data-have]');
+    const v=id?((LV[src.value]||{})[id]||0):null;c.textContent=v===null?'—':(+v.toFixed(3)).toString();});}
+  tb.addEventListener('change',have);src.addEventListener('change',have);
+  tb.addEventListener('click',e=>{if(e.target.dataset.del!==undefined){const r=e.target.closest('tr');if(tb.rows.length>2)r.remove();else{r.querySelector('select').value='';r.querySelector('input').value='';}have();}});
+  document.getElementById('addLine').onclick=()=>{const r=tpl.cloneNode(true);r.querySelector('select').value='';r.querySelector('input').value='';tb.tBodies[0].appendChild(r);have();};
+  have();})();
+</script>
+{% endblock %}

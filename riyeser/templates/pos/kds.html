@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes">
+<title>Kitchen screen · Riyeser POS</title>
+<style>
+:root{--bg:#0f1b2d;--bar:#13243b;--card:#fff;--ink:#0f172a;--muted:#64748b;--line:#e2e8f0;--teal:#14b8a6;--green:#0f7b63;--amber:#f59e0b;--red:#dc2626;--navy:#1f4e86}
+*{box-sizing:border-box}html,body{margin:0;height:100%}
+body{background:var(--bg);color:#e2e8f0;font:16px/1.35 "Segoe UI Variable Text","Segoe UI",Inter,system-ui,-apple-system,Roboto,sans-serif;-webkit-font-smoothing:antialiased;user-select:none;overflow:hidden}
+button{font:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.top{display:flex;align-items:center;gap:10px;height:64px;padding:0 14px;background:var(--bar);border-bottom:1px solid #22385a}
+.logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,#14b8a6,#0f6e66);color:#fff;display:grid;place-items:center;font-weight:800;font-size:16px;position:relative;flex-shrink:0}
+.logo::after{content:"";position:absolute;right:4px;bottom:8px;width:6px;height:6px;border-radius:50%;background:#facc15}
+.nm{font-weight:800;font-size:18px;white-space:nowrap;margin-right:6px}.nm small{display:block;font-size:12px;font-weight:600;color:#94a3b8;max-width:180px;overflow:hidden;text-overflow:ellipsis}
+.tabs{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;min-width:0;flex:1}
+.tabs button{border:1.5px solid #2c4a72;background:transparent;color:#cbd5e1;border-radius:999px;padding:8px 16px;font-weight:700;white-space:nowrap;min-height:44px}
+.tabs button.on{background:var(--teal);border-color:var(--teal);color:#032b27}
+.tb{border:1.5px solid #2c4a72;background:#18304f;color:#e2e8f0;border-radius:12px;padding:8px 14px;font-weight:700;min-height:44px;white-space:nowrap;display:flex;align-items:center;gap:6px}
+.tb:disabled{opacity:.4;cursor:default}.tb.on{background:#134e4a;border-color:var(--teal)}
+.clock{font-variant-numeric:tabular-nums;font-weight:800;font-size:20px;min-width:62px;text-align:right}
+.status{position:fixed;left:50%;top:72px;transform:translateX(-50%);background:var(--red);color:#fff;padding:8px 16px;border-radius:999px;font-weight:700;z-index:5;display:none}
+.wrap{height:calc(100% - 64px);overflow-y:auto;padding:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:14px;align-items:start}
+.tk{background:var(--card);color:var(--ink);border-radius:16px;overflow:hidden;box-shadow:0 8px 24px rgba(0,0,0,.25);display:flex;flex-direction:column}
+.tk.new{animation:pop .5s}@keyframes pop{from{transform:scale(.94);opacity:.3}to{transform:none;opacity:1}}
+.th{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:12px 14px;background:var(--green);color:#fff}
+.tk.amber .th{background:var(--amber);color:#2a1800}.tk.red .th{background:var(--red)}
+.th b{font-size:22px;letter-spacing:-.3px;display:block;line-height:1.1}.th small{display:block;font-size:13px;font-weight:600;opacity:.9;margin-top:2px}
+.th .w{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
+.tags{display:flex;gap:6px;flex-wrap:wrap;padding:8px 14px 0}.tag{font-size:12px;font-weight:800;border-radius:999px;padding:2px 9px;background:#e0f2fe;color:#075985}
+.tag.rc{background:#ede9fe;color:#5b21b6}.tag.cx{background:#fee2e2;color:#991b1b}
+.its{list-style:none;margin:0;padding:6px 0}
+.it{display:flex;gap:10px;align-items:flex-start;padding:9px 14px;border-bottom:1px solid var(--line);cursor:pointer}
+.it:last-child{border-bottom:0}.it:active{background:#f1f5f9}
+.it .q{font-weight:800;font-size:20px;min-width:34px;font-variant-numeric:tabular-nums}
+.it .n{font-weight:700;font-size:18px}.it .note{color:#b45309;font-weight:700;font-size:15px;margin-top:2px}
+.it .mv{display:inline-block;margin-top:4px;font-size:12.5px;font-weight:800;color:#1d4ed8;background:#dbeafe;border-radius:8px;padding:2px 8px}
+.it.done .n,.it.done .q{text-decoration:line-through;color:#94a3b8}.it.done .note{color:#cbd5e1}
+.it.void .n,.it.void .q{text-decoration:line-through;color:var(--red)}.it .vd{display:inline-block;margin-top:4px;font-size:12.5px;font-weight:800;color:#fff;background:var(--red);border-radius:8px;padding:2px 8px}
+.onote{padding:8px 14px;font-style:italic;color:#475569;border-top:1px solid var(--line)}
+.bump{margin:10px 12px 12px;border:0;border-radius:12px;background:#0f172a;color:#fff;font-weight:800;font-size:17px;min-height:54px}
+.empty{text-align:center;color:#94a3b8;padding:80px 20px;font-size:20px}.empty b{display:block;color:#e2e8f0;font-size:26px;margin-bottom:6px}
+@media (max-width:700px){.nm small{display:none}.tb span{display:none}.grid{grid-template-columns:1fr}.top{gap:6px;padding:0 8px}.nm{font-size:16px}}
+</style></head>
+<body>
+<header class="top"><div class="logo" aria-hidden="true">Po</div><div class="nm">Kitchen<small>{{ company_name }}{% if device %} · {{ device.name }}{% endif %}</small></div>
+<nav class="tabs" id="tabs" aria-label="Station"><button data-st="" class="on">All</button>{% for s in stations %}<button data-st="{{ s.id }}">{{ s.name }}</button>{% endfor %}</nav>
+<button class="tb" id="recall" disabled title="Bring back the last bumped order">↶ <span>Recall</span></button>
+<button class="tb" id="sound" aria-pressed="false" title="Sound for new orders">🔔 <span>Sound</span></button>
+<button class="tb" id="fs" title="Full screen">⛶</button>
+<div class="clock" id="clock">--:--</div></header>
+<div class="status" id="status" role="status">Connection lost. Trying again…</div>
+<main class="wrap"><div class="grid" id="grid"></div></main>
+<script>
+(function(){
+const U={t:'{{ url_for('kds.tickets_json') }}',bump:'{{ url_for('kds.bump') }}',recall:'{{ url_for('kds.recall') }}'};
+const CAN={{ can_bump|tojson }},$=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let st=null,seen=null,data=null,offset=0,sound=false,ctx=null,busy=false;
+try{st=localStorage.getItem('riyeser.kds.station');sound=localStorage.getItem('riyeser.kds.sound')==='1';}catch(e){}
+{% if device and device.station %}if(st===null)st='{{ device.station }}';{% endif %}
+if(st===null)st='';
+function tabs(){document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.st===st));}
+function beep(){if(!sound)return;try{ctx=ctx||new (window.AudioContext||window.webkitAudioContext)();const o=ctx.createOscillator(),gn=ctx.createGain();
+  o.frequency.value=880;o.connect(gn);gn.connect(ctx.destination);gn.gain.setValueAtTime(.25,ctx.currentTime);gn.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+.6);o.start();o.stop(ctx.currentTime+.6);}catch(e){}}
+const mmss=s=>{s=Math.max(0,s|0);const m=Math.floor(s/60);return m>=60?Math.floor(m/60)+'h '+String(m%60).padStart(2,'0'):m+':'+String(s%60).padStart(2,'0');};
+function draw(){if(!data)return;const now=Date.now()/1000-offset;
+  const list=data.tickets;$('#recall').disabled=!CAN||!data.recall;$('#recall').title=data.recall?'Bring back '+data.recall.label:'Nothing to recall';
+  if(!list.length){$('#grid').innerHTML='<div class="empty" style="grid-column:1/-1"><b>All caught up</b>New orders appear here as soon as they are sent from the till.</div>';return;}
+  $('#grid').innerHTML=list.map(t=>{const w=t.waited+(now-data._at);const cls=w>=data.red?'red':w>=data.amber?'amber':'';
+    const moved=[...new Set(t.items.filter(i=>i.moved_from).map(i=>i.moved_from))];
+    return `<article class="tk ${cls} ${seen&&!seen.has(t.id)?'new':''}" data-t="${t.id}"><div class="th"><div><b>${esc(t.label)}</b><small>${esc(t.station)} · sent ${esc(t.at)}${t.send>1?' · round '+t.send:''}</small></div><div class="w" data-w="${t.id}">${mmss(w)}</div></div>
+      ${(t.recalled||t.cancelled||moved.length)?`<div class="tags">${t.recalled?'<span class="tag rc">Recalled</span>':''}${t.cancelled?'<span class="tag cx">Order cancelled</span>':''}${moved.map(m=>`<span class="tag">Moved from ${esc(m)}</span>`).join('')}</div>`:''}
+      <ul class="its">${t.items.map(i=>`<li class="it ${i.voided?'void':i.bumped?'done':''}" data-i="${i.id}" role="button" tabindex="0"><span class="q">${+(+i.qty).toFixed(2)}</span><div><div class="n">${esc(i.name)}</div>${i.note?`<div class="note">${esc(i.note)}</div>`:''}${i.voided?`<span class="vd">VOID${i.voided_qty&&i.voided_qty<i.qty?' '+(+i.voided_qty)+' of '+(+i.qty):''}</span>`:i.voided_qty?`<span class="vd">VOID ${+i.voided_qty}</span>`:''}${i.moved_from?`<span class="mv">Moved from ${esc(i.moved_from)}</span>`:''}</div></li>`).join('')}</ul>
+      ${t.note?`<div class="onote">${esc(t.note)}</div>`:''}${CAN?`<button class="bump" data-bump="${t.id}">Bump order</button>`:''}</article>`;}).join('');}
+function tick(){const d=new Date();$('#clock').textContent=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+  if(!data)return;const now=Date.now()/1000-offset;data.tickets.forEach(t=>{const e=document.querySelector(`[data-w="${t.id}"]`);if(!e)return;const w=t.waited+(now-data._at);
+    e.textContent=mmss(w);const tk=e.closest('.tk');tk.classList.toggle('red',w>=data.red);tk.classList.toggle('amber',w>=data.amber&&w<data.red);});}
+async function load(){if(busy)return;busy=true;
+  try{const r=await fetch(U.t+(st?'?station='+st:''),{cache:'no-store',credentials:'same-origin'});
+    if(r.status===401){location.href='{{ url_for('kds.pair') }}';return;}
+    const d=await r.json();d._at=Date.now()/1000;offset=0;
+    const ids=new Set(d.tickets.map(t=>t.id));if(seen&&[...ids].some(i=>!seen.has(i)))beep();
+    data=d;draw();seen=ids;$('#status').style.display='none';}
+  catch(e){$('#status').style.display='block';}finally{busy=false;}}
+async function post(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify(b)});
+  const d=await r.json().catch(()=>({ok:false}));if(r.status===401){location.href='{{ url_for('kds.pair') }}';return d;}await load();return d;}
+document.addEventListener('click',e=>{const b=e.target.closest('button,[data-i]');if(!b)return;
+  if(b.dataset.st!==undefined){st=b.dataset.st;try{localStorage.setItem('riyeser.kds.station',st)}catch(x){}tabs();seen=null;load();return;}
+  if(!CAN)return;
+  if(b.dataset.bump){b.disabled=true;post(U.bump,{ticket_id:+b.dataset.bump});return;}
+  if(b.dataset.i){post(U.bump,{item_id:+b.dataset.i});return;}});
+$('#recall').onclick=()=>post(U.recall,{station:st||null});
+function drawSound(){$('#sound').classList.toggle('on',sound);$('#sound').setAttribute('aria-pressed',sound);}
+$('#sound').onclick=()=>{sound=!sound;try{localStorage.setItem('riyeser.kds.sound',sound?'1':'0')}catch(e){}drawSound();if(sound)beep();};
+$('#fs').onclick=()=>{const d=document.documentElement;if(document.fullscreenElement)document.exitFullscreen();else if(d.requestFullscreen)d.requestFullscreen().catch(()=>{});};
+tabs();drawSound();load();setInterval(load,3000);setInterval(tick,1000);tick();
+})();
+</script>
+</body></html>
