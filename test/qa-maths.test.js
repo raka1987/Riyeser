@@ -166,3 +166,28 @@ test('QA-PAY-09 payslip confidentiality: a staff member sees only their own pays
   // signed out: nothing
   assert.equal((await call('GET', '/api/staff/payslips/mine')).status, 401);
 });
+
+test('QA-PAY-10 final pay for a salaried person whose last day is more than one pay period after their last pay run: every day is paid', async () => {
+  // weekly pay. Last pay run covers Mon 2042-01-06 to Sun 2042-01-12; last day Fri 2042-01-24 = 12 more days
+  const e = await addStaff({ name: 'Qa Salary Final', username: 'qasalfin', pay_type: 'salary', pay_rate: 52000, start_date: '2041-01-01' });
+  const run = await call('POST', '/api/staff/payroll/runs', { period_start: '2042-01-06', period_end: '2042-01-12', pay_date: '2042-01-13', confirm_warnings: true }, admin);
+  assert.equal(run.status, 200, JSON.stringify(run.data));
+  const pv = (await call('POST', `/api/staff/employees/${e.id}/finish/preview`, { end_date: '2042-01-24' }, admin)).data;
+  assert.equal(pv.period_start, '2042-01-13'); assert.equal(pv.period_end, '2042-01-24');
+  // 52000 a year = 1000 a week; 12 days = 1 week + 5/7 of the next = 1714.29 (not capped at one week's 1000)
+  assert.equal(pv.line.base_pay, r2(1000 * 12 / 7));
+});
+
+test('QA-PAY-11 a normal pay run whose dates are not one pay period: salaried staff are flagged before finalising (salary is per pay period)', async () => {
+  const e = await addStaff({ name: 'Qa Salary Range', username: 'qasalrange', pay_type: 'salary', pay_rate: 52000 });
+  // two weeks in weekly pay: salary would be one week's 1000, so it must be checked first
+  const pv = (await call('POST', '/api/staff/payroll/preview', { period_start: '2043-03-02', period_end: '2043-03-15' }, admin)).data;
+  const l = pv.lines.find(x => x.user_id === e.id);
+  assert.equal(l.base_pay, 1000);
+  assert.ok(pv.warnings.some(w => w.user_id === e.id && /one pay period/.test(w.text)), JSON.stringify(pv.warnings));
+  const r = await call('POST', '/api/staff/payroll/runs', { period_start: '2043-03-02', period_end: '2043-03-15', pay_date: '2043-03-16' }, admin);
+  assert.equal(r.status, 409);
+  // one whole pay period: no such warning
+  const ok = (await call('POST', '/api/staff/payroll/preview', { period_start: '2043-03-02', period_end: '2043-03-08' }, admin)).data;
+  assert.ok(!ok.warnings.some(w => w.user_id === e.id && /one pay period/.test(w.text)));
+});

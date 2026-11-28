@@ -674,7 +674,10 @@ function computePayroll(start, end, adjustments = {}, fraction = 1, extra = fals
     // S31: shifts to check before paying (not when an admin has set the hours, or in an extra run that pays no hours)
     const warnings = extra || adjusted ? [] : [
       ...shifts.filter(t => hoursOf(t) > LONG_SHIFT_HOURS).map(t => `${t.clock_in.slice(0, 10)}: a ${round2(hoursOf(t))} h shift (${fmt12h(t.clock_in)} to ${t.clock_out.slice(0, 10)} ${fmt12h(t.clock_out)}). Forgotten clock-out?`),
-      ...openStmt.all(e.id, start, end).map(t => `Still clocked in since ${t.clock_in.slice(0, 10)} ${fmt12h(t.clock_in)}: that shift isn't paid in this run.`)];
+      ...openStmt.all(e.id, start, end).map(t => `Still clocked in since ${t.clock_in.slice(0, 10)} ${fmt12h(t.clock_in)}: that shift isn't paid in this run.`),
+      // QA (APP-PAY-11): salary is paid per pay period, so dates that aren't one whole pay period are checked first
+      ...(e.pay_type === 'salary' && fraction === 1 && !onlyUser && (() => { const [a, b] = payPeriodOf(start, s); return a !== start || b !== end; })()
+        ? [`Salary is paid for one whole pay period (${payPeriodOf(start, s).join(' to ')}), but these dates are ${Math.round((Date.parse(end) - Date.parse(start)) / 864e5) + 1} days. Choose one pay period, or check the salary before finalising.`] : [])];
     const base = extra ? 0 : round2(e.pay_type === 'salary' ? e.pay_rate / periods * fraction : hours * e.pay_rate);
     // paid leave in these dates (annual, sick, other paid): hourly staff are paid leave days × hours a day; salary carries on as normal
     // S56: also leave on earlier dates that was entered after those dates were paid (it was never paid), once
@@ -933,7 +936,9 @@ function finalPay(uid, b) {
   const last = db.prepare(`SELECT MAX(r.period_end) AS d FROM payroll_runs r JOIN payslips p ON p.run_id = r.id WHERE p.user_id = ? AND COALESCE(r.extra_reason, '') = ''`).get(uid).d;
   const start = isDate(b.period_start) ? b.period_start : last && last < end ? dayAdd(last, 1) : payPeriodOf(end)[0];
   if (start > end) bad(`Their pay is already done up to ${last}. Choose a last day after that, or void that pay run first.`);
-  const [ps, pe] = payPeriodOf(start), fraction = Math.min(1, dayCount(start, end) / dayCount(ps, pe));
+  // QA (APP-PAY-10): the share of a pay period these dates are. Not capped at 1: a last day more than one pay period after
+  // the last pay run is paid for every day (salary, regular deductions and PAYE in proportion), not just one period.
+  const [ps, pe] = payPeriodOf(start), fraction = dayCount(start, end) / dayCount(ps, pe);
   const s = getSettings(), unused = Math.max(0, leaveLeft(uid, end.slice(0, 4), 'annual', s));
   const adj = { ...((b.adjustments || {})[uid] || {}), leave_payout_days: unused };
   const lines = computePayroll(start, end, { [uid]: adj }, fraction, false, uid);
