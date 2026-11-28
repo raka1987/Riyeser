@@ -191,7 +191,7 @@ function menu(web) {
       { label: 'Email support', click: () => shell.openExternal('mailto:info@riyeser.com?subject=' + encodeURIComponent(`Riyeser Payroll ${app.getVersion()}`)) },
       { type: 'separator' },
       { label: 'Where are my records?', click: () => dialog.showMessageBox(win, { type: 'info', message: 'Your records', detail: `Payroll records:\n${CUR}\n\nPayslip PDFs and daily backups:\n${PAY_HOME}\n\nCopy that folder to a USB stick or cloud drive now and then.` }) },
-      { label: `About Riyeser Payroll (version ${app.getVersion()})`, click: () => dialog.showMessageBox(win, { type: 'info', message: 'Riyeser Payroll', detail: `Version ${app.getVersion()}\nRiyeser Group\nTime clock, timesheets, pay runs, payslips, leave and pay history.` }) } ] },
+      { label: `About Riyeser Payroll (version ${app.getVersion()})`, click: () => dialog.showMessageBox(win, { type: 'info', message: 'Riyeser Payroll', detail: `Version ${app.getVersion()}\nRiyeser\nTime clock, timesheets, pay runs, payslips, leave and pay history.` }) } ] },
   ]));
 }
 

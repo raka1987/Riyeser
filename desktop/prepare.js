@@ -34,10 +34,10 @@ fs.copyFileSync(path.join(__dirname, 'icon.png'), path.join(OUT, 'build', 'icon.
 // the program's icon and name are written into the .exe on Windows, or on Linux when Wine is installed
 const canEditExe = process.platform === 'win32' || (() => { try { execSync('wine --version', { stdio: 'ignore' }); return true; } catch { return false; } })();
 fs.writeFileSync(path.join(OUT, 'package.json'), JSON.stringify({
-  name: 'riyeser-payroll', productName: 'Riyeser Payroll', version: root.version, description: 'Riyeser Payroll: time clock, timesheets, pay runs and payslips', author: { name: 'Riyeser Group' },
+  name: 'riyeser-payroll', productName: 'Riyeser Payroll', version: root.version, description: 'Riyeser Payroll: time clock, timesheets, pay runs and payslips', author: { name: 'Riyeser' },
   main: 'main.js', dependencies: root.dependencies, overrides: root.overrides,
   build: {
-    appId: 'com.riyeser.payroll', productName: 'Riyeser Payroll', copyright: 'Riyeser Group', electronVersion, electronLanguages: ['en-US'], compression: 'maximum',
+    appId: 'com.riyeser.payroll', productName: 'Riyeser Payroll', copyright: 'Riyeser', electronVersion, electronLanguages: ['en-US'], compression: 'maximum',
     directories: { output: path.join(__dirname, 'dist') },
     // leave out library files the program never uses (keeps the download smaller)
     files: ['**/*', '!build/**', '!**/*.map', '!node_modules/exceljs/dist/**', '!node_modules/pdfjs-dist/{legacy,web,types,image_decoders}/**',
