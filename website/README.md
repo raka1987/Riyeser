@@ -4,6 +4,7 @@ The Riyeser Group website: home, a page per program, Downloads, Pricing (free pr
 
 - **Feature register**: `content/features.mjs` is the one list of what each program does, its status (Available, Beta, Planned, Not supported), where it runs, whether it needs the internet, and the Basics/Plus and Link/Link Office comparisons. Program pages, the comparisons and features.html are built from it: change a feature there.
 - **Search engines**: set `GOOGLE_SITE_VERIFICATION` / `BING_SITE_VERIFICATION` when building (or put the codes in `VERIFY` in `build.mjs`) to add the ownership tags to the home page.
+- **Logo**: the wordmark ("Riyeser." with the swoosh) is `assets/logo-wordmark.svg` (navy, for light backgrounds) and `assets/logo-wordmark-light.svg` (white, for dark backgrounds); the header and footer draw it inline from the first. The favicon/app icon is still the "R" (`assets/favicon.png`, `assets/logo-r.png`).
 - **Edit**: page text lives in `build.mjs`; the Help Centre guides (one per program) in `help.mjs`; styling in `assets/site.css`; program icons in `assets/apps/`.
 - **Build**: `node website/build.mjs` → `website/public/` (plain HTML, works on any web host).
 - **Publish**: Actions → *Publish website* → *Run workflow* (the workflow lives on `main`; it builds this folder from `module/desk-assistant`).

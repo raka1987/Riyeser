@@ -8,7 +8,7 @@
 //  3. Free programs come first everywhere programs are listed (menu, finder, All programs, Downloads, footer), A to Z:
 //     Central, Riyeser Documents, Invoices, PDF; then the paid ones A to Z, with Riyeser Link Office right after Riyeser Link.
 //  4. Riyeser Link Office never has a price of its own: "With Riyeser Link", linked to pricing.html#link.
-//  5. Find your program on a phone is a tidy list; the home hero is one still picture on a phone; the footer is tidy.
+//  5. Find your program on a phone is a tidy list; the home hero on a phone is the text, then the picture; the footer is tidy.
 // Run: build the site, serve website/public on 8090, then `node website/team/test/pricing-test.js [shots folder]`.
 const { chromium } = require('playwright');
 const fs = require('fs');
@@ -95,7 +95,10 @@ const LO_DL = 'download/link-office.html';
   check(!(await pg.$('.pluspill')) && !(await pg.textContent('body')).includes('Link Plus'), 'home: no ★ Plus and no Link Plus');
   const finder = await ids('#find .frow a');
   check(ordered(finder), `finder: ${finder.join(', ')}`);
-  check(ordered(await ids('#programs .grid a.card[href*="programs/"]')), 'home programs grid: in order');
+  // the program strip under the home hero: the owner's reference order (Accounting first), each to its own page
+  const strip = await pg.$$eval('.pstrip a', (as) => as.map((a) => [a.textContent.trim(), a.getAttribute('href')]));
+  check(strip.map(([t]) => t).join() === 'Accounting,Payroll,Invoices,Bookings,POS,Estimate,Link,Link Office,Documents,PDF,Central' && strip.every(([, h]) => /programs(\/[\w-]+\.html|\.html#editions)$/.test(h)),
+    `home program strip: 11 programs, no Projects or Admin, each linked (${strip.map(([t]) => t).join(', ')})`);
   const foot = await pg.$$eval('footer .fpcols > div', (ds) => ds.map((d) => [d.querySelector('.fsub').textContent, [...d.querySelectorAll('a')].map((a) => a.getAttribute('href').replace(/^.*programs\//, '').replace('.html', ''))]));
   check(foot.length === 2 && foot[0][0] === 'Free' && foot[1][0] === 'Paid' && foot[0][1].join() === FREE.join() && foot[1][1].join() === PAID.join(), `footer: Free and Paid columns, A to Z (${JSON.stringify(foot)})`);
   await pg.goto(`${BASE}/programs.html`);
@@ -115,9 +118,9 @@ const LO_DL = 'download/link-office.html';
   check(dls.findIndex((t) => /Riyeser Link Office/.test(t)) === dls.findIndex((t) => /^Riyeser Link\b(?! Office)/.test(t)) + 1, 'Downloads: Link Office right after Riyeser Link');
   check(lo.dl.endsWith(LO_DL) && lo.w.endsWith('pricing.html#link') && lo.t.includes('Comes with Riyeser Link') && !/US\$|a month/.test(lo.t), `Downloads: Link Office downloads (${LO_DL}), "Comes with Riyeser Link" (linked), no price`);
   await pg.goto(`${BASE}/index.html`);
-  check(after(await ids('.menu-pop.progs a:not(.all)')) && after(await ids('#find .frow a')) && after(await ids('#programs .grid a.card[href*="programs/"]')), 'menu, finder and home programs: Link Office right after Riyeser Link');
+  check(after(await ids('.menu-pop.progs a:not(.all)')) && after(await ids('#find .frow a')) && after(await ids('.pstrip a')), 'menu, finder and home programs: Link Office right after Riyeser Link');
   const noPrice = async (sel) => { const t = await pg.$eval(sel, (a) => a.textContent.replace(/\s+/g, ' ')); return t.includes('With Riyeser Link') && !/US\$|\/mo|a month|\bFree\b/.test(t); };
-  check(await noPrice('.menu-pop.progs a[href$="programs/link-office.html"]') && await noPrice('#find .frow a[href$="programs/link-office.html"]') && await noPrice('#programs a.card[href$="programs/link-office.html"]'), 'menu, finder and home card: "With Riyeser Link", never a price or "Free"');
+  check(await noPrice('.menu-pop.progs a[href$="programs/link-office.html"]') && await noPrice('#find .frow a[href$="programs/link-office.html"]'), 'menu and finder: "With Riyeser Link", never a price or "Free"');
   await pg.goto(`${BASE}/programs/link-office.html`);
   const lop = await pg.textContent('main');
   check((await pg.$eval('.phero a.btn.p.big', (a) => a.href + ' ' + a.textContent)).match(/download\/link-office\.html\s+Download for Windows/) && lop.includes('Comes with Riyeser Link') && lop.includes('phone system') && !/Link Plus/.test(lop)
@@ -141,10 +144,11 @@ const LO_DL = 'download/link-office.html';
     `phone finder: a list, every row the same size, names and prices on one line (${rows.length} rows)`);
   check((await fp.evaluate(() => document.documentElement.scrollWidth)) <= 390, 'phone: no sideways scrolling on the home page');
   if (SHOTS) await (await fp.$('#find')).screenshot({ path: path.join(SHOTS, 'finder-phone.png') });
-  // the home hero on a phone: one still picture that shows, then the text (no slideshow dots)
-  const hero = await fp.evaluate(() => { const im = document.querySelector('.h3slide img'); const r = im.getBoundingClientRect(); const h1 = document.querySelector('.h3text h1').getBoundingClientRect();
-    return { h: r.height, w: r.width, loaded: im.complete && im.naturalWidth > 0, op: getComputedStyle(im.closest('.h3slide')).opacity, dots: getComputedStyle(document.querySelector('.h3dots')).display, textBelow: h1.top >= r.bottom - 2 }; });
-  check(hero.h > 180 && hero.w >= 380 && hero.loaded && hero.op === '1' && hero.dots === 'none' && hero.textBelow, `phone hero: the picture shows, then the text, no dots (${JSON.stringify(hero)})`);
+  // the home hero on a phone: the text first, then the picture, then the four points (not on top of the picture)
+  const hero = await fp.evaluate(() => { const im = document.querySelector('.h4pic > img'); const r = im.getBoundingClientRect(); const h1 = document.querySelector('.hero4 h1').getBoundingClientRect();
+    const card = document.querySelector('.h4card').getBoundingClientRect();
+    return { h: r.height, w: r.width, loaded: im.complete && im.naturalWidth > 0, textAbove: h1.bottom <= r.top, cardBelow: card.bottom > r.bottom && card.top > r.top + r.height / 2, h1s: document.querySelectorAll('h1').length }; });
+  check(hero.h > 180 && hero.w >= 330 && hero.loaded && hero.textAbove && hero.cardBelow && hero.h1s === 1, `phone hero: the text, then the picture, then the points (${JSON.stringify(hero)})`);
   // the footer on a phone: Programs in Free and Paid columns side by side, no sideways scrolling
   const fcols = await fp.$$eval('footer .fpcols > div', (ds) => ds.map((d) => Math.round(d.getBoundingClientRect().top)));
   check(fcols.length === 2 && fcols[0] === fcols[1], 'phone footer: Free and Paid side by side');
