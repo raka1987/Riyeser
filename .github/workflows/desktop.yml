@@ -104,7 +104,11 @@ jobs:
           # shortcut moved to the Riyeser folder and the old folder gone. A stand-in shortcut if there's no release yet.
           $menu = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs"
           $old = "$env:RUNNER_TEMP\released-$env:SETUP.exe"
-          try { Invoke-WebRequest "https://github.com/raka1987/riyeser-downloads/releases/latest/download/$env:SETUP.exe" -OutFile $old } catch { $old = $null }
+          $got = $false
+          foreach ($repo in @("raka1987/riyeser-downloads", "raka1987/Riyeser")) {   # the downloads repository, or the code repository's releases while it has none
+            if (-not $got) { try { Invoke-WebRequest "https://github.com/$repo/releases/latest/download/$env:SETUP.exe" -OutFile $old; $got = $true; Write-Host "Released $env:SETUP.exe from $repo" } catch { Write-Host "No $env:SETUP.exe in $repo" } }
+          }
+          if (-not $got) { $old = $null }
           if ($old) {
             Start-Process $old -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait
             Get-Process -Name $env:APP -ErrorAction SilentlyContinue | Stop-Process -Force
