@@ -1,7 +1,7 @@
 {% extends "base.html" %}{% block title %}Help{% endblock %}
 {% block content %}
 <style>.help h2{scroll-margin-top:16px;margin-top:28px}.help li{margin:4px 0}.help .card{max-width:900px}.toc a{display:inline-block;margin:0 12px 6px 0}</style>
-<div class="head"><div><h1>Riyeser Accounting help</h1><p class="sub">Version {{ version }} · a Riyeser Group module. Can't find the answer? Download <a href="{{ url_for('help.diagnostics_view') }}">Support Diagnostics</a> and send it with your question.</p></div></div>
+<div class="head"><div><h1>Riyeser Accounting help</h1><p class="sub">Version {{ version }} · a Riyeser module. Can't find the answer? Download <a href="{{ url_for('help.diagnostics_view') }}">Support Diagnostics</a> and send it with your question.</p></div></div>
 <div class="card toc">{% for k, t in [('start','Getting started'),('sales','Invoices & customers'),('stock','Stock & suppliers'),('pos','Riyeser POS'),('banking','Money & banking'),('expenses','Expense claims'),('payroll','Payroll'),('reports','Reports'),('accounts','Accounts & journals'),('setup','Setup & editions'),('users','Users & passwords'),('modules','Other Riyeser modules'),('trouble','Troubleshooting')] %}<a href="#{{ k }}">{{ t }}</a>{% endfor %}</div>
 <div class="help">
 <div class="card"><h2 id="start">Getting started</h2><ol>

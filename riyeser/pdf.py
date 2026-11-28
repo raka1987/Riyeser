@@ -87,7 +87,7 @@ class _PDF(FPDF):
         self.set_auto_page_break(True, 18)
         self.set_margins(16, 16, 16)
         self.set_title(company["name"])
-        self.set_creator("Riyeser Accounting - Riyeser Group")
+        self.set_creator("Riyeser Accounting")
 
     def footer(self):
         self.set_y(-12)

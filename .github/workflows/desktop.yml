@@ -99,13 +99,38 @@ jobs:
         shell: pwsh
         run: |
           $setup = Get-ChildItem "dist\$env:SETUP-*.exe" | Select-Object -First 1
+          # The publisher and Start menu folder were "Riyeser Group" before they became "Riyeser". Install the released
+          # copy first (it uses the old folder), so the new build is checked as an update: one Installed apps entry, the
+          # shortcut moved to the Riyeser folder and the old folder gone. A stand-in shortcut if there's no release yet.
+          $menu = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs"
+          $old = "$env:RUNNER_TEMP\released-$env:SETUP.exe"
+          $got = $false
+          foreach ($repo in @("raka1987/riyeser-downloads", "raka1987/Riyeser")) {   # the downloads repository, or the code repository's releases while it has none
+            if (-not $got) { try { Invoke-WebRequest "https://github.com/$repo/releases/latest/download/$env:SETUP.exe" -OutFile $old; $got = $true; Write-Host "Released $env:SETUP.exe from $repo" } catch { Write-Host "No $env:SETUP.exe in $repo" } }
+          }
+          if (-not $got) { $old = $null }
+          if ($old) {
+            Start-Process $old -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait
+            Get-Process -Name $env:APP -ErrorAction SilentlyContinue | Stop-Process -Force
+            $was = Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "$env:APP*"
+            Write-Host "Released copy:" $was.DisplayName "by" $was.Publisher "- Riyeser Group folder:" (Test-Path "$menu\Riyeser Group\$env:APP.lnk")
+          }
+          if (-not (Test-Path "$menu\Riyeser Group\$env:APP.lnk")) {
+            New-Item -ItemType Directory -Force -Path "$menu\Riyeser Group" | Out-Null
+            Set-Content "$menu\Riyeser Group\$env:APP.lnk" "old shortcut"
+          }
           Start-Process $setup.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait
           $exe = "$env:LOCALAPPDATA\Programs\$env:APP\$env:APP.exe"
           if (-not (Test-Path $exe)) { throw "Not installed" }
           if (-not (Test-Path "$([Environment]::GetFolderPath('Desktop'))\$env:APP.lnk")) { throw "No desktop shortcut" }
-          $entry = Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "$env:APP*"
+          $entry = @(Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "$env:APP*")
           if (-not $entry) { throw "Not listed in Installed apps" }
+          if ($entry.Count -ne 1) { throw "Expected one Installed apps entry, found: $($entry.DisplayName)" }
+          $entry = $entry[0]
           Write-Host "Listed as:" $entry.DisplayName "by" $entry.Publisher
+          if ($entry.Publisher -ne "Riyeser") { throw "Publisher should be Riyeser, is: $($entry.Publisher)" }
+          if (-not (Test-Path "$menu\Riyeser\$env:APP.lnk")) { throw "No Start menu shortcut in the Riyeser folder" }
+          if (Test-Path "$menu\Riyeser Group") { throw "The old Riyeser Group Start menu folder is still there" }
           $env:RIYESER_HOME = "$env:RUNNER_TEMP\rh-installed"
           Start-Process $exe
           # The one-file program starts a second copy of itself, which opens the window: check every copy.

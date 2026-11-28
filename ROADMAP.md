@@ -1,6 +1,6 @@
-# Riyeser Group roadmap
+# Riyeser roadmap
 
-Riyeser Group is the holding company. Every program is a module of the **Riyeser** hub.
+Riyeser is the business. Every program is a module of the **Riyeser** hub.
 
 | Phase | Module | Status |
 |---|---|---|
@@ -23,7 +23,7 @@ Riyeser Group is the holding company. Every program is a module of the **Riyeser
 - **Hand over to a person.** When it can't help, create a support ticket with a summary of the problem, the steps already tried, the version and diagnostics. Nobody has to explain it twice.
 
 **How it would be built**
-- One shared "Ask Riyeser" panel in the hub and in every module. It uses the Claude API through a small Riyeser Group service, so the API key is never stored on customers' computers.
+- One shared "Ask Riyeser" panel in the hub and in every module. It uses the Claude API through a small Riyeser service, so the API key is never stored on customers' computers.
 - The help guides, these READMEs and the error messages form its knowledge base.
 - Tools it can call: read-only reports and queries first. Any action that changes records always needs the user to confirm, and is written to the audit trail.
 - Privacy: customer data is sent only when the user switches on "let the assistant see my data". Each company can turn this off.

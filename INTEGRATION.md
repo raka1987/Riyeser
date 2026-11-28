@@ -1,6 +1,6 @@
 # Connecting Riyeser modules to Riyeser Accounting
 
-All Riyeser Group modules share one folder on the PC: **`Documents\Riyeser`**. You can change it with the `RIYESER_DOCS` environment variable.
+All Riyeser modules share one folder on the PC: **`Documents\Riyeser`**. You can change it with the `RIYESER_DOCS` environment variable.
 
 ```
 Documents\Riyeser\

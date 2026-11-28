@@ -1,4 +1,4 @@
-"""Links to the other Riyeser Group modules.
+"""Links to the other Riyeser modules.
 
 Riyeser Payroll -> Accounting: Payroll writes one JSON file per pay run into
 Documents\\Riyeser\\Inbox\\Payroll (format: see INTEGRATION.md). Accounting lists them
