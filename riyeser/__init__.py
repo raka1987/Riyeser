@@ -7,7 +7,7 @@ from flask import Flask, g, session, redirect, url_for, request, abort, flash, r
 from . import db as dbmod
 from .db import fmt_money, cents_str, get_db
 
-__version__ = "2.11.0"
+__version__ = "2.11.1"
 
 
 def create_app(test_config=None):
@@ -150,6 +150,11 @@ def create_app(test_config=None):
             auto_backup(app)  # once a day per company (S38)
             send_due_email(app)  # booking reminders when they're due (S51)
             g.over_allowance = not co.within_allowance(co.current_id())
+            if (request.endpoint or "").startswith("pos."):   # who's selling at the till (Till PINs, POS 2.11.1)
+                from .views.pos_cashier import till_user
+                stop = till_user(db)
+                if stop is not None:
+                    return stop
             from .perms import check_request
             why = check_request(db)
             if why:

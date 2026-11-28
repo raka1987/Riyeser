@@ -69,6 +69,8 @@ body{overflow:hidden;user-select:none}
 .disp small{font-size:13px;color:var(--muted);font-weight:600}
 .keys{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
 .keys button{min-height:58px;border-radius:12px;border:1.5px solid var(--line);background:#fff;font-weight:700;font-size:24px}
+.keys .kclr{grid-column:1/-1;min-height:48px;font-size:18px;color:var(--err);border-color:#f3c3bd;letter-spacing:.3px}
+@media (max-height:820px){.keys button{min-height:50px}.keys .kclr{min-height:42px}.methods button{min-height:74px;padding:10px}.quick button{min-height:48px}}
 .chg{display:flex;justify-content:space-between;align-items:center;border-radius:14px;padding:13px 18px;font-size:21px;font-weight:800;background:var(--ok-bg);color:var(--ok)}
 .chg.short{background:var(--warn-bg);color:var(--warn)}
 .big{min-height:70px;font-size:21px;border-radius:14px}
@@ -110,8 +112,9 @@ body{overflow:hidden;user-select:none}
 .rec .it b{font-size:16px}.rec .it small{color:var(--muted);display:block}.rec .acts{display:flex;gap:8px;flex-wrap:wrap}.rec .acts .btn{flex:1;min-width:140px}
 .give.co{background:var(--warn-bg);color:var(--warn)}
 .cardinfo{color:var(--muted);font-size:14.5px;text-align:center}
-#pPay [hidden],#pDone [hidden]{display:none!important}
-#pOpen .donec{margin:16px auto;gap:10px}#pOpen .keys button{min-height:48px}#pOpen .quick button{min-height:48px}
+#pPay [hidden],#pDone [hidden],#mUnknown [hidden]{display:none!important}
+.opener{display:flex;justify-content:space-between;align-items:center;gap:10px;background:#e8f0fa;color:var(--navy);border-radius:12px;padding:8px 8px 8px 14px;font-weight:700}
+#pOpen .donec{margin:16px auto;gap:10px}#pOpen .keys button{min-height:48px}#pOpen .keys .kclr{min-height:42px}#pOpen .quick button{min-height:48px}
 .lowwarn{display:block;margin:0 0 10px;padding:9px 14px;border-radius:12px;background:var(--warn-bg);color:var(--warn);font-weight:600;font-size:14px;text-decoration:none}
 #lowNote{color:var(--warn);font-weight:600;font-size:13.5px}
 .pt .from{font-size:12px;font-weight:600;color:var(--muted);display:block;text-align:right}
@@ -197,9 +200,10 @@ body{overflow:hidden;user-select:none}
   <div class="tick" style="background:#e8f0fa;color:var(--navy)"><svg class="ic" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
   <h2>Open <span id="openName">the till</span></h2>
   <p style="margin:0;color:var(--muted)">Count the float (the change you start with) and put it in the drawer.</p>
+  {% if tl_lock and tl_lock.pins_on %}<div class="opener" id="openWho"><span id="openWhoTxt">Who's opening the till?</span><button type="button" class="btn sm" id="openPin">Enter PIN</button></div>{% endif %}
   <div class="disp"><small>Float in drawer</small><span class="n" id="flt">$0.00</span></div>
   <div class="quick" id="fq"><button data-flt="10000">$100</button><button data-flt="20000">$200</button><button data-flt="30000">$300</button><button data-flt="0">No float</button></div>
-  <div class="keys" id="fkeys"><button>1</button><button>2</button><button>3</button><button>4</button><button>5</button><button>6</button><button>7</button><button>8</button><button>9</button><button>00</button><button>0</button><button data-k="del" aria-label="Delete">&#9003;</button></div>
+  <div class="keys" id="fkeys"><button>1</button><button>2</button><button>3</button><button>4</button><button>5</button><button>6</button><button>7</button><button>8</button><button>9</button><button>00</button><button>0</button><button data-k="del" aria-label="Delete">&#9003;</button><button data-k="clear" class="kclr" aria-label="Clear (C)">C · Clear</button></div>
   <p class="err" id="openErr"></p>
   <button class="btn go big" id="openGo">Open till &amp; start selling</button>
 </div></section>
@@ -223,13 +227,13 @@ body{overflow:hidden;user-select:none}
     <div id="cashArea" hidden>
       <div class="quick" id="quick"></div>
       <div class="disp"><small>Cash received</small><span class="n" id="tend">$0.00</span></div>
-      <div class="keys" id="keys"><button>1</button><button>2</button><button>3</button><button>4</button><button>5</button><button>6</button><button>7</button><button>8</button><button>9</button><button>00</button><button>0</button><button data-k="del" aria-label="Delete">⌫</button></div>
+      <div class="keys" id="keys"><button>1</button><button>2</button><button>3</button><button>4</button><button>5</button><button>6</button><button>7</button><button>8</button><button>9</button><button>00</button><button>0</button><button data-k="del" aria-label="Delete">⌫</button><button data-k="clear" class="kclr" aria-label="Clear (C)">C · Clear</button></div>
       <div class="chg short" id="chg"></div>
     </div>
     <div id="cardArea" hidden>
       <div class="disp"><small id="cardLbl">Charge to card</small><span class="n" id="cardAmt"></span></div>
       <div class="cardline"><span class="tl" id="cardHow"></span><button class="btn sm" id="cardPart" type="button">Pay part by card (split)</button></div>
-      <div class="keys" id="ckeys" hidden><button>1</button><button>2</button><button>3</button><button>4</button><button>5</button><button>6</button><button>7</button><button>8</button><button>9</button><button>00</button><button>0</button><button data-k="del" aria-label="Delete">⌫</button></div>
+      <div class="keys" id="ckeys" hidden><button>1</button><button>2</button><button>3</button><button>4</button><button>5</button><button>6</button><button>7</button><button>8</button><button>9</button><button>00</button><button>0</button><button data-k="del" aria-label="Delete">⌫</button><button data-k="clear" class="kclr" aria-label="Clear (C)">C · Clear</button></div>
       <button class="btn go big" id="cardGo">Send to card machine</button>
       <div class="cardinfo" id="cardInfo"></div>
     </div>
@@ -262,7 +266,7 @@ body{overflow:hidden;user-select:none}
   <div id="bParts" style="display:flex;flex-direction:column;gap:8px"></div>
   <div class="leftpay" id="bLeft"><span>Left to pay</span><span class="n" id="bLeftAmt"></span></div>
   <div class="g2b"><button class="btn danger" id="bUndo">Undo split</button><button class="btn" id="bBack">Back to the till</button></div>
-  <a class="btn" id="bReceipt" target="receipt" href="#">Print the whole bill</a>
+  <a class="btn" id="bReceipt" data-print href="#">Print the whole bill</a>
 </div></section>
 
 <!-- line editor -->
@@ -293,17 +297,23 @@ body{overflow:hidden;user-select:none}
   <div id="spBody" style="margin-top:14px"></div><p class="err" id="spErr"></p>
   <button class="btn go big" id="spGo" style="width:100%">Split the bill</button></div></div>
 <div class="modal" id="mOrders"><div class="box"><h2>{{ 'Open orders' if mode == 'restaurant' else 'Held sales' }}<button class="x" data-close>×</button></h2><div class="olist" id="olist"></div></div></div>
+<div class="modal" id="mUnknown"><div class="box"><h2>Barcode not found<button class="x" data-close>×</button></h2>
+  <p style="margin:-4px 0 14px">No product has the barcode <b class="n" id="unkCode" style="font-family:ui-monospace,Consolas,monospace"></b>.</p>
+  <p id="unkAsk" style="margin:0 0 14px;color:var(--muted)">Ask a manager to add it as a product, then scan it again.</p>
+  <div style="display:flex;gap:10px"><button class="btn" data-close style="flex:1">OK</button><a class="btn go" id="unkAdd" style="flex:1.4" href="#">Add a new product with this code</a></div></div></div>
 {% if 'customer' in f %}<div class="modal" id="mCust"><div class="box"><h2>Choose a customer<button class="x" data-close>×</button></h2>
   <label class="fld"><input id="cq" placeholder="Search customers"></label><div class="clist" id="clist"></div></div></div>{% endif %}
 {% endblock %}
 
 {% block scripts %}
 {% include "pos/_terminal.html" %}
+<script src="{{ url_for('static', filename='pos-scanner.js') }}"></script>
 <script>
 (function(){
 const MODE='{{ mode }}', F=new Set({{ features|tojson }}), ITEMS={{ items_json|safe }}, CATS={{ cats|tojson }};
 const CUSTOMERS={{ customers|map(attribute='name')|list|tojson }}, CUST_IDS={{ customers|map(attribute='id')|list|tojson }}, WALK_IN={{ walk_in|tojson }};
 const SHIFTS={{ shifts|tojson }}, FLOATS={{ floats|tojson }}, RULES={{ rules|tojson }}, SELF_OK={{ self_ok|tojson }};
+const PINS={{ (tl_lock.pins_on if tl_lock else False)|tojson }}, SC={{ scanner|tojson }}, CAN_ADD={{ can_add_products|tojson }}, NEW_ITEM='{{ url_for('inventory.edit') }}';
 const TILL_LOC={{ till_locs|tojson }}, DRAWERS={{ drawers|tojson }}, LOCS={{ locations|tojson }}, MULTI_LOC={{ multi_loc|tojson }};
 const BYID={};ITEMS.forEach(i=>BYID[i.id]=i);const TILES=ITEMS.filter(i=>!i.parent);
 const U={open:'{{ url_for('pos.shift_open') }}',sale:'{{ url_for('pos.sale') }}',order:'{{ url_for('pos.save_order') }}',orders:'{{ url_for('pos.orders') }}',base:'{{ url_for('pos.register') }}',photo:'{{ url_for('pos.photo', iid=0) }}'.replace(/0$/,'')};
@@ -324,6 +334,15 @@ function stockOf(i){if(!i)return null;if(i.kind==='product'){const st=i.kids.map
   if(i.stock===null||i.stock===undefined)return null;const l=TILL_LOC[till()];if(i.stocks&&l!=null&&String(l) in i.stocks)return i.stocks[String(l)];return i.stock;}
 const gstOf=()=>billPart?0:Math.round(cart.reduce((s,l)=>s+lt(l)*l.rate/(100+l.rate),0));
 const show=(id,on)=>$(id).classList.toggle('show',on);
+// the money keypads: digits, 00, ⌫ (one less) and C (clear to 0). On a keyboard: numbers, Backspace, Esc or Delete.
+function padKey(c,b){const k=b.dataset.k||b.textContent.trim();if(k==='clear')return '0';if(k==='del')return c.slice(0,-1)||'0';return (c==='0'?'':c)+k;}
+function activePad(){if($('#pOpen').classList.contains('show'))return $('#fkeys').closest('[hidden]')?null:$('#fkeys');
+  if($('#pPay').classList.contains('show')){if(!$('#cardArea').hidden&&!$('#ckeys').hidden)return $('#ckeys');if(!$('#cashArea').hidden)return $('#keys');}return null;}
+document.addEventListener('keydown',e=>{if(e.ctrlKey||e.metaKey||e.altKey||$$('.modal.show').length||($('#lockScr')&&$('#lockScr').classList.contains('show')))return;
+  const pad=activePad();if(!pad||e.target.matches('input,select,textarea'))return;
+  const k=/^[0-9]$/.test(e.key)?e.key:e.key==='Backspace'?'del':(e.key==='Escape'||e.key==='Delete')?'clear':null;if(!k)return;
+  const b=k==='del'||k==='clear'?pad.querySelector(`[data-k="${k}"]`):[...pad.querySelectorAll('button:not([data-k])')].find(x=>x.textContent.trim()===k);
+  if(b){e.preventDefault();e.stopPropagation();b.click();}},true);
 // categories + product tiles
 function drawCats(){const color={};ITEMS.forEach(i=>color[i.cat]=i.color);
   const list=[...(ITEMS.some(i=>i.fav)?['★']:[]),'All',...CATS,...(ITEMS.some(i=>i.cat==='Other')?['Other']:[])];
@@ -361,7 +380,11 @@ function draw(){
   if($('#tableBtn')){$('#tableBtn').style.display=otype==='dine_in'?'':'none';$('#tableLbl').textContent=table?'Table '+table:'Choose a table';}
   if($('#custLbl'))$('#custLbl').textContent=cust?CUSTOMERS[CUST_IDS.indexOf(+cust)]||WALK_IN:WALK_IN;
   if($('#tact'))$('#tact').hidden=!(orderId&&cart.length);
-  const dr=DRAWERS[till()];$('#nosale').hidden=!(dr&&dr.mode==='printer');}
+  const dr=DRAWERS[till()];$('#nosale').hidden=!(dr&&dr.mode==='printer'&&dr.nosale!==false);keepCart();}
+function keepCart(){try{const k='riyeser.cart.'+till();if(!cart.length||billPart||paid.length)sessionStorage.removeItem(k);
+  else sessionStorage.setItem(k,JSON.stringify({cart,orderId,table,cust,otype,at:Date.now()}));}catch(e){}}
+function restoreCart(){try{const v=JSON.parse(sessionStorage.getItem('riyeser.cart.'+till())||'null');
+  if(v&&Date.now()-v.at<12*3600000&&v.cart&&v.cart.length){cart=v.cart.filter(l=>BYID[l.id]);orderId=v.orderId;table=v.table;cust=v.cust;if(v.otype)otype=v.otype;}}catch(e){}}
 function setType(t){otype=t;$$('#otype button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));draw();}
 function reset(){cart=[];orderId=null;table=null;cust=null;method=null;tend=0;checkout=null;paid=[];resumed=null;billPart=null;bill=null;orderStatus='open';if(MODE==='restaurant')setType(otypes[0]||'takeaway');else draw();}
 // held orders / tables
@@ -460,9 +483,12 @@ async function complete(){$('#complete').disabled=true;
     +(d.method==='split'?`<br>Card ${fmt(cardTot)} + cash ${fmt(d.total-cardTot)}`:'')+(cardTot&&!d.drawer?'<br>No cash: the drawer stays shut.':'');
   if(d.drawer)document.dispatchEvent(new CustomEvent('riyeser:open-drawer',{detail:{cashout:d.cashout||0,change:d.change||0}}));
   drawerNote(d);$('#newSale').textContent='New sale';
-  $('#doneNote').textContent='Saved to Accounting · stock updated';
+  $('#doneNote').textContent='Saved to Accounting · stock updated';afterSale();
   const ln=$('#lowNote');if(ln){ln.hidden=!(d.low_stock&&d.low_stock.length);ln.textContent=ln.hidden?'':'Low on stock: '+d.low_stock.join(', ');}
   show('#pPay',false);show('#pDone',true);reset();loadOrders();drawGrid();}
+function afterSale(){const after=(DRAWERS[till()]||{}).after||'ask';
+  $('#printRc').lastChild.textContent=after==='never'?'Print a copy':'Print receipt';$('#noRc').lastChild.textContent=after==='never'?'Done':'No receipt';
+  if(after==='always'){printReceipt(true);$('#doneNote').textContent='Receipt printing · saved to Accounting · stock updated';}}
 function newSale(){show('#pDone',false);if(bill&&bill.status==='open'&&orderStatus==='billing'){showBill();return;}if(bill)reset();$('#q').focus();}
 function takeStock(id,q){const it=BYID[id];if(!it||it.stock===null||it.stock===undefined)return;it.stock-=q;const l=TILL_LOC[till()];if(it.stocks&&l!=null&&String(l) in it.stocks)it.stocks[String(l)]-=q;}
 function drawerNote(d){if(d.drawer_error)toast('The cash drawer didn\'t open: '+d.drawer_error+' Open it with the key.');}
@@ -476,7 +502,7 @@ async function completePart(tenders){
   $('#give').innerHTML=d.method==='card'?`<span>Paid by card</span><span class="n">${fmt(d.total)}</span>`:`<span>Give change</span><span class="n">${fmt(d.change)}</span>`;
   $('#giveCo').hidden=!d.cashout;$('#giveCo').innerHTML=d.cashout?`<span>Give cash out</span><span class="n">${fmt(d.cashout)}</span>`:'';
   $('#doneCard').innerHTML=(d.cards||[]).map(c=>`${esc(c.scheme||'Card')} ${c.last4?'••'+esc(c.last4):''}${c.auth?' · auth '+esc(c.auth):''} · ${fmt(c.amount)}`).join('<br>');
-  drawerNote(d);billPart=null;paid=[];checkout=null;
+  drawerNote(d);billPart=null;paid=[];checkout=null;afterSale();
   if(d.closed){orderStatus='paid';$('#doneNote').textContent='Every part is paid. The table is closed.';$('#newSale').textContent='New sale';}
   else{$('#doneNote').textContent=fmt(d.bill.left)+' still to pay on this bill.';$('#newSale').textContent='Next guest';}
   show('#pPay',false);show('#pDone',true);loadOrders();}
@@ -484,7 +510,7 @@ function showBill(){if(!bill)return;$('#bTitle').textContent=label()+' · split 
   $('#bMode').textContent={even:'Split evenly',items:'Split by item',amounts:'Split by amount'}[bill.mode]+' · '+bill.parts.length+' parts';
   $('#bTotal').textContent=fmt(bill.total);$('#bReceipt').href=bill.receipt_url;
   $('#bParts').innerHTML=bill.parts.map(p=>`<div class="part ${p.paid?'done':''}"><div><b>${esc(p.label)}</b><small>${p.paid?'Paid'+(p.method?' · '+({cash:'cash',card:'card',split:'card + cash'}[p.method]||p.method):''):'To pay'}</small></div>
-    <div class="r"><span class="amt n">${fmt(p.amount)}</span>${p.paid?`<a class="btn sm" target="receipt" href="${bill.receipt_url}?part=${p.id}">Receipt</a>`:`<button class="btn go sm" data-paypart="${p.id}">Pay</button>`}</div></div>`).join('');
+    <div class="r"><span class="amt n">${fmt(p.amount)}</span>${p.paid?`<a class="btn sm" data-print href="${bill.receipt_url}?part=${p.id}">Receipt</a>`:`<button class="btn go sm" data-paypart="${p.id}">Pay</button>`}</div></div>`).join('');
   $('#bLeft').hidden=!bill.left;$('#bLeftAmt').textContent=fmt(bill.left);$('#bUndo').hidden=bill.parts.some(p=>p.paid);
   show('#pBill',true);}
 function payPart(id){const p=bill.parts.find(x=>x.id===id);if(!p||p.paid)return;billPart=p;paid=[];checkout=newRef();show('#pBill',false);openPay();}
@@ -517,10 +543,10 @@ document.addEventListener('click',async e=>{const b=e.target.closest('button,[da
   if(b.dataset.cust!==undefined){cust=b.dataset.cust?+b.dataset.cust:null;show('#mCust',false);draw();return;}
   if(b.dataset.m){method=b.dataset.m;$$('#methods button').forEach(x=>x.classList.toggle('on',x===b));$('#cashArea').hidden=method!=='cash';$('#cardArea').hidden=method!=='card';cardAmt=leftToPay();cardEdit=false;updPay();return;}
   if(b.id==='cardPart'){cardEdit=!cardEdit;if(cardEdit)cardAmt=0;else if(!cardAmt)cardAmt=leftToPay();updPay();return;}
-  if(b.closest('#ckeys')){let c=String(cardAmt);if(b.dataset.k==='del')c=c.slice(0,-1)||'0';else c=(c==='0'?'':c)+b.textContent;cardAmt=Math.min(+c,leftToPay());$('#cardAmt').textContent=fmt(cardAmt);$('#cardGo').disabled=cardAmt<=0;
+  if(b.closest('#ckeys')){let c=padKey(String(cardAmt),b);cardAmt=Math.min(+c,leftToPay());$('#cardAmt').textContent=fmt(cardAmt);$('#cardGo').disabled=cardAmt<=0;
     $('#cardGo').textContent=RT.linked(till())?'Send '+fmt(cardAmt)+' to card machine':'Card approved: '+fmt(cardAmt);return;}
   if(b.dataset.cash){tend=+b.dataset.cash;updPay();return;}
-  if(b.closest('#keys')){let c=String(tend);if(b.dataset.k==='del')c=c.slice(0,-1)||'0';else c=(c==='0'?'':c)+b.textContent;tend=Math.min(+c,99999999);updPay();return;}});
+  if(b.closest('#keys')){let c=padKey(String(tend),b);tend=Math.min(+c,99999999);updPay();return;}});
 $('#lnMinus').onclick=()=>{const l=cart[editIdx];l.qty=Math.max(1,l.qty-1);$('#lnQty').textContent=+l.qty.toFixed(3);};
 // ---- table actions: move, move items, merge, split
 async function ensureSaved(){if(!orderId)return false;const d=await saveOrder(false);return !!d;}
@@ -596,6 +622,15 @@ $('#q').addEventListener('input',drawGrid);
 $('#q').addEventListener('keydown',e=>{if(e.key!=='Enter')return;e.preventDefault();const q=$('#q').value.trim().toLowerCase();if(!q)return;
   const exact=F.has('scan')?ITEMS.find(i=>i.kind!=='product'&&(i.sku.toLowerCase()===q||(i.barcodes||[]).includes(q))):null,m=TILES.filter(i=>i.name.toLowerCase().includes(q)||i.sku.toLowerCase().includes(q));
   const hit=exact||(m.length===1?m[0]:null);if(hit){add(hit.id);$('#q').value='';drawGrid();}else toast(m.length?'Several items match. Tap the right one.':'No item with that code or name');});
+// barcode scanners (POS setup › Hardware): a fast burst of characters ending in Enter is a scan, wherever the focus is
+function byCode(q){q=String(q).toLowerCase();return ITEMS.find(i=>i.kind!=='product'&&((i.sku||'').toLowerCase()===q||(i.barcodes||[]).includes(q)));}
+function scanned(code){if($('#lockScr')&&$('#lockScr').classList.contains('show'))return;
+  if($('#pPay').classList.contains('show')||$('#pDone').classList.contains('show')||$('#pOpen').classList.contains('show')){toast('Finish this first, then scan.');return;}
+  const it=byCode(code);if(SC.beep)RiyeserScanner.beep(!!it);
+  if(it){if($('#mVar').classList.contains('show'))show('#mVar',false);add(it.id);toast(it.name+' added');return;}
+  $('#unkCode').textContent=code;const offer=SC.unknown==='offer'&&CAN_ADD;$('#unkAdd').hidden=!offer;$('#unkAsk').hidden=offer;
+  $('#unkAdd').href=NEW_ITEM+'?barcode='+encodeURIComponent(code);show('#mUnknown',true);}
+if(F.has('scan')&&window.RiyeserScanner)RiyeserScanner.attach({prefix:SC.prefix,suffix:SC.suffix,capture:SC.capture,owns:el=>el&&el.id==='q',onScan:scanned});
 // a barcode scanner types like a keyboard: send stray typing to the search box
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){$$('.modal').forEach(m=>m.classList.remove('show'));return;}
   const t=e.target;if(t.matches('input,select,textarea')||$$('.modal.show,.panel.show').length||e.ctrlKey||e.metaKey||e.altKey)return;
@@ -603,9 +638,12 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'){$$('.modal').forEac
 $('#pay').onclick=()=>{if(orderStatus==='billing'){showBill();return;}if(otype==='dine_in'&&!table){loadOrders().then(showTables);toast('Choose a table first');return;}openPay();};
 $('#complete').onclick=complete;$('#cardGo').onclick=payCard;$('#newSale').onclick=newSale;
 $('#noRc').onclick=()=>{toast('No receipt. The sale is saved.');newSale();};
-$('#printRc').onclick=async()=>{if(!last)return;const dr=DRAWERS[till()];
-  if(dr&&dr.raw&&last.sale_id){const d=await post(U.base+'receipt/'+last.sale_id+'/raw',{till_id:till(),part_id:last.part_id||null});if(d.ok){toast('Receipt printed');newSale();return;}}
-  const w=window.open(last.receipt_url,'receipt','width=380,height=640');if(!w)location.href=last.receipt_url+(last.receipt_url.includes('?')?'&':'?')+'back=1';newSale();};
+// the receipt prints inside the app: straight to the till's receipt printer when it has one, else the Windows print box
+async function printReceipt(auto){if(!last)return;const dr=DRAWERS[till()];
+  if(dr&&dr.raw&&last.sale_id){const d=await post(U.base+'receipt/'+last.sale_id+'/raw',{till_id:till(),part_id:last.part_id||null,auto:!!auto});
+    if(d.ok){toast('Receipt printed');return;}if(d.error)toast(d.error);}
+  RiyeserInApp.print(last.receipt_url);}
+$('#printRc').onclick=async()=>{await printReceipt(false);newSale();};
 $('#clear').onclick=async()=>{if(!cart.length&&!orderId)return;if(orderStatus==='billing'){showBill();return;}
   if(orderId){if(!confirm('Cancel this open order?'))return;await fetch(U.base+'order/'+orderId+'/cancel',{method:'POST'});loadOrders();}reset();};
 if($('#hold'))$('#hold').onclick=async()=>{if(otype==='dine_in'&&!table){await loadOrders();showTables();toast('Choose a table first');return;}
@@ -613,7 +651,8 @@ if($('#hold'))$('#hold').onclick=async()=>{if(otype==='dine_in'&&!table){await l
 if($('#kitchen'))$('#kitchen').onclick=async()=>{if(otype==='dine_in'&&!table){await loadOrders();showTables();toast('Choose a table first');return;}
   const d=await saveOrder(true);if(!d)return;orderId=d.id;
   if(d.nothing_new){toast('Nothing new to send: everything on this order is already in the kitchen.');draw();return;}
-  if(d.docket_url)window.open(d.docket_url,'docket','width=380,height=600');toast(d.docket_url?'Sent to kitchen':'Sent to the kitchen screen');loadOrders();
+  if(d.docket_url)RiyeserInApp.print(d.docket_url);
+  toast(d.docket_error?'Sent. A docket printer had a problem: '+d.docket_error:(d.printed&&d.printed.length)?'Sent to kitchen · printed on '+d.printed.join(', '):d.docket_url?'Sent to kitchen':'Sent to the kitchen screen');loadOrders();
   if(otype==='dine_in')reset();else draw();};
 if($('#tableBtn'))$('#tableBtn').onclick=async()=>{await loadOrders();showTables();};
 if($('#custBtn')){const dc=()=>{const q=$('#cq').value.trim().toLowerCase();
@@ -624,15 +663,25 @@ $$('[data-open]').forEach(a=>a.addEventListener('click',async e=>{if(!a.closest(
 // the till must be opened (with its float) before selling
 let flt=0;
 function drawFlt(){$('#flt').textContent=fmt(flt);$$('#fq button').forEach(b=>b.classList.toggle('on',+b.dataset.flt===flt));}
+let opener=null;
 function needOpen(){const t=$('#till').value;if(!t||SHIFTS[t])return false;flt=(t in FLOATS)?FLOATS[t]:20000;
-  $('#openName').textContent=$('#till').selectedOptions[0].text;$('#openErr').textContent='';drawFlt();show('#pOpen',true);return true;}
+  $('#openName').textContent=$('#till').selectedOptions[0].text;$('#openErr').textContent='';drawFlt();show('#pOpen',true);
+  if(PINS){opener=null;whoOpens();}return true;}
+// Till PINs: "Who's opening the till?" The float is counted against that person.
+async function whoOpens(){const name=$('#till').selectedOptions[0].text;$('#openGo').disabled=true;
+  try{opener=await TillLock.ask({title:"Who's opening the till?",sub:'Enter your PIN to open '+name+'.',purpose:'open'});}
+  catch(e){opener=null;}
+  $('#openWhoTxt').textContent=opener?'Opening: '+opener.name:"Who's opening the till?";$('#openPin').textContent=opener?'Not you?':'Enter PIN';
+  $('#openGo').disabled=!opener;if(!opener&&!TillLock.me)TillLock.show();}
+if($('#openPin'))$('#openPin').onclick=whoOpens;
 $('#fq').addEventListener('click',e=>{const b=e.target.closest('button');if(b){flt=+b.dataset.flt;drawFlt();}});
-$('#fkeys').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;let c=String(flt);
-  if(b.dataset.k==='del')c=c.slice(0,-1)||'0';else c=(c==='0'?'':c)+b.textContent;flt=Math.min(+c,9999999);drawFlt();});
+$('#fkeys').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
+  flt=Math.min(+padKey(String(flt),b),9999999);drawFlt();});
 $('#openGo').onclick=async()=>{const t=$('#till').value;
   const r=await fetch(U.open,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({till_id:t,float:(flt/100).toFixed(2)})});
   const d=await r.json().catch(()=>({ok:false,error:'Could not open the till.'}));if(!d.ok){$('#openErr').textContent=d.error;return;}
-  SHIFTS[t]=true;show('#pOpen',false);toast($('#till').selectedOptions[0].text+' is open');$('#q').focus();};
+  SHIFTS[t]=true;show('#pOpen',false);toast($('#till').selectedOptions[0].text+' is open');$('#q').focus();
+  if(PINS&&opener&&opener.id!==TillLock.me)location.reload();};  // the page shows the new cashier
 document.addEventListener('tillchange',()=>{if(!needOpen())show('#pOpen',false);drawGrid();draw();});
 needOpen();
 // card payments left unfinished (the PC crashed, the page was closed, the connection dropped)
@@ -659,6 +708,7 @@ async function recAct(a,id){const x=unres.find(u=>u.id===id);if(!x)return;
     try{await RT.run({kind:'refund',amount:x.approved_amount,till_id:x.till_id,orphan_of:x.id,approval_id:ap.approval_id,doneLabel:'Done'});toast('Refunded to the card.');}catch(e){if(!e.txn)toast(e.message);}
     unres=await (await fetch(U.base+'terminal/unresolved')).json();drawRec();}}
 drawRec();
+restoreCart();if(MODE==='restaurant'&&otypes.includes(otype))setType(otype);
 drawCats();drawGrid();draw();loadOrders().then(()=>{const h=location.hash.slice(1);if(h==='tables'&&$('#tables'))showTables();else if(h==='held')showOrders();if(h)history.replaceState(null,'',location.pathname);});
 })();
 </script>

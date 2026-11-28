@@ -143,6 +143,33 @@ def send_to_kitchen(db, o, lines):
 
 
 # ------------------------------------------------------------ dockets
+def print_dockets(db, o, send_no, printing):
+    """Print what this send added, straight to each station's own printer (Hardware page: kitchen and bar printers).
+    Returns (stations still to print with the Windows print box, names printed, problems)."""
+    from .. import drawer as D, pos_print as PP
+    left, printed, errors = [], [], []
+    for s in stations(db, active_only=False):
+        if s["id"] not in printing:
+            continue
+        if not s["printer"]:
+            left.append(s["id"])
+            continue
+        items = db.execute("SELECT k.* FROM kds_items k JOIN kds_tickets t ON t.id=k.ticket_id WHERE t.order_id=?"
+                           " AND t.send_no=? AND t.station_id=? ORDER BY k.id", (o["id"], send_no, s["id"])).fetchall()
+        try:
+            D.backend().send(s["printer"], PP.docket_job(s["name"] if len(stations(db)) > 1 else None, label(o),
+                                                         o["id"], g.user["full_name"] or g.user["username"],
+                                                         [(k["qty"], k["name"], k["note"]) for k in items],
+                                                         PP.layout_of(s), o["note"]),
+                             job=f"Riyeser POS docket {o['id']} {s['name']}")
+            printed.append(s["name"])
+        except D.DrawerError as e:
+            errors.append(f"{s['name']}: {e}")
+            left.append(s["id"])
+    return left, printed, errors
+
+
+
 @bp.route("/docket/<int:oid>")
 def docket(oid):
     """The kitchen docket. With ?send=N: only what that send added (per printing station). Without: the whole
@@ -154,16 +181,20 @@ def docket(oid):
     from .pos import _order_json
     send = opt_int(request.args.get("send"))
     groups = []
+    only = {int(x) for x in (request.args.get("only") or "").split(",") if x.isdigit()}
     if send:
         for s in stations(db, active_only=False):
-            if s["output"] not in ("print", "both"):
+            if s["output"] not in ("print", "both") or (only and s["id"] not in only):
                 continue
             items = db.execute("SELECT k.* FROM kds_items k JOIN kds_tickets t ON t.id=k.ticket_id WHERE t.order_id=?"
                                " AND t.send_no=? AND t.station_id=? ORDER BY k.id", (oid, send, s["id"])).fetchall()
             if items:
                 groups.append(dict(station=s["name"], items=items))
+    from .. import pos_print as PP
+    first = next((s for s in stations(db, active_only=False) if not only or s["id"] in only), None)
     return render_template("pos/docket.html", o=_order_json(db, o), user=g.user, groups=groups, send=send,
-                           label=label(o), several=len(stations(db)) > 1)
+                           label=label(o), several=len(stations(db)) > 1,
+                           lc=PP.css_vars(PP.layout_of(first)))
 
 
 # ------------------------------------------------------------ stations setup (and the kitchen screen's settings)

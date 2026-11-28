@@ -7,7 +7,7 @@
 <div class="actions">
 <a class="btn" href="{{ url_for('documents.view', doc_id=doc.id, pdf=1) }}">Download PDF</a>
 <form method="post" class="inline" action="{{ url_for('documents.save_pdf', doc_id=doc.id) }}"><button class="btn" title="Save into Documents\Riyeser for Riyeser Desk Assistant">Save to Riyeser folder</button></form>
-<a class="btn" href="{{ url_for('documents.view', doc_id=doc.id, print=1) }}" target="_blank">Print</a>
+<a data-inapp class="btn" href="{{ url_for('documents.view', doc_id=doc.id, print=1) }}">Print</a>
 <form method="post" class="inline" action="{{ url_for('documents.email', doc_id=doc.id) }}"><input name="to" type="email" value="{{ doc.cemail or '' }}" placeholder="email address" aria-label="Email to" style="width:190px"><button class="btn">Email {{ 'quote' if doc.status == 'quote' else 'it' }}</button></form>
 {% if doc.status in ('quote','order') %}
 {% set is_po = doc.side == 'purchase' and doc.status == 'order' %}

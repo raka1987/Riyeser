@@ -653,7 +653,7 @@ def test_drawer_problems_never_lose_the_sale_and_the_test_button(shop):
         db = get_db()
         assert db.execute("SELECT ok FROM pos_drawer_events WHERE kind='sale'").fetchone()[0] == 0
         ok(db)
-    page = c.get("/pos/drawer").get_data(as_text=True)
+    page = c.get("/pos/drawer", follow_redirects=True).get_data(as_text=True)
     assert "Works with drawers that plug into an ESC/POS receipt printer" in page and "Receipt printer (test)" in page
 
 
@@ -828,7 +828,7 @@ def test_new_screens_render(shop):
     restaurant(s)
     gen_variants(s)
     add_location(s, "Warehouse")
-    for url in ("/pos/", "/pos/drawer", "/pos/kitchen", "/pos/setup", "/kds/", "/inventory/locations",
+    for url in ("/pos/", "/pos/hardware", "/pos/kitchen", "/pos/setup", "/kds/", "/inventory/locations",
                 "/inventory/transfers", "/inventory/transfers/new", f"/inventory/{s['tee']}/variants",
                 "/inventory/variants/import", "/inventory/count", "/inventory/low-stock", f"/inventory/{s['tee']}/edit"):
         r = c.get(url)

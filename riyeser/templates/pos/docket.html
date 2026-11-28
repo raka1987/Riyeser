@@ -1,10 +1,11 @@
 <!doctype html><html><head><meta charset="utf-8"><title>Kitchen docket #{{ o.id }}</title>
-<style>body{font:15px/1.45 "Courier New",monospace;margin:0;background:#fff;color:#000}.r{width:72mm;margin:0 auto;padding:10px 4px}
+<style>body{font:15px/1.45 "Courier New",monospace;margin:0;background:#fff;color:#000}.r{width:{{ lc.width }};max-width:100%;margin:0 auto;padding:calc(10px + {{ lc.top }}) 4px calc(10px + {{ lc.bottom }});overflow-wrap:anywhere}
+body{zoom:{{ lc.font }}}@media print{.r{margin:0 0 0 {{ lc.left }};padding-left:0;padding-right:0}}
 h1{font-size:22px;text-align:center;margin:0}h2{font-size:17px;text-align:center;margin:0 0 4px;letter-spacing:2px}.c{text-align:center}hr{border:0;border-top:2px dashed #000;margin:8px 0}
 .l{font-size:18px;font-weight:bold;margin:6px 0 0}.n{margin-left:24px;font-style:italic}.mv{margin-left:24px;font-size:13px}
 .st+.st{page-break-before:always;break-before:page}
-@media print{.np{display:none}@page{size:80mm auto;margin:0}}</style></head>
-<body onload="setTimeout(()=>window.print(),300)"><div class="r">
+@media print{.np{display:none}@page{size:{{ lc.page_mm }}mm auto;margin:0}}</style></head>
+<body{% if not preview %} onload="setTimeout(()=>window.print(),300)"{% endif %}><div class="r">
 {% if send %}{% for gp in groups %}<div class="st">
 {% if several %}<h2>** {{ gp.station|upper }} **</h2>{% endif %}
 <h1>{{ label|upper }}</h1>
@@ -16,4 +17,4 @@ h1{font-size:22px;text-align:center;margin:0}h2{font-size:17px;text-align:center
 <div class="c">Order #{{ o.id }} · {{ (o.kitchen_sent_at or o.updated_at)[11:16] }} · {{ user.full_name or user.username }}<br>REPRINT: the whole order</div><hr>
 {% for l in o.lines %}<div class="l">{{ '%g'|format(l.qty) }} x {{ l.name }}</div>{% if l.note %}<div class="n">** {{ l.note }}</div>{% endif %}{% endfor %}
 {% if o.note %}<hr><div>{{ o.note }}</div>{% endif %}<hr>{% endif %}
-<p class="c np"><button onclick="print()">Print</button> <button onclick="close()">Close</button></p></div></body></html>
+{% if not preview %}<p class="c np"><button onclick="print()">Print</button> <button onclick="close()">Close</button></p>{% endif %}</div></body></html>

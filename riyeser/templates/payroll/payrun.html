@@ -6,6 +6,6 @@
 {% if not r.voided %}{% if lv('payroll') >= 3 %}<form method="post" class="inline" action="{{ url_for('payroll.void_run', rid=r.id) }}" data-confirm="Reverse this pay run?"><button class="btn danger">Reverse pay run</button></form>{% endif %}{% endif %}</div></div>
 <div class="tbl"><table><tr><th>Employee</th><th class="n">Hours</th><th class="n">Gross</th><th class="n">PAYG</th><th class="n">Super</th><th class="n">Net</th><th></th></tr>
 {% for s in slips %}<tr><td>{{ s.first_name }} {{ s.last_name }}</td><td class="n">{{ s.hours }}</td><td class="n">{{ s.gross|money }}</td><td class="n">{{ s.tax|money }}</td><td class="n">{{ s.super|money }}</td><td class="n">{{ s.net|money }}</td>
-<td><a class="btn sm" href="{{ url_for('payroll.payslip', sid=s.id) }}" target="_blank">Payslip</a></td></tr>{% endfor %}
+<td><a data-inapp class="btn sm" href="{{ url_for('payroll.payslip', sid=s.id) }}">Payslip</a></td></tr>{% endfor %}
 <tr class="grand"><td colspan="2">Total</td><td class="n">{{ slips|sum(attribute='gross')|money }}</td><td class="n">{{ slips|sum(attribute='tax')|money }}</td><td class="n">{{ slips|sum(attribute='super')|money }}</td><td class="n">{{ slips|sum(attribute='net')|money }}</td><td></td></tr></table></div>
 {% endblock %}

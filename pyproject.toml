@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "riyeser-accounting"
-version = "2.11.0"
+version = "2.11.1"
 authors = [{name = "Riyeser"}]
 description = "Riyeser Accounting (a Riyeser module) - double-entry business accounting (sales, purchases, banking, inventory, payroll, GST/BAS, reports)"
 readme = "README.md"

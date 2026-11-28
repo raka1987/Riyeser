@@ -8,7 +8,7 @@
 @media (max-width:900px){.kgrid{grid-template-columns:1fr}}
 </style>
 <div class="head"><div><h1>Kitchen &amp; screens</h1><p class="sub">Choose where each station's orders go: a printed docket, the kitchen screen, or both. Items already sent are never sent again, even when they move to another table.</p></div>
-<div class="actions"><a class="btn" href="{{ url_for('pos.setup') }}">POS setup</a><a class="btn" href="{{ url_for('kds.board') }}" target="_blank" rel="noopener">Open the kitchen screen</a></div></div>
+<div class="actions"><a class="btn" href="{{ url_for('pos.setup') }}">POS setup</a><a data-inapp class="btn" href="{{ url_for('kds.board') }}">Open the kitchen screen</a></div></div>
 <form method="post" class="card"><input type="hidden" name="what" value="stations">
 <fieldset {{ 'disabled' if not can_change }} style="border:0;padding:0;margin:0;min-width:0">
 <h2 style="margin-top:0">1 · Stations</h2>

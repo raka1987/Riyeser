@@ -2,7 +2,7 @@
 {% block content %}
 {% include "estimate/_steps.html" %}
 <div class="est-head"><div><h1>Send the quote</h1><p class="sub">Quote <a href="{{ url_for('documents.view', doc_id=doc.id) }}">{{ doc.number }}</a> for {{ t.cname }} · {% if qoptions %}{% set lead = (qoptions|selectattr('on_quote')|first) %}{{ qoptions|length }} options from {{ qoptions|map(attribute='total')|min|cur }} · {{ lead.name }} {{ '(chosen)' if lead.chosen else '(recommended)' }} {{ lead.total|cur }}{% else %}{{ doc.total|cur }}{% endif %} including {{ company.tax_name or 'tax' }} · <span class="st {{ status }}">{{ {'draft': 'Draft', 'sent': 'Sent', 'accepted': 'Accepted', 'declined': 'Declined', 'expired': 'Expired'}[status] }}</span>{% if doc.valid_until %} · valid until {{ doc.valid_until|mdate }}{% endif %}</p></div>
-<div class="actions"><a class="btn" href="{{ url_for('estimate.quote_pdf', tid=t.id, download=1) }}">⬇ Download PDF</a><a class="btn" href="{{ url_for('estimate.quote_pdf', tid=t.id) }}" target="_blank" rel="noopener">🖨 Print</a></div></div>
+<div class="actions"><a class="btn" href="{{ url_for('estimate.quote_pdf', tid=t.id, download=1) }}">⬇ Download PDF</a><a data-inapp class="btn" href="{{ url_for('estimate.quote_pdf', tid=t.id) }}">🖨 Print</a></div></div>
 <div class="mwrap">
 <div><iframe class="pdfprev" src="{{ url_for('estimate.quote_pdf', tid=t.id) }}" title="Quote {{ doc.number }}"></iframe></div>
 <div>

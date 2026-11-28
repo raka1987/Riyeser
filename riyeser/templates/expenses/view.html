@@ -44,9 +44,9 @@
 </div>
 
 <div class="card xc-receipt" style="margin:0"><h3>Receipt</h3>
-{% if x.rmime %}{% if x.rmime.startswith('image/') and x.rmime not in ('image/heic', 'image/heif') %}<a href="{{ url_for('expenses.receipt', xid=x.id) }}" target="_blank" rel="noopener"><img src="{{ url_for('expenses.receipt', xid=x.id) }}" alt="Receipt for claim {{ x.id }}"></a>
+{% if x.rmime %}{% if x.rmime.startswith('image/') and x.rmime not in ('image/heic', 'image/heif') %}<a data-inapp href="{{ url_for('expenses.receipt', xid=x.id) }}"><img src="{{ url_for('expenses.receipt', xid=x.id) }}" alt="Receipt for claim {{ x.id }}"></a>
 {% else %}<p>{{ x.rname or 'Receipt' }}</p>{% endif %}
-<p><a class="btn sm" href="{{ url_for('expenses.receipt', xid=x.id) }}" target="_blank" rel="noopener">Open</a> <a class="btn sm" href="{{ url_for('expenses.receipt', xid=x.id, download=1) }}">Download</a></p>
+<p><a data-inapp class="btn sm" href="{{ url_for('expenses.receipt', xid=x.id) }}">Open</a> <a class="btn sm" href="{{ url_for('expenses.receipt', xid=x.id, download=1) }}">Download</a></p>
 {% else %}<p class="muted">No receipt attached.</p>{% endif %}</div>
 </div>
 {% endblock %}

@@ -30,8 +30,8 @@
 
 <div class="card" id="sheet"><h3>Job sheet</h3>
 <p class="muted small">Everything recorded on site: times, work done, checklist, parts, photos and the customer's signature. Open a visit's On site page to add to it.</p>
-{% if photos %}<div class="site-photos">{% for p in photos %}<figure><a href="{{ url_for('bookings.site_photo_file', pid=p.id) }}" target="_blank" rel="noopener"><img src="{{ url_for('bookings.site_photo_file', pid=p.id, thumb=1) }}" alt="{{ p.kind|capitalize }} photo{{ ': ' ~ p.caption if p.caption }}" loading="lazy"></a><figcaption><b>{{ p.kind|capitalize }}</b>{% if p.caption %} · {{ p.caption }}{% endif %}</figcaption></figure>{% endfor %}</div>{% endif %}
-<div class="site-row"><a class="btn" href="{{ url_for('bookings.job_sheet', jid=j.id) }}" target="_blank" rel="noopener">View job sheet (PDF)</a><a class="btn" href="{{ url_for('bookings.job_sheet', jid=j.id, download=1) }}">Download</a>
+{% if photos %}<div class="site-photos">{% for p in photos %}<figure><a data-inapp href="{{ url_for('bookings.site_photo_file', pid=p.id) }}"><img src="{{ url_for('bookings.site_photo_file', pid=p.id, thumb=1) }}" alt="{{ p.kind|capitalize }} photo{{ ': ' ~ p.caption if p.caption }}" loading="lazy"></a><figcaption><b>{{ p.kind|capitalize }}</b>{% if p.caption %} · {{ p.caption }}{% endif %}</figcaption></figure>{% endfor %}</div>{% endif %}
+<div class="site-row"><a data-inapp class="btn" href="{{ url_for('bookings.job_sheet', jid=j.id) }}">View job sheet (PDF)</a><a class="btn" href="{{ url_for('bookings.job_sheet', jid=j.id, download=1) }}">Download</a>
 {% if can('bookings', 2) and email_ready %}<form method="post" action="{{ url_for('bookings.job_sheet_email', jid=j.id) }}" class="site-row" style="margin:0"><input type="email" name="to" value="{{ cemail or '' }}" placeholder="Customer's email" aria-label="Customer's email" required><button class="btn">Email job sheet</button></form>{% endif %}</div>
 {% if not email_ready %}<p class="muted small">To email the job sheet from here, set up email in Setup, Email.</p>{% endif %}
 </div>

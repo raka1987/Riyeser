@@ -58,6 +58,25 @@ details.um{position:relative}details.um>summary{list-style:none;cursor:pointer}d
 @media (max-width:1100px){.tnav a span,.tnav button span{display:none}.nm small{display:none}}
 @media (max-width:700px){.tbar{padding:0 10px;height:64px}.nm{display:none}.tsel{max-width:110px}}
 #mApprove{z-index:75}
+.swb{display:flex;align-items:center;gap:8px;border:1.5px solid var(--line2);background:#fff;border-radius:12px;padding:6px 12px;min-height:46px;font-weight:700;text-align:left;max-width:190px;margin-right:6px}
+.swb span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.swb small{display:block;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+@media (max-width:700px){.swb span{display:none}.swb{padding:6px 10px}}
+/* the till's lock screen: "Who's selling?" (Till PINs) */
+.lock{position:fixed;inset:0;z-index:80;background:linear-gradient(160deg,#0f2742,#0f6e66);display:none;overflow:auto;padding:24px 16px}
+.lock.show{display:flex;flex-direction:column;align-items:center}
+.lock .lk-in{width:min(860px,100%);margin:auto 0;display:flex;flex-direction:column;align-items:center;gap:18px;color:#fff}
+.lock h1{margin:0;font-size:32px;letter-spacing:-.5px;text-align:center}.lock p.lk-sub{margin:-8px 0 0;color:#cfe7e2;text-align:center}
+.lk-tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:14px;width:100%}
+.lk-tiles button{border:0;border-radius:20px;background:#fff;color:var(--ink);min-height:120px;padding:16px;font-size:20px;font-weight:800;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);overflow-wrap:anywhere}
+.lk-tiles button .av{width:52px;height:52px;font-size:20px;background:var(--green-l);color:var(--green-d)}
+.lk-tiles button.other{background:rgba(255,255,255,.12);color:#fff;border:2px dashed rgba(255,255,255,.5);box-shadow:none;font-size:17px}
+.lk-pad{background:#fff;color:var(--ink);border-radius:22px;padding:22px;width:min(380px,100%);display:flex;flex-direction:column;align-items:center;gap:12px;box-shadow:0 30px 80px rgba(0,0,0,.3)}
+.lk-pad h2{margin:0;font-size:22px;text-align:center}.lk-pad .pinpad{grid-template-columns:repeat(3,minmax(0,92px));width:auto}
+.lk-pad .pinpad button{height:64px;font-size:26px}.lk-pad .pinpad button[data-k=clear]{color:var(--err);font-size:22px}
+.lk-pad[hidden],.lk-tiles[hidden]{display:none}
+.lk-err{color:var(--err);font-weight:600;min-height:1.3em;text-align:center;margin:0}
+.lk-foot{display:flex;gap:10px;width:100%}.lk-foot .btn{flex:1}
+.lk-out{color:#cfe7e2;font-size:13.5px;text-align:center}.lk-out a{color:#fff;font-weight:700}
 .ap .what{display:flex;justify-content:space-between;align-items:center;gap:12px;background:#f8fafc;border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:14px}
 .ap .what b{font-size:17px}.ap .what small{display:block;color:var(--muted);font-size:13px}.ap .what .amt{font-size:24px;font-weight:800;white-space:nowrap}
 .ap .lk{width:48px;height:48px;border-radius:14px;background:var(--warn-bg);color:var(--warn);display:grid;place-items:center;flex-shrink:0}
@@ -82,7 +101,9 @@ details.um{position:relative}details.um>summary{list-style:none;cursor:pointer}d
   {% set tables_on = mode == 'restaurant' and 'tables' in features %}
   {% set held_on = (mode == 'retail' and 'hold' in features) or mode == 'restaurant' %}
   <header class="tbar">
-    {% set pos_app = product.key == 'pos' %}{% set back = url_for('inventory.index') if pos_app else url_for('core.dashboard') %}
+    {% set pos_app = product.key == 'pos' %}{% set tlk = tl_lock if tl_lock is defined else {} %}
+    {% set office = not tlk.pins_on or can('stock') or can('setup') %}{# a cashier signed in by PIN doesn't get the PC user's back office #}
+    {% set back = (url_for('inventory.index') if pos_app else url_for('core.dashboard')) if office else url_for('pos.register') %}
     <a class="logo{{ ' pos' if pos_app }}" href="{{ back }}" title="{{ 'Products & setup' if pos_app else 'Back office' }}">{{ 'Po' if pos_app else 'R' }}</a>
     <div class="nm">Riyeser POS<small>{{ company.name }}</small></div><div class="vr"></div>
     <nav class="tnav" id="tnav">
@@ -95,11 +116,13 @@ details.um{position:relative}details.um>summary{list-style:none;cursor:pointer}d
     <div class="sp"></div>
     <select class="tsel" id="till" aria-label="Till">{% for t in tills %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}</select>
     <div class="vr" style="margin:0 6px"></div>
+    {% if tlk.pins_on %}<button type="button" class="swb" id="switchBtn" title="Lock the till and switch cashier"><svg class="ic" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg><span><small>Selling</small>{{ tlk.cashier.name if tlk.cashier else 'Locked' }}</span></button>{% endif %}
     <details class="um"><summary><span class="av" title="{{ user.full_name or user.username }}">{% set nm = (user.full_name or user.username or '?').split() %}{{ (nm[0][:1] ~ (nm[-1][:1] if nm|length > 1 else ''))|upper }}</span></summary><div class="dd">
-      <div class="who"><b>{{ user.full_name or user.username }}</b><small>{{ user.role|title }}</small></div>
-      <a href="{{ back }}">{{ 'Products & setup' if pos_app else 'Back office' }}</a>
-      {% if can('setup') %}<a href="{{ url_for('pos.setup') }}">POS setup</a><a href="{{ url_for('pos.card_setup') }}">Card payments</a><a href="{{ url_for('pos.drawer_setup') }}">Cash drawer</a>{% if mode == 'restaurant' %}<a href="{{ url_for('pos.kitchen_setup') }}">Kitchen &amp; screens</a>{% endif %}<a href="{{ url_for('pos.approvals') }}">Manager approvals</a>{% endif %}
-      {% if mode == 'restaurant' and can('kitchen') %}<a href="{{ url_for('kds.board') }}" target="_blank" rel="noopener">Kitchen screen</a>{% endif %}
+      <div class="who"><b>{{ user.full_name or user.username }}</b><small>{% if tlk.pins_on %}Selling at the till · this PC is signed in as {{ tlk.signed_in_name }}{% else %}{{ user.role|title }}{% endif %}</small></div>
+      {% if office %}<a href="{{ back }}">{{ 'Products & setup' if pos_app else 'Back office' }}</a>{% endif %}
+      {% if tlk.pins_on %}<a href="#" data-switch>Switch cashier</a>{% endif %}
+      {% if can('setup') %}<a href="{{ url_for('pos.setup') }}">POS setup</a><a href="{{ url_for('pos.hardware') }}">Hardware</a><a href="{{ url_for('pos.card_setup') }}">Card payments</a>{% if mode == 'restaurant' %}<a href="{{ url_for('pos.kitchen_setup') }}">Kitchen &amp; screens</a>{% endif %}<a href="{{ url_for('pos.approvals') }}">Manager approvals</a>{% endif %}
+      {% if mode == 'restaurant' and can('kitchen') %}<a data-inapp href="{{ url_for('kds.board') }}">Kitchen screen</a>{% endif %}
       <a href="{{ url_for('help.index') }}#pos">Help</a>
       <a href="{{ url_for('auth.logout') }}">Sign out</a></div></details>
   </header>
@@ -118,6 +141,61 @@ details.um{position:relative}details.um>summary{list-style:none;cursor:pointer}d
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.style.display='block';clearTimeout(t._h);t._h=setTimeout(()=>t.style.display='none',2400);}
 </script>
 
+{% if tlk.pins_on %}
+<div class="lock{{ ' show' if tlk.till_locked }}" id="lockScr" role="dialog" aria-modal="true" aria-labelledby="lkTitle"><div class="lk-in">
+  <h1 id="lkTitle">Who's selling?</h1><p class="lk-sub" id="lkSub">Tap your name, then enter your PIN.</p>
+  <div class="lk-tiles" id="lkTiles">{% for c in tlk.cashier_tiles %}<button type="button" data-lkuser="{{ c.id }}"><span class="av">{% set nm = c.name.split() %}{{ (nm[0][:1] ~ (nm[-1][:1] if nm|length > 1 else ''))|upper }}</span><span data-lkname>{{ c.name }}</span></button>{% endfor %}
+    <button type="button" class="other" data-lkuser="">Not on the list?<br>Enter your PIN</button></div>
+  <div class="lk-pad" id="lkPad" hidden><h2 id="lkWho">Enter your PIN</h2>
+    <div class="dots" id="lkDots" aria-hidden="true"></div><span class="sr" id="lkCount" style="position:absolute;left:-9999px" aria-live="polite"></span>
+    <div class="pinpad" id="lkKeys">{% for k in ['1','2','3','4','5','6','7','8','9'] %}<button type="button" data-k="{{ k }}">{{ k }}</button>{% endfor %}<button type="button" data-k="clear" aria-label="Clear (C)">C</button><button type="button" data-k="0">0</button><button type="button" data-k="del" aria-label="Delete">&#9003;</button></div>
+    <p class="lk-err" id="lkErr" role="alert"></p>
+    <div class="lk-foot"><button type="button" class="btn" id="lkBack">Back</button><button type="button" class="btn go" id="lkGo" disabled>Unlock</button></div></div>
+  <p class="lk-out">This PC is signed in as {{ tlk.signed_in_name }}. <a href="{{ url_for('auth.logout') }}">Sign out</a></p>
+</div></div>
+<script>
+/* Till PINs: the lock screen, "Switch cashier", auto-lock after {{ tlk.lock_minutes }} minute(s) of no use, and the
+   "Who's opening the till?" PIN pad. window.TillLock.ask({title, sub, purpose}) resolves with the cashier. */
+window.TillLock=(function(){
+  const $=s=>document.querySelector(s), scr=$('#lockScr'), ME={{ (tlk.cashier.id if tlk.cashier else None)|tojson }},
+    LOCK_MIN={{ tlk.lock_minutes|tojson }}, U={unlock:'{{ url_for('pos.cashier_unlock') }}',lock:'{{ url_for('pos.cashier_lock') }}',state:'{{ url_for('pos.cashier_state') }}'};
+  let pin='',uid=null,waiter=null,purpose='unlock',busy=false;
+  function dots(){$('#lkDots').innerHTML=Array.from({length:Math.max(4,pin.length)},(_,i)=>`<i class="${i<pin.length?'f':''}"></i>`).join('');$('#lkCount').textContent=pin.length+' numbers';$('#lkGo').disabled=pin.length<4||busy;}
+  function pad(on,name){$('#lkPad').hidden=!on;$('#lkTiles').hidden=on;pin='';$('#lkErr').textContent='';$('#lkWho').textContent=name?name+', enter your PIN':'Enter your PIN';dots();}
+  function show(o){o=o||{};purpose=o.purpose||'unlock';$('#lkTitle').textContent=o.title||"Who's selling?";$('#lkSub').textContent=o.sub||'Tap your name, then enter your PIN.';
+    scr.classList.add('show');uid=null;pad(!!o.pinOnly,null);$('#lkBack').hidden=!!o.pinOnly&&!o.cancel;$('#lkBack').textContent=o.pinOnly?'Cancel':'Back';}
+  function hide(){scr.classList.remove('show');}
+  async function go(){if(pin.length<4||busy)return;busy=true;dots();$('#lkErr').textContent='';
+    let d;try{const r=await fetch(U.unlock,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin,user_id:uid,till_id:(document.getElementById('till')||{}).value,purpose})});d=await r.json();}
+    catch(e){d={ok:false,error:'Riyeser isn\'t answering. Check this PC is on, then try again.'};}
+    busy=false;pin='';dots();
+    if(!d.ok){$('#lkErr').textContent=d.error;return;}
+    if(waiter){const w=waiter;waiter=null;hide();w.resolve(d.cashier);return;}
+    if(d.cashier.id===ME){hide();return;}
+    location.reload();}
+  function key(k){if(busy)return;if(k==='clear')pin='';else if(k==='del')pin=pin.slice(0,-1);else if(/^[0-9]$/.test(k)&&pin.length<6)pin+=k;dots();$('#lkErr').textContent='';}
+  scr.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
+    if(b.dataset.lkuser!==undefined){uid=b.dataset.lkuser?+b.dataset.lkuser:null;pad(true,uid?b.querySelector('[data-lkname]').textContent:null);return;}
+    if(b.dataset.k){key(b.dataset.k);return;}
+    if(b.id==='lkGo')go();
+    if(b.id==='lkBack'){if(waiter&&$('#lkBack').textContent==='Cancel'){const w=waiter;waiter=null;hide();w.reject(new Error('cancelled'));return;}pad(false);}});
+  document.addEventListener('keydown',e=>{if(!scr.classList.contains('show')||$('#lkPad').hidden)return;
+    if(/^[0-9]$/.test(e.key)){key(e.key);e.preventDefault();}else if(e.key==='Backspace'){key('del');e.preventDefault();}
+    else if(e.key==='Escape'||e.key==='Delete'){key('clear');e.preventDefault();}else if(e.key==='Enter'){go();e.preventDefault();}},true);
+  async function lock(auto){try{await fetch(U.lock,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({auto:!!auto})});}catch(e){}show();}
+  document.addEventListener('click',e=>{const s=e.target.closest('#switchBtn,[data-switch]');if(!s)return;e.preventDefault();const d=s.closest('details');if(d)d.open=false;lock(false);});
+  // any till call refused because the till locked (423): show the lock screen
+  const f0=window.fetch.bind(window);window.fetch=async function(){const r=await f0.apply(null,arguments);if(r.status===423&&!waiter)show();return r;};
+  // auto-lock after no use
+  let lastAct=Date.now(),lastPing=Date.now();
+  ['pointerdown','keydown','touchstart','wheel'].forEach(ev=>document.addEventListener(ev,()=>{if(scr.classList.contains('show'))return;lastAct=Date.now();
+    if(Date.now()-lastPing>60000){lastPing=Date.now();f0(U.state,{headers:{Accept:'application/json'}}).catch(()=>{});}},{passive:true,capture:true}));
+  if(LOCK_MIN)setInterval(()=>{if(!scr.classList.contains('show')&&ME&&Date.now()-lastAct>LOCK_MIN*60000)lock(true);},5000);
+  return {show,lock,ask(o){return new Promise((resolve,reject)=>{waiter={resolve,reject};show(Object.assign({pinOnly:true,cancel:true},o));});},
+    _idle(ms){lastAct=Date.now()-ms;}, me:ME};
+})();
+</script>
+{% endif %}
 {% if rules is defined %}
 <div class="modal" id="mApprove"><div class="box ap">
   <div class="hd"><span class="lk" id="apLk"><svg class="ic" viewBox="0 0 24 24" style="width:26px;height:26px"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></span>
@@ -176,5 +254,6 @@ window.requestApproval=(function(){
 {% endif %}
 {% block scripts %}{% endblock %}
 <script src="{{ url_for('static', filename='lists.js') }}"></script>
+<script src="{{ url_for('static', filename='inapp.js') }}"></script>
 </body>
 </html>

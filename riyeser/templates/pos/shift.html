@@ -1,9 +1,9 @@
 <!doctype html><html><head><meta charset="utf-8"><title>{{ 'Z-report' if sh.status == 'closed' else 'X-read' }} {{ sh.till_name }}</title>
-<style>body{font:13px/1.45 "Courier New",monospace;margin:0;background:#fff;color:#000}.r{width:72mm;margin:0 auto;padding:10px 4px}
+<style>body{font:13px/1.45 "Courier New",monospace;margin:0;background:#fff;color:#000}.r{width:{{ lc.width }};max-width:100%;margin:0 auto;padding:calc(10px + {{ lc.top }}) 4px calc(10px + {{ lc.bottom }});overflow-wrap:anywhere}
 h1{font-size:16px;text-align:center;margin:0}.c{text-align:center}hr{border:0;border-top:1px dashed #000;margin:8px 0}
 table{width:100%;border-collapse:collapse}td{padding:1px 0;vertical-align:top}td.n{text-align:right;white-space:nowrap}.t td{font-weight:bold}
 .np{text-align:center;margin:14px 0}.np button,.np a{font:14px system-ui,sans-serif;padding:8px 14px;margin:0 4px}
-@media print{.np{display:none}@page{size:80mm auto;margin:0}}</style></head>
+@media print{.np{display:none}@page{size:{{ lc.page_mm }}mm auto;margin:0}.r{margin:0 0 0 {{ lc.left }};padding-left:0;padding-right:0}}</style></head>
 <body onload="setTimeout(()=>window.print(),300)"><div class="r">
 <h1>{{ company.name }}</h1>
 <div class="c">{% if company.abn %}{{ tl.tax_id }} {{ company.abn }}<br>{% endif %}<b>{{ 'Z-REPORT (TILL CLOSED)' if sh.status == 'closed' else 'X-READ (TILL STILL OPEN)' }}</b><br>
@@ -28,6 +28,11 @@ table{width:100%;border-collapse:collapse}td{padding:1px 0;vertical-align:top}td
 {% if fig.card_extras %}<tr><td>Card tips/cash out/fees</td><td class="n">{{ fig.card_extras|money }}</td></tr>{% endif %}
 {% if sh.card_settlement is not none %}<tr><td>Card machine</td><td class="n">{{ sh.card_settlement|money }}</td></tr>{% endif %}
 {% endif %}</table>
+{% if fig.by_cashier %}<hr><div><b>SALES BY CASHIER</b></div><table>
+{% for c in fig.by_cashier %}<tr><td>{{ c.name }} ({{ c.sales }})</td><td class="n">{{ c.total|money }}</td></tr>
+{% if c.refunds %}<tr><td>&nbsp; refunds ({{ c.refunds }})</td><td class="n">-{{ c.refund_total|money }}</td></tr>{% endif %}
+{% if c.voids %}<tr><td>&nbsp; voids</td><td class="n">{{ c.voids }}</td></tr>{% endif %}
+{% if c.no_sales %}<tr><td>&nbsp; no sale</td><td class="n">{{ c.no_sales }}</td></tr>{% endif %}{% endfor %}</table>{% endif %}
 {% if fig.terminal and fig.terminal.schemes %}<hr><div><b>CARD TERMINAL BY CARD TYPE</b></div><table>
 {% for c in fig.terminal.schemes %}<tr><td>{{ c.scheme }} ({{ c.count }})</td><td class="n">{{ c.net|money }}</td></tr>{% endfor %}
 {% if fig.terminal.tips %}<tr><td>&nbsp; incl. tips</td><td class="n">{{ fig.terminal.tips|money }}</td></tr>{% endif %}
@@ -37,5 +42,5 @@ table{width:100%;border-collapse:collapse}td{padding:1px 0;vertical-align:top}td
 {% if sh.status == 'closed' and counts %}<hr><table>{% for d, n in counts if n %}<tr><td>{{ '$%d'|format(d // 100) if d >= 100 else '%dc'|format(d) }} x {{ n }}</td><td class="n">{{ (d * n)|money }}</td></tr>{% endfor %}</table>{% endif %}
 {% if sh.reason %}<hr><div>Reason: {{ sh.reason }}{% if appr and appr.method != 'self' %}<br>Approved by {{ users.get(appr.approved_by, '') }} ({{ appr.method }}){% endif %}</div>{% endif %}
 <hr><div class="c">Sent to Riyeser Accounting automatically</div>
-<p class="np"><button onclick="print()">Print</button> <a href="{{ url_for('pos.close_till', till=sh.till_id) }}">Back to the till</a></p>
+<p class="np"><button onclick="print()">Print</button> <a href="{{ url_for('pos.close_till', till=sh.till_id) }}" target="_top">Back to the till</a></p>
 </div></body></html>

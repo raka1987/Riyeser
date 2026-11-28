@@ -103,3 +103,25 @@ def ensure_schema(db):
         id INTEGER PRIMARY KEY, till_id INTEGER REFERENCES pos_tills(id), kind TEXT NOT NULL,  -- sale, part, refund, no_sale, test, receipt
         ref TEXT, reason TEXT, user_id INTEGER REFERENCES users(id), approval_id INTEGER REFERENCES pos_approvals(id),
         ok INTEGER NOT NULL DEFAULT 0, error TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))""")
+    # ---- 2.11.1: cashier PINs at the till (riyeser/pos_pins.py), printers and the other till hardware
+    _add(db, "company", (("pos_cashier_settings", "TEXT"),    # JSON: pins auto/off, lock_minutes
+                         ("pos_receipt_settings", "TEXT"),    # JSON: logo, header lines, footer
+                         ("pos_scanner_settings", "TEXT")))   # JSON: prefix, suffix, capture, beep, unknown
+    db.execute("""CREATE TABLE IF NOT EXISTS pos_pin_fails (
+        id INTEGER PRIMARY KEY, device TEXT, target_id INTEGER REFERENCES users(id), till_id INTEGER, why TEXT,
+        at_epoch REAL NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))""")
+    db.execute("""CREATE TABLE IF NOT EXISTS pos_cashier_events (
+        id INTEGER PRIMARY KEY, kind TEXT NOT NULL,      -- unlock, lock, auto_lock, open_till
+        user_id INTEGER REFERENCES users(id), signed_in_id INTEGER REFERENCES users(id), till_id INTEGER,
+        created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))""")
+    _add(db, "pos_tills", (("receipt_printer", "TEXT"),                      # NULL = ask each time (Windows print box)
+                           ("paper_mm", "INTEGER NOT NULL DEFAULT 80"),       # 80 or 58
+                           ("print_after", "TEXT NOT NULL DEFAULT 'ask'"),    # always, ask, never
+                           ("receipt_copies", "INTEGER NOT NULL DEFAULT 1"),
+                           ("drawer_on", "TEXT"),                             # JSON: cash_sale, cash_refund, no_sale
+                           ("hw_setup_at", "TEXT"),                           # the first-time walkthrough was done
+                           ("print_layout", "TEXT")))                         # JSON: "Adjust print layout"
+    # 2.11.0 "print receipts straight to this printer" carries over as this till's receipt printer
+    db.execute("UPDATE pos_tills SET receipt_printer=drawer_printer WHERE receipt_printer IS NULL AND raw_receipts=1"
+               " AND drawer_printer IS NOT NULL")
+    _add(db, "pos_stations", (("printer", "TEXT"), ("paper_mm", "INTEGER NOT NULL DEFAULT 80"), ("print_layout", "TEXT")))

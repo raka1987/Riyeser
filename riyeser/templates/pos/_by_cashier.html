@@ -1,0 +1,4 @@
+{# Sales by cashier (POS 2.11.1): a table that scrolls inside its own box on a phone. rows from pos.cashier_totals #}
+<div class="tscroll bycash"><table class="t"><tr><th>Cashier</th><th class="r">Sales</th><th class="r">Total</th><th class="r">Refunds</th><th class="r">Net</th><th class="r">Voids</th><th class="r">No sale</th></tr>
+{% for c in rows %}<tr><td><b>{{ c.name }}</b></td><td class="r n">{{ c.sales }}</td><td class="r n">{{ c.total|money }}</td><td class="r n">{% if c.refunds %}−{{ c.refund_total|money }} <small class="muted">({{ c.refunds }})</small>{% else %}–{% endif %}</td><td class="r n"><b>{{ c.net|money }}</b></td><td class="r n">{{ c.voids or '–' }}</td><td class="r n">{{ c.no_sales or '–' }}</td></tr>
+{% else %}<tr><td colspan="7" class="none">No sales yet.</td></tr>{% endfor %}</table></div>

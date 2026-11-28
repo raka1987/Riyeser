@@ -32,7 +32,8 @@ table.t td.r,table.t th.r{text-align:right}
 <div class="page">
  {% if shift %}
   <div class="h1"><div><h1>Close {{ tname }}</h1><p>Opened {{ shift.opened_at[11:16] }} on {{ shift.opened_at[:10] }} by {{ opener.full_name or opener.username }} · float {{ shift.float_amount|money }}</p></div>
-    <a class="btn sm" href="{{ url_for('pos.shift_report', shid=shift.id) }}" target="_blank">Print mid-day report (X-read)</a></div>
+    <a class="btn sm" href="{{ url_for('pos.shift_report', shid=shift.id) }}" data-print>Print mid-day report (X-read)</a></div>
+  {% if not_yours %}<div class="flash warn" style="margin:0 0 14px" role="status">{{ not_yours }}</div>{% endif %}
   <form method="post" id="closeForm" class="g2">
     <input type="hidden" name="till" value="{{ till }}"><input type="hidden" name="approval_id" id="approvalId">
     <div class="card pd">
@@ -85,6 +86,8 @@ table.t td.r,table.t th.r{text-align:right}
       </div>
     </div>
   </form>
+  <div class="card" style="overflow:hidden;margin-top:18px"><div class="pd" style="padding-bottom:8px"><h2>Sales by cashier</h2><p class="h" style="margin:0">On {{ tname }} since it opened.</p></div>
+    {% with rows = by_cashier %}{% include "pos/_by_cashier.html" %}{% endwith %}</div>
  {% else %}
   <div class="card closed"><h1 style="margin:0;font-size:26px">{{ tname }} isn’t open</h1><p style="margin:0;color:var(--muted)">Open it from the Sell screen. You’ll count the float first.</p>
     <a class="btn go" href="{{ url_for('pos.register') }}">Go to Sell</a></div>
@@ -93,7 +96,7 @@ table.t td.r,table.t th.r{text-align:right}
     <table class="t"><tr><th>Closed</th><th>Till</th><th>By</th><th class="r">Counted</th><th class="r">Difference</th><th class="r"></th></tr>
     {% for h in history %}<tr><td class="n">{{ h.closed_at[:16] }}</td><td>{{ h.till_name }}</td><td>{{ h.full_name or h.username }}</td><td class="r n">{{ h.counted|money }}</td>
       <td class="r n">{% if h.variance %}<span class="badge warn">{{ '+' if h.variance > 0 }}{{ h.variance|money }}</span>{% else %}<span class="badge ok">Balanced</span>{% endif %}</td>
-      <td class="r"><a class="btn sm" href="{{ url_for('pos.shift_report', shid=h.id) }}" target="_blank">Z-report</a></td></tr>{% endfor %}</table></div>{% endif %}
+      <td class="r"><a class="btn sm" href="{{ url_for('pos.shift_report', shid=h.id) }}" data-print>Z-report</a></td></tr>{% endfor %}</table></div>{% endif %}
 </div>
 {% endblock %}
 {% block scripts %}

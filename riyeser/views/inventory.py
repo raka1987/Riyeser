@@ -55,8 +55,9 @@ def edit(iid=None):
     if item and item["has_variants"]:
         from .variants import _flags
         vflags = _flags(item)
+    prefill = None if item else (request.args.get("barcode") or "").strip()[:64] or None  # "add a product" from a scan
     return render_template("inventory/edit.html", item=item, defaults=defaults, categories=cats, has_photo=has_photo,
-                           suppliers=suppliers, vflags=vflags, **lookups(db))
+                           suppliers=suppliers, vflags=vflags, prefill_barcode=prefill, **lookups(db))
 
 
 @guarded
