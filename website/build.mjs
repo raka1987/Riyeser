@@ -253,8 +253,8 @@ const inclDetails = (key, name) => `<details class="incd"><summary>What's includ
 // ---------- screenshots: the real programs with a sample business (assets/shots, each also as -900.webp) ----------
 // Taken with sample data only ("Coral Coast Trading (sample)", Riyeser Link's "Sample Plumbing" demo): no real people or customers.
 const SHOTS = {
-  central: [['central-home', 1280, 800, 'Riyeser Central home screen in demo mode: tiles for Link, Invoices, Bookings, Books, POS, Payroll, Documents and PDF, with money owed, recent activity and shortcuts', 'Home screen, with money owed and recent activity'],
-    ['central-home-dark', 1280, 800, 'The same Riyeser Central home screen in the dark look', 'The dark look']],
+  central: [['central-home', 1280, 600, 'Riyeser Central home screen: a tile for each program with one live line (5 to file, 2 overdue, 3 today, Tue pay run), an Add a program tile, and reminders for overdue invoices, the pay run and online bookings', 'Home screen: your programs, each with what needs you'],
+    ['central-home-dark', 1280, 600, 'The same Riyeser Central home screen in the dark look', 'The dark look']],
   invoices: [['invoices-list', 1440, 675, 'Riyeser Invoices sales register listing open and overdue invoices for sample customers', 'Your invoices, with what is open and overdue'],
     ['invoices-invoice', 1440, 495, 'An overdue invoice in Riyeser Invoices with a part payment applied and buttons to download a PDF or receive a payment', 'An invoice with a part payment'],
     ['invoices-quote', 1032, 860, "An accepted quote, signed by the customer, with its valid-until date and buttons to make the invoice or a booking job", 'A quote the customer accepted']],
@@ -441,10 +441,10 @@ const DEMO = [
       ['pdf-tools', 21, 52, 'Combine, split, convert to Word or compress.']] },
   { id: 'central', label: 'Central', prog: 'central', finder: ['central'],
     head: 'Start your day knowing exactly what needs doing.', ticks: ['Free forever', "Today's meetings and to-dos, and money owed to you", 'Try every program with a sample business'],
-    steps: [['central-home', 39, 28, 'Every Riyeser program you have, one click away.'],
-      ['central-home', 73, 31, 'Money owed and overdue invoices, as soon as you open it.'],
-      ['central-home', 72, 50, 'Add a program: it installs and updates itself.'],
-      ['central-home', 82, 78, 'Shortcuts to the till, a new invoice, booking or pay run.']] },
+    steps: [['central-home', 15, 42, 'Every Riyeser program you have, one click away.'],
+      ['central-home', 43, 49, 'Each program shows what needs you: money owed, today\'s bookings, the next pay run.'],
+      ['central-home', 43, 69, 'Add a program: it installs and updates itself.'],
+      ['central-home', 35, 87, 'Quiet reminders only when there\'s something to say.']] },
 ];
 const SHOT_DIM = Object.fromEntries(Object.values(SHOTS).flat().map(([f, w, h, alt]) => [f, { w, h, alt }]));
 for (const d of DEMO) {
@@ -675,7 +675,7 @@ INDUSTRIES.push(
       ['documents', ['Scan, file and find receipts and papers', 'Find any document by a word inside it', 'Free forever']],
       ['invoices', ['Unlimited quotes, invoices, customers and payments', 'Turn an accepted quote into an invoice in one click', 'Print or save any invoice as a PDF', 'Free forever']],
       ['pdf', ['Fill in and sign forms', 'Combine, split and reorder pages', 'Free forever']]] },
-  { id: 'appointments', name: 'Appointment businesses', icon: 'calendar', photo: null, short: 'Staff calendars, online bookings and reminder emails.',
+  { id: 'appointments', name: 'Appointment businesses', icon: 'calendar', photo: 'appointments-calendar.webp', short: 'Staff calendars, online bookings and reminder emails.',
     title: 'Appointment Businesses', lead: 'Salons, studios and other businesses that work by appointment: every booking on one calendar, from one Windows PC.',
     h: 'Every appointment on one calendar', p: 'See each person\'s day and week with double-booking warnings, let customers book online from your website or your own riyeser.com booking page (beta), and send reminder emails the day before.',
     shot: 'shots/bookings-week.webp', shotName: 'Riyeser Bookings', shotApp: 'bookings', shotW: 1440, shotH: 585, cta: ['bookings', 'Explore Bookings'],
@@ -989,7 +989,7 @@ ${homeStrip(up)}
       return `<li><a href="${up}programs/${id}.html"><img src="${up}assets/apps/${id}.png" alt="" width="44" height="44"><b><small>Riyeser</small>${esc(p.short)}</b><span class="fbadge">Free</span></a></li>`; }).join('')}</ul></div>
   <div class="duo-sys"><h2>One connected system</h2><div class="duo-row"><div class="duo-t"><p>Your programs share one company file, and every one opens from Riyeser Central.</p>
     <a class="more" href="${up}features.html">See what works today ${ARR}</a></div>
-    <img src="${up}assets/shots/central-home-900.webp" srcset="${up}assets/shots/central-home-900.webp 900w, ${up}assets/shots/central-home.webp 1280w" sizes="(max-width: 900px) 92vw, 340px" width="1280" height="800" alt="Riyeser Central home screen in demo mode, with a tile for each Riyeser program" loading="lazy"></div></div>
+    <img src="${up}assets/shots/central-home-900.webp" srcset="${up}assets/shots/central-home-900.webp 900w, ${up}assets/shots/central-home.webp 1280w" sizes="(max-width: 900px) 92vw, 340px" width="1280" height="600" alt="Riyeser Central home screen: a tile for each program with what needs you, and an Add a program tile" loading="lazy"></div></div>
 </div></section>
 
 <section class="c tp-sec" aria-labelledby="tp-h"><h2 class="sr-only" id="tp-h">Why businesses choose Riyeser</h2><ul class="tpoints">
