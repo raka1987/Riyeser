@@ -462,7 +462,7 @@ def post_document(db, doc_id):
         if l["item_id"]:
             cogs.append(l)
     for acct, amt in tax_by_acct.items():
-        jl.append(dict(account_id=acct, debit=0 if sale else amt, credit=amt if sale else 0, memo="GST"))
+        jl.append(dict(account_id=acct, debit=0 if sale else amt, credit=amt if sale else 0, memo=tax_word(db)))
     jl.append(dict(account_id=control, debit=doc["total"] if sale else 0, credit=0 if sale else doc["total"],
                    memo=doc["number"]))
     contact = db.execute("SELECT name FROM contacts WHERE id=?", (doc["contact_id"],)).fetchone()
@@ -732,7 +732,7 @@ def bank_transaction(db, kind, bank_account_id, date, lines, payee=None, referen
     if not total:
         raise PostingError("Enter at least one amount.")
     for acct, amt in tax_by_acct.items():
-        jl.append(dict(account_id=acct, debit=amt if spend else 0, credit=0 if spend else amt, memo="GST"))
+        jl.append(dict(account_id=acct, debit=amt if spend else 0, credit=0 if spend else amt, memo=tax_word(db)))
     jl.append(dict(account_id=bank_account_id, debit=0 if spend else total, credit=total if spend else 0,
                    memo=payee))
     m = memo or (f"{'Spend' if spend else 'Receive'} money: {payee or ''}").strip()
@@ -749,6 +749,18 @@ def transfer(db, from_id, to_id, date, amount, memo=None):
                      [dict(account_id=to_id, debit=amount), dict(account_id=from_id, credit=amount)])
     audit(db, "transfer", fmt_money(amount))
     return eid
+
+
+def labels_for(db):
+    """The open company file's tax words (riyeser/countries.py labels): GST, VAT, Sales tax... ("Tax" if none)."""
+    from .countries import labels
+    co = db.execute("SELECT * FROM company WHERE id=1").fetchone()
+    return labels(co or {})
+
+
+def tax_word(db):
+    """The memo on a tax line in the books and the tax accounts' name in messages: GST, VAT, Sales tax..."""
+    return labels_for(db)["tax"]
 
 
 def control_accounts(db):
@@ -780,8 +792,11 @@ def check_journal_lines(db, lines, gst_ok=False):
     for l in lines:
         hit = ctl.get(l.get("account_id"))
         if hit and (l.get("debit") or l.get("credit")) and not (gst_ok and hit[0] == "GST"):
-            extra = " (or tick \"This is a GST adjustment\")" if hit[0] == "GST" else ""
-            raise PostingError(f"A journal can't post to the {hit[0]} control account: use {hit[1]}{extra}.")
+            what, extra = hit[0], ""
+            if hit[0] == "GST":   # the tax accounts: named as this company's tax (GST, VAT, sales tax)
+                what = tax_word(db)
+                extra = f" (or tick \"This is a {labels_for(db)['word']} adjustment\")"
+            raise PostingError(f"A journal can't post to the {what} control account: use {hit[1]}{extra}.")
 
 
 def general_journal(db, date, memo, lines, reference=None):

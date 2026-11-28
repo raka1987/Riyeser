@@ -55,14 +55,18 @@ def path_of(cid):
 
 
 def _details(path):
-    """Name and ABN straight from a company file (read-only, quick)."""
+    """Name and ABN (the tax number, with its country's label) straight from a company file (read-only, quick)."""
     try:
         con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        con.row_factory = sqlite3.Row
         try:
-            r = con.execute("SELECT name, abn FROM company WHERE id=1").fetchone()
+            r = con.execute("SELECT * FROM company WHERE id=1").fetchone()
         finally:
             con.close()
-        return {"name": r[0], "abn": r[1]} if r else None
+        if not r:
+            return None
+        from .countries import labels
+        return {"name": r["name"], "abn": r["abn"], "tax_id": labels(r)["tax_id"]}
     except sqlite3.Error:
         return None
 

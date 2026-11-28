@@ -24,9 +24,11 @@
 
 <div class="card"><h3>How customers pay you</h3><p class="muted">Printed as "How to pay" on invoices and statements.</p><div class="fields">
 <div><label for="bank_account_name">Account name</label><input id="bank_account_name" name="bank_account_name" value="{{ co.bank_account_name or '' }}"></div>
-<div><label for="bank_name">Bank</label><input id="bank_name" name="bank_name" value="{{ co.bank_name or '' }}"></div>
-<div><label for="bank_bsb">BSB</label><input id="bank_bsb" name="bank_bsb" value="{{ co.bank_bsb or '' }}"></div>
-<div><label for="bank_account_no">Account number</label><input id="bank_account_no" name="bank_account_no" value="{{ co.bank_account_no or '' }}"></div>
+{% set bl = bank_labels %}<div><label for="bank_name">{{ bl.bank }}</label><input id="bank_name" name="bank_name" value="{{ co.bank_name or '' }}"></div>
+{% if bl.branch or co.bank_bsb %}<div><label for="bank_bsb">{{ bl.branch or 'Bank / branch code' }}</label><input id="bank_bsb" name="bank_bsb" value="{{ co.bank_bsb or '' }}"{% if bl.branch_hint %} placeholder="{{ bl.branch_hint }}"{% endif %}></div>{% endif %}
+<div><label for="bank_account_no">{{ bl.account }}</label><input id="bank_account_no" name="bank_account_no" value="{{ co.bank_account_no or '' }}"{% if bl.account_hint %} placeholder="{{ bl.account_hint }}"{% endif %}></div>
+{% if bl.swift or co.bank_swift %}<div><label for="bank_swift">{{ bl.swift or 'SWIFT / BIC' }} <span class="muted">(optional)</span></label><input id="bank_swift" name="bank_swift" value="{{ co.bank_swift or '' }}" maxlength="11" autocapitalize="characters" placeholder="For payments from overseas"></div>{% endif %}
+{% if bl.iban or co.bank_iban %}<div><label for="bank_iban">IBAN <span class="muted">(optional)</span></label><input id="bank_iban" name="bank_iban" value="{{ co.bank_iban or '' }}" maxlength="34" autocapitalize="characters"></div>{% endif %}
 <div class="wide"><label for="payment_instructions">Other payment instructions</label><input id="payment_instructions" name="payment_instructions" value="{{ co.payment_instructions or '' }}" placeholder="e.g. Please use the invoice number as the reference"></div></div></div>
 
 <div class="card"><h3>Footer notes</h3><p class="muted">A short note at the bottom of each kind of document. Leave one empty for none.</p><div class="fields">

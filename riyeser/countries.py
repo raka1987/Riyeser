@@ -99,6 +99,7 @@ def ensure_schema(db):
     for col, ddl in COLUMNS + (("tax_name", "TEXT NOT NULL DEFAULT 'GST'"), ("date_format", "TEXT NOT NULL DEFAULT 'iso'")):
         if col not in have:
             db.execute(f"ALTER TABLE company ADD COLUMN {col} {ddl}")
+    ensure_bank_schema(db)
 
 
 def _get(c, key):
@@ -123,10 +124,59 @@ def labels(company):
         LEGACY["tax_report_name"] if not chosen else f"{tax} return summary" if taxed else "Tax summary")
     layout = _get(company, "tax_report_layout") or ("bas" if not chosen else "generic")
     office = (_get(company, "tax_office") or "").strip() or (LEGACY["tax_office"] if not chosen else "the tax office")
+    au = not chosen or _get(company, "country") == "AU"
+    word = tax if tax.isupper() else tax[:1].lower() + tax[1:]     # mid-sentence: GST, VAT, sales tax
     return {"tax": tax, "has_tax": taxed, "tax_id": tax_id, "report": report, "layout": layout, "office": office,
             "invoice": "Tax Invoice" if taxed else "Invoice",
-            "credit": "Adjustment Note" if not chosen or _get(company, "country") == "AU" else "Credit Note",
-            "registered": f"Registered for {tax}" if taxed else "Registered for tax"}
+            "credit": "Adjustment Note" if au else "Credit Note",
+            "registered": f"Registered for {tax}" if taxed else "Registered for tax",
+            # screen labels (empty where there's no tax, so a label reads "Price", "Total", never "including none")
+            "word": word if taxed else "tax",
+            "incl": f"including {word}" if taxed else "",                        # Total (including VAT)
+            "inc": ("inc GST" if au and tax == "GST" else f"incl. {word}") if taxed else "",   # Price (incl. VAT)
+            "ex": ("ex GST" if au and tax == "GST" else f"excl. {word}") if taxed else "",     # Selling price (excl. VAT)
+            "summary": ("GST summary" if au and tax == "GST" else f"{tax} summary") if taxed else "",
+            "prices_incl": bool(_get(company, "prices_include_tax")),
+            "bas": layout == "bas"}
+
+
+# ---------------------------------------------------------------- bank details: the words for each country
+# The company file keeps its existing columns (bank_name, bank_bsb, bank_account_no) whatever the country; only the
+# labels change. bank_bsb holds the BSB (Australia) or the branch / sort / routing code elsewhere. Two optional
+# columns (bank_swift, bank_iban) are added for payers overseas and for countries that use an IBAN.
+IBAN_COUNTRIES = frozenset("""AD AE AL AT AZ BA BE BG BH BR BY CH CR CY CZ DE DK DO EE EG ES FI FO FR GB GE GI GL GR GT
+    HR HU IE IL IQ IS IT JO KW KZ LB LC LI LT LU LV LY MC MD ME MK MR MT MU NL NO PK PL PS PT QA RO RS SA SC SD SE SI SK
+    SM ST SV TL TN TR UA VA VG XK BI DJ FK MN NI OM RU SO YE""".split())
+BANK_COLUMNS = (("bank_swift", "TEXT"), ("bank_iban", "TEXT"))
+BRANCH_LABELS = {"GB": "Sort code", "IE": "Sort code", "US": "Routing number (ABA)", "CA": "Transit and institution number",
+                 "IN": "IFSC", "ZA": "Branch code", "JP": "Branch code"}
+
+
+def ensure_bank_schema(db):
+    have = {r["name"] for r in db.execute("PRAGMA table_info(company)")}
+    for col, ddl in BANK_COLUMNS:
+        if col not in have:
+            db.execute(f"ALTER TABLE company ADD COLUMN {col} {ddl}")
+
+
+def bank_labels(company):
+    """The bank fields this company's country uses, for Business details, payslips and "How to pay" on documents.
+    scheme: au (BSB + account number; also every file that never chose a country), nz (one account number:
+    bank-branch-account-suffix) or intl (bank, branch / sort code, account number, SWIFT/BIC, and IBAN where used).
+    A label of None means the field isn't asked for (it's still shown when it already holds something)."""
+    cc = (_get(company, "country") or "").upper()
+    if not cc or cc == "AU":
+        return {"scheme": "au", "bank": "Bank", "branch": "BSB", "branch_hint": "e.g. 062-000",
+                "account": "Account number", "account_hint": "", "swift": None, "iban": None, "short_branch": "BSB",
+                "short_account": "Acc"}
+    if cc == "NZ":
+        return {"scheme": "nz", "bank": "Bank", "branch": None, "branch_hint": "", "account": "Account number",
+                "account_hint": "Bank, branch, account and suffix, e.g. 12-3456-0123456-00", "swift": None,
+                "iban": None, "short_branch": "Branch", "short_account": "Account"}
+    return {"scheme": "intl", "bank": "Bank name", "branch": BRANCH_LABELS.get(cc, "Branch / sort code"),
+            "branch_hint": "", "account": "Account number", "account_hint": "", "swift": "SWIFT / BIC",
+            "iban": "IBAN" if cc in IBAN_COUNTRIES else None, "short_branch": BRANCH_LABELS.get(cc, "Branch"),
+            "short_account": "Account"}
 
 
 def money_format(company):
@@ -460,6 +510,10 @@ def request_money(cents, blank_zero=False):
 
 def request_labels():
     return labels(_open_company() or {})
+
+
+def request_bank():
+    return bank_labels(_open_company() or {})
 
 
 def request_date(v):

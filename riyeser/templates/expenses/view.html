@@ -14,7 +14,7 @@
 <tr><td class="muted">Date paid</td><td>{{ x.date }}</td></tr>
 <tr><td class="muted">Where from</td><td>{{ x.supplier or '—' }}</td></tr>
 <tr><td class="muted">What for</td><td>{{ x.aname or '—' }}{% if can('accounts') and x.acode %} <span class="muted">({{ x.acode }})</span>{% endif %}</td></tr>
-<tr><td class="muted">Amount</td><td><b>{{ x.amount|money }}</b>{% if x.gst %} including {{ x.gst|money }} GST{% endif %}</td></tr>
+<tr><td class="muted">Amount</td><td><b>{{ x.amount|money }}</b>{% if x.gst %} including {{ x.gst|money }} {{ tl.word }}{% endif %}</td></tr>
 {% if x.note %}<tr><td class="muted">Note</td><td style="white-space:pre-wrap">{{ x.note }}</td></tr>{% endif %}
 <tr><td class="muted">Sent</td><td>{{ x.created_at }}</td></tr>
 {% if x.decided_at %}<tr><td class="muted">{{ 'Declined' if x.status == 'declined' else 'Approved' }}</td><td>{{ x.decided_at }}{% if x.dfull or x.dname %} by {{ x.dfull or x.dname }}{% endif %}</td></tr>{% endif %}

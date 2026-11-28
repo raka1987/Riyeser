@@ -16,7 +16,7 @@ table{width:100%;border-collapse:collapse}td{padding:1px 0;vertical-align:top}td
 <tr><td>Refunds ({{ fig.refunds }})</td><td class="n">-{{ (fig.refund_cash + fig.refund_card)|money }}</td></tr>
 <tr><td>Voids ({{ fig.voids }})</td><td class="n">{{ fig.void_total|money }}</td></tr>
 <tr><td>Discounts given</td><td class="n">{{ fig.discounts|money }}</td></tr>
-<tr><td>GST included</td><td class="n">{{ fig.gst|money }}</td></tr>
+{% if tl.has_tax %}<tr><td>{{ tl.tax }} included</td><td class="n">{{ fig.gst|money }}</td></tr>{% endif %}
 </table><hr>
 <table>
 <tr><td>Float</td><td class="n">{{ fig.float|money }}</td></tr>

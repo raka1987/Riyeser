@@ -8,7 +8,7 @@
     <p class="youare">✓ This is what you're using</p></div>
   <div class="card ed ed-basic"><div class="edlogo">B</div><h2>{{ editions.basic.title }}</h2><p class="edprice">Free for 90 days, then {{ prices.basic }} a month per business</p>
     <ul><li>Everything in Riyeser Invoices</li><li>Suppliers and bills</li><li>Stock items, stocktake and reorder alerts</li><li>Simple money in and money out</li>
-    <li>Profit &amp; Loss, GST summary, sales and stock reports</li><li>Works with Riyeser POS, the till app</li></ul></div>
+    <li>Profit &amp; Loss, {{ tl.summary ~ ', ' if tl.has_tax }}sales and stock reports</li><li>Works with Riyeser POS, the till app</li></ul></div>
 </div>
 <div class="card">
   <h3>Move up to {{ editions.basic.title }}</h3>

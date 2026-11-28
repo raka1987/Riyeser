@@ -29,7 +29,7 @@
 <p class="muted" style="margin:4px 0 0;font-size:12.5px">Leave empty for 30 days. After this date the quote shows as Expired.</p></div>{% endif %}
 <div><label for="doc-reference">{{ 'Customer PO' if side=='sale' else 'Supplier invoice #' }}</label><input id="doc-reference" name="reference" value="{{ doc.reference or '' if doc }}"></div>
 {% if kind != 'credit' %}<div><label for="doc-status">Save as</label><select id="doc-status" name="status">{% for k, v in [('open', L.doc ~ ' (post to ledger)'),('order','Order'),('quote','Quote')] %}<option value="{{ k }}" {{ 'selected' if st==k }}>{{ v }}</option>{% endfor %}</select></div>{% endif %}
-<label class="check"><input type="checkbox" name="tax_inclusive" id="tax_inclusive" value="1" {{ 'checked' if (doc.tax_inclusive if doc else company.prices_include_tax) }}> Prices include {{ tl.tax }}</label>
+<label class="check"{% if not tl.has_tax %} style="display:none"{% endif %}><input type="checkbox" name="tax_inclusive" id="tax_inclusive" value="1" {{ 'checked' if (doc.tax_inclusive if doc else company.prices_include_tax) }}> Prices include {{ tl.word }}</label>
 </div></div>
 <div class="card"><table class="lines" id="lines"><thead><tr><th style="width:110px">Item</th><th>Description</th><th class="n">Qty</th><th class="n">Price</th><th class="n">Disc</th><th style="width:220px">Account</th><th>Tax</th><th>Job</th><th class="n">Amount</th><th></th></tr></thead>
 <tbody>{% if lines %}{% for l in lines %}{{ row(l, loop.index) }}{% endfor %}{% else %}{{ row(None, 1) }}{{ row(None, 2) }}{{ row(None, 3) }}{% endif %}</tbody></table>

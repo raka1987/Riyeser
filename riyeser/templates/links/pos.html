@@ -1,7 +1,7 @@
 {% extends "base.html" %}{% block title %}Riyeser POS{% endblock %}
 {% block content %}
 <div class="head"><div><h1>Riyeser POS</h1>
-<p class="sub">The shop counter is now its own app, <b>Riyeser POS</b>. It opens this same company file, so every sale shows here straight away as a paid invoice, and stock and GST stay right.</p></div></div>
+<p class="sub">The shop counter is now its own app, <b>Riyeser POS</b>. It opens this same company file, so every sale shows here straight away as a paid invoice, and stock{{ ' and ' ~ tl.word if tl.has_tax }} stay{{ 's' if not tl.has_tax }} right.</p></div></div>
 <div class="card" style="display:flex;gap:20px;align-items:center;flex-wrap:wrap">
   <div class="poslogo" aria-hidden="true">Po</div>
   <div style="flex:1;min-width:260px">

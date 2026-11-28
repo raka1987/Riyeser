@@ -218,7 +218,8 @@ def create_app(test_config=None):
                     my_companies=mine, current_company=co.current_id() if g.get("user") else None,
                     over_allowance=g.get("over_allowance"), company_allowance=co.allowance() if g.get("user") else None,
                     can=lambda area, need=1: perms.can(area, need), lv=lambda area: perms.level(area),
-                    report_area=perms.report_area, prices=dbmod.PRICES, tl=_countries.request_labels())
+                    report_area=perms.report_area, prices=dbmod.PRICES, tl=_countries.request_labels(),
+                    bank_labels=_countries.request_bank())
 
     @app.errorhandler(403)
     def forbidden(_e):

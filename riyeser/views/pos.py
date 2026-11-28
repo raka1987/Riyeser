@@ -12,6 +12,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, abort, g, current_app
 
 from ..db import get_db, linked, round_cents, audit, to_cents, write_txn
+from ..ledger import tax_word
 from ..ledger import save_document, record_payment, void_payment, void_document, post_entry, stock_in, tax_code, \
     PostingError
 from . import guarded, opt_int
@@ -934,7 +935,7 @@ def _post_card_extras(db, txn, today, number, contact_id):
                           memo="Card surcharge"))
         if gst:
             lines.append(dict(account_id=tc["collected_account_id"] or linked(db, "gst_collected"), credit=gst,
-                              memo="GST on card surcharge"))
+                              memo=f"{tax_word(db)} on card surcharge"))
     return post_entry(db, today, f"POS card extras {number}", "pos_card_extra", lines, source_id=txn["id"],
                       reference=number, contact_id=contact_id)
 
@@ -1327,7 +1328,7 @@ def refund(sid):
             if t:
                 tc = tax_code(db, l["tax_code_id"])
                 jl.append(dict(account_id=(tc["collected_account_id"] if tc else None) or linked(db, "gst_collected"),
-                               debit=t, memo="GST refund"))
+                               debit=t, memo=f"{tax_word(db)} refund"))
             total, tax = total + net + t, tax + t
             if l["item_id"]:
                 stock.append((l, q))

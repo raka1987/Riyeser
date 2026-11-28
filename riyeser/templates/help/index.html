@@ -5,15 +5,15 @@
 <div class="card toc">{% for k, t in [('start','Getting started'),('sales','Invoices & customers'),('stock','Stock & suppliers'),('pos','Riyeser POS'),('banking','Money & banking'),('expenses','Expense claims'),('payroll','Payroll'),('reports','Reports'),('accounts','Accounts & journals'),('setup','Setup & editions'),('users','Users & passwords'),('modules','Other Riyeser modules'),('trouble','Troubleshooting')] %}<a href="#{{ k }}">{{ t }}</a>{% endfor %}</div>
 <div class="help">
 <div class="card"><h2 id="start">Getting started</h2><ol>
-<li><b>Setup → Company</b>: enter your business name, ABN, address and when your financial year starts.</li>
-<li><b>Setup → Country &amp; tax</b>: choose your country to fill in its tax (GST, VAT…), tax number label, rate and codes, currency, dates and time zone. You check every value and press <b>Confirm these settings</b>; rates are a starting point, so check them with your accountant or tax office.</li>
+<li><b>Setup → Company</b>: enter your business name, {{ tl.tax_id }}, address and when your financial year starts.</li>
+<li><b>Setup → Country &amp; tax</b>: choose your country to fill in its tax ({{ 'GST, VAT…' if tl.bas else 'VAT, sales tax…' }}), tax number label, rate and codes, currency, dates and time zone. You check every value and press <b>Confirm these settings</b>; rates are a starting point, so check them with your accountant or tax office.</li>
 <li>Add your <b>customers</b> and <b>suppliers</b>, and your <b>stock items</b> with buy and sell prices.</li>
 <li>Already trading? Enter opening balances: <b>Setup → Accounts</b> for bank balances, and opening quantity and cost on each new stock item.</li>
 <li>Start invoicing. <b>Today</b>, the home screen, shows today's sales, money in this week, unpaid invoices (overdue first), bills due, low stock, today's bookings and the calls you said you'd make. It only shows what your Riyeser app has, and what your user is allowed to see. <b>Business overview</b> (on Today) has the year's figures, bank balances and recent transactions.</li></ol>
 <p class="muted">Every transaction is double-entry, so the reports always balance. You never type debits and credits for normal work.</p></div>
 
 <div class="card"><h2 id="sales">Invoices &amp; customers</h2><ul>
-<li><b>New Invoice</b>: choose a customer, then add lines. Picking a stock item fills in the price, account and GST. Tick <b>Prices include GST</b> if your prices are GST-inclusive.</li>
+<li><b>New Invoice</b>: choose a customer, then add lines. Picking a stock item fills in the price, account{{ ' and ' ~ tl.word if tl.has_tax }}.{% if tl.has_tax %} Tick <b>Prices include {{ tl.word }}</b> if your prices {{ 'are GST-inclusive' if tl.tax == 'GST' else 'include ' ~ tl.word }}.{% endif %}</li>
 <li><b>Save as</b> lets you keep a <b>Quote</b> or <b>Order</b>. Open it later and press <b>Convert to invoice</b>.</li>
 <li><b>Quotes</b>: each quote has a <b>Valid until</b> date (30 days unless you choose another), printed on its PDF. Open the quote and press <b>Mark accepted</b> when the customer says yes (type their name as a signature if you like) or <b>Declined</b> if they say no. A quote still waiting after its date shows as <b>Expired</b>. Under <b>Quotes</b>, the Waiting, Accepted, Declined and Expired buttons show just those.</li>
 <li>From an accepted quote, <b>Make the invoice</b> copies its lines onto a new invoice (the quote is kept as it was). If you use Riyeser Bookings, <b>Make a booking job</b> adds a job there with the customer, their address and the quote's lines and price, ready to book a time. Invoicing that job uses the quote's lines, so nothing is charged twice.</li>
@@ -36,15 +36,15 @@
 {% include "help/_pos_card.html" %}
 
 <div class="card"><h2 id="banking">Money &amp; banking</h2><ul>
-<li><b>Money Out</b> / <b>Money In</b>: payments and deposits that aren't for an invoice or bill (rent, bank fees, interest). Amounts include GST unless you untick it.</li>
+<li><b>Money Out</b> / <b>Money In</b>: payments and deposits that aren't for an invoice or bill (rent, bank fees, interest). {% if tl.has_tax %}Amounts include {{ tl.word }} unless you untick it.{% endif %}</li>
 <li><b>Bank Reconciliation</b> ({{ editions.enterprise.name }}): enter your statement's closing balance and tick the transactions that appear on it until the difference is $0.00.</li>
 <li><b>Bank Statement Import</b> ({{ editions.enterprise.name }}): load a CSV from your bank, then allocate each line to an account in one click.</li>
 <li><b>Banking your cash takings</b>: use <b>Transfer Money</b> from <i>Undeposited Funds</i> to your bank account when you deposit the till cash.</li></ul></div>
 
 <div class="card"><h2 id="expenses">Expense claims</h2><ul>
-<li>For {{ editions.basic.title }} and {{ editions.enterprise.title }}. When staff pay for something for the business with their own money (fuel, parts, a train fare), they claim it back under <b>Expense claims → New expense claim</b>: the date, where from, what it was for, the amount including GST, the GST on the receipt, a note, and a photo or PDF of the receipt.</li>
+<li>For {{ editions.basic.title }} and {{ editions.enterprise.title }}. When staff pay for something for the business with their own money (fuel, parts, a train fare), they claim it back under <b>Expense claims → New expense claim</b>: the date, where from, what it was for, the amount{{ ' ' ~ tl.incl ~ ', the ' ~ tl.word ~ ' on the receipt' if tl.has_tax }}, a note, and a photo or PDF of the receipt.</li>
 <li>A manager sees the claims <b>Waiting</b>, checks the receipt, and presses <b>Approve</b> or <b>Decline</b> (with a reason the staff member can read).</li>
-<li>Approving puts it in the books: choose <b>Owe it to them</b> to make a bill payable to the staff member (pay it under <b>Pay bills</b>; the claim then shows <b>Paid</b>), or <b>Already paid them back</b> to record the money paid out of a bank account. The expense and its GST go in the account chosen, so it's on the GST report.</li>
+<li>Approving puts it in the books: choose <b>Owe it to them</b> to make a bill payable to the staff member (pay it under <b>Pay bills</b>; the claim then shows <b>Paid</b>), or <b>Already paid them back</b> to record the money paid out of a bank account. {% if tl.has_tax %}The expense and its {{ tl.word }} go in the account chosen, so it's on the {{ 'GST report' if tl.bas else tl.report }}.{% else %}The expense goes in the account chosen.{% endif %}</li>
 <li>Who can do what is set under <b>Setup → Users &amp; roles</b>, area <b>Expense claims</b>: <i>Add &amp; edit</i> lets someone claim their own; <i>Full</i> lets them see everyone's and approve. People who aren't administrators can't approve their own claims.</li></ul></div>
 
 <div class="card"><h2 id="payroll">Payroll</h2><ul>
@@ -54,7 +54,7 @@
 <div class="card"><h2 id="reports">Reports</h2><ul>
 <li>Every report can be filtered by date, printed and exported to CSV. Click a line to drill down to the transactions behind it.</li>
 <li><b>Who Owes Me</b> (aged receivables) groups unpaid invoices by how overdue they are.</li>
-<li><b>GST Summary</b> shows the figures for your BAS: G1, 1A, 1B and so on.</li>
+{% if tl.bas %}<li><b>GST Summary</b> shows the figures for your BAS: G1, 1A, 1B and so on.</li>{% elif tl.has_tax %}<li><b>{{ tl.report }}</b> shows your sales and purchases with the {{ tl.word }} on each, and what's payable to (or refundable from) {{ tl.office }}. Check the figures with your accountant before you file.</li>{% endif %}
 <li><b>Inventory Report</b> shows what's on hand at average cost. Its total should match the Inventory account; Support Diagnostics checks this for you.</li></ul></div>
 
 <div class="card"><h2 id="accounts">Accounts &amp; journals</h2><ul>
@@ -68,7 +68,7 @@
 {% if product.separate %}<li><b>{{ editions.basic.app }}</b> and <b>{{ editions.enterprise.app }}</b> are two separate apps (green and blue) that open the same company files. To move up or down, open <a href="{{ url_for('core.upgrade') }}">Basics or Plus</a> under Setup and install the other app: it replaces this one and your books carry straight over. Plus-only records are kept safe in Basics and come back in Plus.</li>
 <li>If the free trial ends without a licence, {{ editions.enterprise.title }} keeps your everyday screens working and locks the Plus-only screens (nothing is removed) until you enter a licence in Riyeser Central.</li>
 {% else %}<li>Switch any time under <b>Setup → Company → Edition</b>. Your data never changes. If the trial ends without a licence, companies open in {{ editions.basic.name }}; enter a licence in Riyeser Central and {{ editions.enterprise.name }} comes back with everything as you left it.</li>{% endif %}
-<li><b>Lock periods up to</b> stops anyone posting into a finished period, for example after your BAS is lodged.</li>
+<li><b>Lock periods up to</b> stops anyone posting into a finished period, for example after your {{ 'BAS is lodged' if tl.bas else tl.word ~ ' return is filed' }}.</li>
 <li><b>Riyeser folder</b>: tick <i>Save a PDF of every invoice and bill</i> to file copies in Documents\Riyeser for Riyeser Desk Assistant.</li></ul></div>
 
 <div class="card"><h2 id="users">Users &amp; passwords</h2><ul>

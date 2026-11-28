@@ -5,6 +5,7 @@ from datetime import date
 from flask import Blueprint, render_template, request, redirect, url_for, flash, abort, g, Response
 
 from ..db import get_db, to_cents, linked, audit
+from ..countries import labels
 from .. import pdf as pdfmod
 from ..ledger import save_document, convert_document, void_document, record_payment, void_payment, add_days, \
     PostingError, credits_for, apply_credit, refund_credit, credit_available
@@ -203,8 +204,9 @@ def _save(side, doc_id):
     flash(f"{doc['number']} saved.", "ok")
     if side == "sale" and kind == "invoice" and status == "open" and not doc["tax_total"] \
             and g.company.get("gst_registered", 1):
-        flash(f"{doc['number']} has no GST on it. If it should, void it and enter it again with the GST tax code.",
-              "warn")  # S14
+        tl = labels(g.company)
+        flash(f"{doc['number']} has no {tl['word']} on it. If it should, void it and enter it again with the "
+              f"{tl['tax']} tax code.", "warn")  # S14
     if status == "open":
         _auto_pdf(db, did)
     return redirect(url_for("documents.view", doc_id=did))
