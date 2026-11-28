@@ -152,6 +152,7 @@
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && v2.classList.contains('open')) { drawer(false); mb.focus(); } });
     app.querySelector('#so2v').onclick = () => X.signOut();
     const das = app.querySelector('#demoAs2'); if (das) das.onchange = async () => { X.api.asStaff(das.value); await X.loadMe(); X.closePanel(); X.remount(); };
+    if (matchMedia('(max-width: 640px)').matches) app.querySelector('#q2').placeholder = 'Search customers or pages';   // nothing cut off on a phone
     searchBox(app);
   }
   // Top search: pages by name as you type; Enter searches customers (name, Company ID, ABN, phone or email) like the current HQ.
