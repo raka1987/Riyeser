@@ -9,7 +9,8 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "UNLICENSED",
+  "copyright": "Copyright © 2026 Riyeser. All rights reserved.",
   "dependencies": {
     "@tesseract.js-data/eng": "^1.0.0",
     "exceljs": "^4.4.0",

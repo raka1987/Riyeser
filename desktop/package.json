@@ -2,6 +2,8 @@
   "name": "riyeser-payroll-desktop",
   "private": true,
   "description": "Builds Riyeser Payroll as a Windows desktop program",
+  "license": "UNLICENSED",
+  "copyright": "Copyright © 2026 Riyeser. All rights reserved.",
   "scripts": {
     "build": "node prepare.js && electron-builder --projectDir build/app --win nsis portable --x64",
     "start": "node prepare.js && electron build/app"
