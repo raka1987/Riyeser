@@ -2935,43 +2935,39 @@ do $$ declare a uuid := current_setting('pay.a')::uuid; begin
   exception when others then assert sqlerrm like 'Rows in billing_payments are never deleted%', sqlerrm; end;
 end $$;
 set role authenticated;
--- the Billing entity: finance fills it in (with bank details); old invoices keep the old details, new ones get the new
+-- the Billing entity: ONLY the HQ Owner enters or changes it (SEC-011, the owner's decision); old invoices keep the old
+-- details, new ones get the new. Finance is refused; the Owner's change is in force straight away and in the HQ history.
 select pg_temp.as_user('b1b1b1b1-0000-4000-8000-000000000005');
-select public.hq_set_billing_entity('{"name": "Riyeser Pty Ltd", "address": "1 George St, Sydney NSW", "tax_label": "", "tax_number": "12 345 678 901",
-  "email": "accounts@riyeser.test", "bank": {"account_name": "Riyeser Pty Ltd", "bank_name": "Westpac", "bsb": "032-000", "account_number": "123456", "junk": "x"}}');
--- SEC-011: it's only proposed: a different HQ person must approve it (two-person rule)
-do $$ declare h json := public.hq_billing(); begin
-  assert not (h ->> 'bank_ready')::boolean and h -> 'entity' ->> 'name' = 'Riyeser', 'not in force yet';
-  assert h -> 'entity_pending' -> 'details' -> 'bank' ->> 'bsb' = '032-000' and (h -> 'entity_pending' ->> 'mine')::boolean
-     and h -> 'entity_pending' ->> 'proposed_by' = 'Fina', 'shown waiting, proposed by Fina';
-  perform set_config('pay.chg', h -> 'entity_pending' ->> 'id', false);
-  begin perform public.hq_billing_entity_decide((h -> 'entity_pending' ->> 'id')::bigint, true); raise exception 'approved own change';
-  exception when others then assert sqlerrm like 'Someone else in Riyeser HQ has to approve%', sqlerrm; end;
-end $$;
--- the same again changes nothing (one waiting change)
-select public.hq_set_billing_entity('{"name": "Riyeser Pty Ltd", "address": "1 George St, Sydney NSW", "tax_label": "", "tax_number": "12 345 678 901",
-  "email": "accounts@riyeser.test", "bank": {"account_name": "Riyeser Pty Ltd", "bank_name": "Westpac", "bsb": "032-000", "account_number": "123456"}}');
-select pg_temp.as_user('b1b1b1b1-0000-4000-8000-000000000006');
 do $$ begin
-  begin perform public.hq_billing_entity_decide(current_setting('pay.chg')::bigint, true); raise exception 'sales approved';
-  exception when others then assert sqlerrm like 'Your HQ role can''t%', sqlerrm; end;
+  assert not (public.hq_billing() ->> 'can_edit_entity')::boolean, 'finance: read-only';
+  begin perform public.hq_set_billing_entity('{"name": "Fina Pty Ltd", "bank": {"account_number": "999999"}}'); raise exception 'finance changed the bank details';
+  exception when others then assert sqlerrm like 'Your HQ role can''t do that. Only the Riyeser HQ Owner can change%', sqlerrm; end;
+  begin perform public.hq_billing_entity_decide(1, true); raise exception 'finance approved something';
+  exception when others then assert sqlerrm like 'Billing details don''t wait for approval any more%', sqlerrm; end;
+end $$;
+select pg_temp.as_user_password_only('99999999-9999-9999-9999-999999999999');
+do $$ begin
+  begin perform public.hq_set_billing_entity('{"name": "Riyeser Pty Ltd"}'); raise exception 'owner without two-step';
+  exception when others then assert sqlerrm like 'Riyeser HQ is for%', sqlerrm; end;
 end $$;
 select pg_temp.as_user('99999999-9999-9999-9999-999999999999');
-do $$ declare h json; begin
-  assert ((public.hq_billing() -> 'entity_pending' ->> 'id')::bigint) = current_setting('pay.chg')::bigint and not (public.hq_billing() -> 'entity_pending' ->> 'mine')::boolean, 'one waiting change, the same one';
-  perform public.hq_billing_entity_decide(current_setting('pay.chg')::bigint, true);
-  perform public.hq_billing_entity_decide(current_setting('pay.chg')::bigint, true);   -- safe to repeat
-  h := public.hq_billing();
-  assert (h ->> 'bank_ready')::boolean and h -> 'entity' ->> 'tax_label' = 'ABN' and h -> 'entity' -> 'bank' ->> 'junk' is null, 'bank ready, ABN label by default, only known fields';
-  assert h -> 'entity_pending' is null or json_typeof(h -> 'entity_pending') = 'null', 'nothing waiting';
-  begin perform public.hq_billing_entity_decide(current_setting('pay.chg')::bigint, false); raise exception 'undid an approved change';
-  exception when others then assert sqlerrm like 'That change was already dealt with%', sqlerrm; end;
+select public.hq_set_billing_entity('{"name": "Riyeser Pty Ltd", "address": "1 George St, Sydney NSW", "tax_label": "", "tax_number": "12 345 678 901",
+  "email": "accounts@riyeser.test", "bank": {"account_name": "Riyeser Pty Ltd", "bank_name": "Westpac", "bsb": "032-000", "account_number": "123456", "junk": "x"}}');
+-- the same again: nothing new (safe to repeat)
+select public.hq_set_billing_entity('{"name": "Riyeser Pty Ltd", "address": "1 George St, Sydney NSW", "tax_label": "", "tax_number": "12 345 678 901",
+  "email": "accounts@riyeser.test", "bank": {"account_name": "Riyeser Pty Ltd", "bank_name": "Westpac", "bsb": "032-000", "account_number": "123456"}}');
+do $$ declare h json := public.hq_billing(); begin
+  assert (h ->> 'can_edit_entity')::boolean, 'the Owner can edit';
+  assert (h ->> 'bank_ready')::boolean and h -> 'entity' ->> 'tax_label' = 'ABN' and h -> 'entity' -> 'bank' ->> 'junk' is null, 'in force straight away: bank ready, ABN label by default, only known fields';
+  assert json_typeof(h -> 'entity_pending') = 'null', 'nothing ever waits';
 end $$;
 reset role;
 do $$ begin
   assert (select count(*) from public.billing_entities where details ->> 'name' = 'Riyeser Pty Ltd') = 1, 'one new version';
-  assert exists (select 1 from public.hq_audit where action = 'billing.entity_proposed' and actor = 'b1b1b1b1-0000-4000-8000-000000000005')
-     and exists (select 1 from public.hq_audit where action = 'billing.entity_changed' and actor = '99999999-9999-9999-9999-999999999999'), 'proposed and approved, each in the HQ history with who';
+  assert (select count(*) from public.billing_entity_changes where status = 'approved' and proposed_by = '99999999-9999-9999-9999-999999999999') = 1, 'kept as a record';
+  assert not exists (select 1 from public.billing_entities where details ->> 'name' like 'Fina%'), 'nothing from Finance';
+  assert exists (select 1 from public.hq_audit where action = 'billing.entity_changed' and actor = '99999999-9999-9999-9999-999999999999'
+     and details -> 'before' ->> 'name' = 'Riyeser' and details -> 'after' -> 'bank' ->> 'bsb' = '032-000'), 'in the HQ history: who, when, before and after';
   begin delete from public.billing_entity_changes; raise exception 'deleted a change'; exception when others then assert sqlerrm not like 'deleted a change', sqlerrm; end;
 end $$;
 set role authenticated;

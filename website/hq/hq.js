@@ -173,7 +173,6 @@
       // payments: PayPal subscriptions and bank transfer invoices (team-chat.sql), and the paypal function's status
       billing: () => rpc('hq_billing'), markPaid: (ref, bankRef, amount) => rpc('hq_billing_mark_paid', { invoice_ref: ref, bank_reference: bankRef, paid_amount: amount }),
       setBillingEntity: (d) => rpc('hq_set_billing_entity', { details: d }),
-      decideBillingEntity: (change, approve) => rpc('hq_billing_entity_decide', { change, approve: !!approve }),
       resendDoc: (ref, to, update) => rpc('hq_billing_resend', { doc_ref: ref, to_email: to || null, update_contact: !!update }),
       // payments received in the last few days; an older database: worked out from the latest payments
       async paymentsReceived(days) {
@@ -292,7 +291,6 @@
     const plans = { w2: { extra_users: 6, extra_companies: 0, billing: 'yearly', early_bird: true } };
     const settings = { 'support.overdue_hours': 24, 'support.escalate_hours': 48, 'refunds.two_person_threshold': 200, 'offers.self_limit_days': 31, 'billing.grace_days': 7 };
     // payments in the demo: Harbour Cafe pays by PayPal, Sample Plumbing has a bank transfer invoice waiting, one PayPal payment failed
-    let entityPending = null; let entityN = 0;
     let entity = { name: 'Riyeser', address: '', tax_label: 'ABN', tax_number: '', email: 'info@riyeser.com', bank: { account_name: '', bank_name: '', bsb: '', account_number: '', swift: '', note: '' } };
     const bOrders = [
       { id: 'o1', workspace_id: 'w2', ref: 'RI-10002', method: 'paypal', modules: ['basic', 'pos', 'calls'], module_names: ['Accounting Basics', 'POS', 'Riyeser Link'], bundle: 'shop', people: 9, billing: 'monthly', amount: 143, first_amount: null, total: 143, status: 'active', paypal_id: '…7Q2X9K', paypal_env: 'sandbox', next_charge_at: t(-12), paid_through: t(-12).slice(0, 10), created_at: t(18) },
@@ -549,8 +547,7 @@
         return { failed: bOrders.filter((o) => ['payment_failed', 'suspended'].includes(o.status)).map(orderOut).map(bizOf), unpaid: bOrders.filter((o) => o.method === 'bank' && o.status === 'pending').map(orderOut).map(bizOf),
           payments: bPays.slice().sort((a, b) => b.at.localeCompare(a.at)).map(payOut).map(bizOf), paypal: { ...paypalSeen, events_7d: 14, subscriptions: bOrders.filter((o) => o.method === 'paypal' && o.status !== 'cancelled').length },
           entity: JSON.parse(JSON.stringify(entity)), bank_ready: !!entity.bank.account_number, grace_days: settings['billing.grace_days'],
-          can_mark_paid: P.includes('licences.manage'), can_edit_entity: P.includes('settings.manage') || P.includes('licences.manage'),
-          entity_pending: entityPending ? { ...JSON.parse(JSON.stringify(entityPending)), proposed_by: nameOf(entityPending.by), mine: entityPending.by === actor } : null,
+          can_mark_paid: P.includes('licences.manage'), can_edit_entity: me().role === 'owner', entity_pending: null,
           can_send_docs: P.includes('licences.manage') }; },
       async markPaid(ref, bankRef, amount) { need('licences.manage'); const o = bOrders.find((x) => x.ref === String(ref).trim().toUpperCase() && x.method === 'bank');
         if (!o) throw new Error('There\'s no bank transfer invoice with that number.'); if (o.status !== 'pending') throw new Error('That invoice is already paid.');
@@ -573,24 +570,14 @@
         sent.forEach((a) => queue(a, d.kind === 'receipt' ? `Your Riyeser receipt ${d.ref}` : `Your Riyeser invoice ${d.ref}`, 'billing_resend', ws));
         log('billing.doc_resent', { workspace_id: ws, ref: d.ref, kind: d.kind, to: sent.map(maskEmail), other_address: !!addr, contact_updated: !!(addr && update) });
         return { ref: d.ref, to: sent, contact_updated: !!(addr && update) }; },
-      // SEC-011: a change is only proposed; someone else (Owner or Finance) approves it before invoices use it
-      async setBillingEntity(d) { if (!['settings.manage', 'licences.manage'].some((x) => permsOf(me()).includes(x))) throw new Error('Your HQ role can\'t do that.');
+      // SEC-011 (the owner's decision): only the HQ Owner enters or changes it; it's in force straight away
+      async setBillingEntity(d) { if (me().role !== 'owner') throw new Error('Your HQ role can\'t do that. Only the Riyeser HQ Owner can change Riyeser\'s billing and bank details.');
         if (String(d.name || '').trim().length < 2) throw new Error('Type the business name that sells Riyeser.');
         const details = { name: d.name.trim(), address: (d.address || '').trim(), tax_label: (d.tax_label || '').trim() || 'ABN', tax_number: (d.tax_number || '').trim(), email: (d.email || '').trim(),
           bank: Object.fromEntries(['account_name', 'bank_name', 'bsb', 'account_number', 'swift', 'note'].map((k) => [k, String((d.bank || {})[k] || '').trim()])) };
-        const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-        if (entityPending && same(entityPending.details, details)) return;
-        if (!entityPending && same(entity, details)) return;
-        if (entityPending) { log('billing.entity_replaced', { change: entityPending.id }); entityPending = null; }
-        if (same(entity, details)) return;
-        entityPending = { id: ++entityN, details, by: actor, proposed_at: new Date().toISOString() };
-        log('billing.entity_proposed', { change: entityPending.id, name: details.name, bank_set: !!details.bank.account_number }); },
-      async decideBillingEntity(change, approve) { if (!['settings.manage', 'licences.manage'].some((x) => permsOf(me()).includes(x))) throw new Error('Your HQ role can\'t do that.');
-        if (!entityPending || entityPending.id !== change) throw new Error('That change was already dealt with.');
-        if (approve && entityPending.by === actor) throw new Error('Someone else in Riyeser HQ has to approve a change you made (two-person rule).');
-        if (approve) { entity = entityPending.details; log('billing.entity_changed', { change, name: entity.name, bank_set: !!entity.bank.account_number }); }
-        else log('billing.entity_rejected', { change, withdrawn: entityPending.by === actor });
-        entityPending = null; },
+        if (JSON.stringify(entity) === JSON.stringify(details)) return;
+        const before = entity; entity = details;
+        log('billing.entity_changed', { name: details.name, before, after: details, bank_set: !!details.bank.account_number }); },
       async paypalStatus() { return { ready: false, credentials: true, webhooks: false, env: 'sandbox', message: 'Webhooks aren\'t verified yet: add PAYPAL_WEBHOOK_ID and deploy again.' }; },
       // support
       async tickets(box = 'open', q = '') { need('support.view'); const od = settings['support.overdue_hours']; const s = q.toLowerCase();
@@ -1367,23 +1354,14 @@
   function entityCard(b) {
     const e = b.entity || {}; const bk = e.bank || {}; const ed = b.can_edit_entity;
     const fld = (k, label, v, max = 120) => `<label class="f"><span>${label}</span><input name="${k}" value="${esc(v || '')}" maxlength="${max}"${ed ? '' : ' readonly'}></label>`;
-    const pe = b.entity_pending; const pd = pe && pe.details ? pe.details : null;
-    const diff = pd ? [['name', 'Business name'], ['email', 'Contact email'], ['address', 'Address'], ['tax_label', 'Tax number label'], ['tax_number', 'Tax number'],
-      ['bank.account_name', 'Bank account name'], ['bank.bank_name', 'Bank'], ['bank.bsb', 'BSB'], ['bank.account_number', 'Account number'], ['bank.swift', 'SWIFT / BIC'], ['bank.note', 'Note for customers']]
-      .map(([k, l]) => { const g = (o) => (k.startsWith('bank.') ? ((o || {}).bank || {})[k.slice(5)] : (o || {})[k]) || ''; return g(e) === g(pd) ? null : [l, g(e), g(pd)]; }).filter(Boolean) : [];
-    const pendingBox = pe ? `<div class="impact" id="entPending"><b>⏳ Waiting for a second person to approve</b>
-        <p class="small" style="margin:4px 0 6px">${esc(pe.proposed_by || 'Someone')} proposed this change ${esc(ago(pe.proposed_at))}. Invoices keep using the details below until someone else in Riyeser HQ (Owner or Finance) approves it.</p>
-        <div class="scroll"><table class="tbl"><tr><th>Field</th><th>Now</th><th>Proposed</th></tr>${diff.map(([l, a, c]) => `<tr><td>${esc(l)}</td><td>${esc(a) || '<span class="muted">empty</span>'}</td><td><b>${esc(c) || '<span class="muted">empty</span>'}</b></td></tr>`).join('')}</table></div>
-        ${ed ? `<div class="mfoot" style="justify-content:flex-start">${pe.mine ? '<span class="muted small">You proposed it, so someone else approves it.</span> <button type="button" class="btn" id="entNo">Withdraw it</button>'
-          : '<button type="button" class="btn p" id="entYes">Approve: use it on new invoices</button> <button type="button" class="btn" id="entNo">Turn it down</button>'}</div>` : ''}</div>` : '';
     return `<div class="card" id="entity"><h3>Billing entity <small>· who sells Riyeser: on every invoice and receipt</small></h3>
-      ${pendingBox}${b.bank_ready ? '' : '<div class="err" id="addbank">Add your bank details. Until then, bank transfer invoices tell customers Riyeser will email the details.</div>'}
+      ${b.bank_ready ? '' : '<div class="err" id="addbank">Add your bank details. Until then, bank transfer invoices tell customers Riyeser will email the details.</div>'}
       <form id="entf" class="grid g2">${fld('name', 'Business name', e.name)}${fld('email', 'Contact email', e.email)}${fld('address', 'Address', e.address, 300)}
         ${fld('tax_label', 'Tax number label', e.tax_label || 'ABN', 40)}${fld('tax_number', 'ABN (or tax number)', e.tax_number, 40)}
         ${fld('bank.account_name', 'Bank account name', bk.account_name, 80)}${fld('bank.bank_name', 'Bank', bk.bank_name, 80)}${fld('bank.bsb', 'BSB', bk.bsb, 80)}
         ${fld('bank.account_number', 'Account number', bk.account_number, 80)}${fld('bank.swift', 'SWIFT / BIC (for overseas payers)', bk.swift, 80)}${fld('bank.note', 'Note for customers (optional)', bk.note, 300)}
-        ${ed ? '<div><button class="btn p">Propose this change</button></div>' : '<p class="muted small">Owners and Finance can change this.</p>'}</form>
-      <p class="muted small">Two people: a change only takes effect when someone else in Riyeser HQ approves it. Each change is kept as a new version: invoices and receipts already made keep the details they were made with.</p></div>`;
+        ${ed ? '<div><button class="btn p">Save billing entity</button></div>' : '<p class="muted small" id="entOwnerOnly">Only the Owner can change these.</p>'}</form>
+      <p class="muted small">Each change is in the HQ history (who, when, before and after) and kept as a new version: invoices and receipts already made keep the details they were made with.</p></div>`;
   }
   async function payments() {
     main('<p class="muted">Loading…</p>');
@@ -1398,10 +1376,7 @@
     m.querySelectorAll('[data-doc]').forEach((x) => x.onclick = () => docView(x.dataset.doc));
     const ef = m.querySelector('#entf'); if (ef && b.can_edit_entity) ef.onsubmit = async (e) => { e.preventDefault(); const f = new FormData(ef); const d = { bank: {} };
       for (const [k, v] of f.entries()) { if (k.startsWith('bank.')) d.bank[k.slice(5)] = String(v); else d[k] = String(v); }
-      try { await api.setBillingEntity(d); flash('Change proposed. Someone else in Riyeser HQ (Owner or Finance) approves it before invoices use it.'); payments(); } catch (err) { flash(plain(err)); } };
-    const pe = b.entity_pending; const yes = m.querySelector('#entYes'); const no = m.querySelector('#entNo');
-    if (pe && yes) yes.onclick = async () => { try { await api.decideBillingEntity(pe.id, true); flash('Approved. New invoices use the new details.'); payments(); } catch (err) { flash(plain(err)); } };
-    if (pe && no) no.onclick = async () => { try { await api.decideBillingEntity(pe.id, false); flash(pe.mine ? 'Your proposed change is withdrawn.' : 'The change is turned down. Nothing changed.'); payments(); } catch (err) { flash(plain(err)); } };
+      try { await api.setBillingEntity(d); flash('Billing entity saved. New invoices use it.'); payments(); } catch (err) { flash(plain(err)); } };
     if (S.markPaid) { const ref = S.markPaid; S.markPaid = null; const o = b.unpaid.find((x) => x.ref === ref); if (o && b.can_mark_paid) markPaidDlg(o.ref, o.total, payments); }
   }
   async function inbox() { main(soon('Team Inbox', 'Internal discussions linked to a customer, case or invoice, handovers that become tasks with an owner and due time, and commitments saved to the customer timeline. For now, use the Team handover on the Overview and internal notes on each customer page.', 'Coming soon')); }
@@ -1520,9 +1495,9 @@
   }
 
   function closePanel() { document.querySelectorAll('.modal').forEach((x) => x.remove()); }
-  const HIST_ACTS = { 'billing.bank_paid': 'marked a bank transfer paid', 'billing.doc_resent': 'sent an invoice or receipt again', 'billing.entity_changed': 'approved a billing entity change (now in force)',
-    'billing.entity_proposed': 'proposed a billing entity change (waiting for a second person)', 'billing.entity_rejected': 'turned down a billing entity change',
-    'billing.entity_replaced': 'replaced a waiting billing entity change', 'link.new_password': 'asked Link Office for a new phone password (nobody sees it)', 'customer.viewed': 'opened the company', 'company.viewed': 'opened the company', 'note.added': 'added a note', 'calls.paid_until': 'changed Riyeser Link paid-until',
+  const HIST_ACTS = { 'billing.bank_paid': 'marked a bank transfer paid', 'billing.doc_resent': 'sent an invoice or receipt again', 'billing.entity_changed': 'changed the billing entity (bank details)',
+    'billing.entity_proposed': 'proposed a billing entity change (old two-person rule)', 'billing.entity_rejected': 'turned down a billing entity change (old two-person rule)',
+    'billing.entity_replaced': 'replaced a waiting billing entity change (old two-person rule)', 'link.new_password': 'asked Link Office for a new phone password (nobody sees it)', 'customer.viewed': 'opened the company', 'company.viewed': 'opened the company', 'note.added': 'added a note', 'calls.paid_until': 'changed Riyeser Link paid-until',
     'licence.module': 'changed a licence', 'licence.plan': 'changed a plan', 'licence.storage': 'granted extra file storage', 'staff.added': 'added HQ staff', 'staff.changed': 'changed HQ staff', 'staff.permissions': 'changed HQ permissions',
     'staff.owner_made': 'made an HQ owner (SQL Editor)', 'ticket.viewed': 'opened a ticket', 'ticket.replied': 'replied to a ticket', 'ticket.note': 'added an internal note',
     'ticket.status': 'changed a ticket\'s status', 'ticket.priority': 'changed a ticket\'s priority', 'ticket.assigned': 'assigned a ticket', 'ticket.escalated': 'escalated a ticket',

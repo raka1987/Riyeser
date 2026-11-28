@@ -6081,8 +6081,8 @@ begin
     'entity', (billing_entity_now()).details,
     'bank_ready', coalesce(nullif(trim((billing_entity_now()).details #>> '{bank,account_number}'), ''), '') <> '',
     'grace_days', hq_setting_num('billing.grace_days', 7),
-    'can_mark_paid', hq_can('licences.manage'), 'can_edit_entity', hq_can('settings.manage') or hq_can('licences.manage'),
-    'entity_pending', hq_billing_entity_pending(), 'can_send_docs', hq_can('licences.manage'));
+    'can_mark_paid', hq_can('licences.manage'), 'can_edit_entity', hq_is_owner(),
+    'entity_pending', null, 'can_send_docs', hq_can('licences.manage'));
 end $$;
 -- This business's invoices and payments (the customer page, Money tab).
 create or replace function public.hq_company_billing(ws uuid) returns json
@@ -6119,9 +6119,9 @@ begin
   return json_build_object('receipt', rcpt, 'paid_until', upto);
 end $$;
 -- The Billing entity: who sells Riyeser (on every invoice and receipt). Each change is a new version.
--- SEC-011: a change (above all the bank details customers pay into) is only PROPOSED here. It takes effect when a
--- different HQ person (settings.manage or licences.manage: the Owner, Finance) approves it (hq_billing_entity_decide).
--- One proposal waits at a time: proposing the same again changes nothing; proposing something else replaces it.
+-- SEC-011 (owner's decision: "bank details super admin can input"): ONLY the Riyeser HQ Owner can enter or change it.
+-- Finance and every other HQ role are refused. The Owner's change takes effect straight away (no second person), and is
+-- written to the HQ history (who, when, before and after) and kept in billing_entity_changes as a record.
 create table if not exists public.billing_entity_changes (
   id bigint generated always as identity primary key,
   details jsonb not null,
@@ -6136,12 +6136,21 @@ alter table public.billing_entity_changes enable row level security;
 revoke all on public.billing_entity_changes from anon, authenticated;
 drop trigger if exists billing_entity_changes_keep on public.billing_entity_changes;
 create trigger billing_entity_changes_keep before delete on public.billing_entity_changes for each row execute function public.no_delete();
+-- An earlier version let Finance propose changes for a second person to approve: any still waiting are closed, unused.
+update public.billing_entity_changes set status = 'replaced', decided_at = now() where status = 'pending';
+-- Who may change it: the HQ Owner role only (with two-step sign-in, as for all of HQ).
+create or replace function public.hq_is_owner() returns boolean
+  language sql stable security definer set search_path = public as $$ select coalesce(public.hq_role() = 'owner', false) $$;
+revoke all on function public.hq_is_owner() from public, anon, authenticated;
 create or replace function public.hq_set_billing_entity(details jsonb) returns void
   language plpgsql security definer set search_path = public as $$
 declare d jsonb; b jsonb := coalesce(details -> 'bank', '{}'::jsonb); k text; cur jsonb := (billing_entity_now()).details;
-  t text := ''; p billing_entity_changes;
+  t text := ''; c billing_entity_changes;
 begin
-  if not (hq_can('settings.manage') or hq_can('licences.manage')) then perform hq_need(array['settings.manage']); end if;
+  if hq_role() is null then perform hq_need(array['settings.manage']); end if;   -- not HQ staff (or no two-step sign-in)
+  if not hq_is_owner() then
+    raise exception 'Your HQ role can''t do that. Only the Riyeser HQ Owner can change Riyeser''s billing and bank details.';
+  end if;
   if length(trim(coalesce(details ->> 'name', ''))) < 2 then raise exception 'Type the business name that sells Riyeser.'; end if;
   d := jsonb_build_object('name', '', 'address', '', 'tax_label', 'ABN', 'tax_number', '', 'email', '');
   foreach k in array array['name', 'address', 'tax_label', 'tax_number', 'email'] loop
@@ -6150,51 +6159,22 @@ begin
   end loop;
   d := d || jsonb_build_object('bank', (select jsonb_object_agg(x, left(trim(coalesce(b ->> x, '')), case when x = 'note' then 300 else 80 end))
          from unnest(array['account_name', 'bank_name', 'bsb', 'account_number', 'swift', 'note']) x));
-  select * into p from billing_entity_changes where status = 'pending' for update;
-  if p.id is not null and p.details = d then return; end if;          -- the same proposal again: nothing to do
-  if p.id is null and d = cur then return; end if;                    -- no change
-  if p.id is not null then
-    update billing_entity_changes set status = 'replaced', decided_by = auth.uid(), decided_at = now() where id = p.id;
-    perform hq_log('billing.entity_replaced', jsonb_build_object('change', p.id));
-  end if;
-  if d = cur then return; end if;                                     -- back to what's in force: the old proposal is simply gone
-  insert into billing_entity_changes (details, proposed_by) values (d, auth.uid()) returning * into p;
-  perform hq_log('billing.entity_proposed', jsonb_build_object('change', p.id, 'name', d ->> 'name',
+  if d = cur then return; end if;                                     -- no change: nothing written (safe to repeat)
+  insert into billing_entities (details, created_by) values (d, auth.uid());
+  insert into billing_entity_changes (details, proposed_by, status, decided_by, decided_at) values (d, auth.uid(), 'approved', auth.uid(), now()) returning * into c;
+  perform hq_log('billing.entity_changed', jsonb_build_object('change', c.id, 'name', d ->> 'name', 'before', cur, 'after', d,
     'bank_changed', (d -> 'bank') is distinct from (cur -> 'bank'), 'bank_set', coalesce(d #>> '{bank,account_number}', '') <> ''));
 end $$;
--- Approve (it takes effect: a new version of the entity) or turn down the waiting change. Approving needs someone other
--- than whoever proposed it; the proposer may withdraw their own (approve = false). Safe to repeat: a decided change stays decided.
+-- Kept so older HQ pages and re-runs stay safe: nothing waits for approval any more, so it only explains that.
 create or replace function public.hq_billing_entity_decide(change bigint, approve boolean) returns void
   language plpgsql security definer set search_path = public as $$
-declare p billing_entity_changes;
 begin
-  if not (hq_can('settings.manage') or hq_can('licences.manage')) then perform hq_need(array['settings.manage']); end if;
-  select * into p from billing_entity_changes where id = change for update;
-  if p.id is null then raise exception 'That change isn''t there.'; end if;
-  if p.status <> 'pending' then
-    if (p.status = 'approved') = coalesce(approve, false) and p.decided_by = auth.uid() then return; end if;
-    raise exception 'That change was already dealt with.';
-  end if;
-  if coalesce(approve, false) then
-    if p.proposed_by = auth.uid() then raise exception 'Someone else in Riyeser HQ has to approve a change you made (two-person rule).'; end if;
-    if p.details is distinct from (billing_entity_now()).details then
-      insert into billing_entities (details, created_by) values (p.details, p.proposed_by);
-    end if;
-    update billing_entity_changes set status = 'approved', decided_by = auth.uid(), decided_at = now() where id = p.id;
-    perform hq_log('billing.entity_changed', jsonb_build_object('change', p.id, 'name', p.details ->> 'name', 'proposed_by', p.proposed_by,
-      'bank_set', coalesce(p.details #>> '{bank,account_number}', '') <> ''));
-  else
-    update billing_entity_changes set status = 'rejected', decided_by = auth.uid(), decided_at = now() where id = p.id;
-    perform hq_log('billing.entity_rejected', jsonb_build_object('change', p.id, 'proposed_by', p.proposed_by, 'withdrawn', p.proposed_by = auth.uid()));
-  end if;
+  perform hq_need(array['settings.manage', 'licences.manage']);
+  raise exception 'Billing details don''t wait for approval any more: only the Riyeser HQ Owner changes them, and it takes effect straight away.';
 end $$;
--- The waiting change for the Billing entity card (or null).
+-- Kept for the same reason: nothing is ever waiting now.
 create or replace function public.hq_billing_entity_pending() returns json
-  language sql stable security definer set search_path = public as $$
-  select json_build_object('id', p.id, 'details', p.details, 'proposed_at', p.proposed_at,
-    'proposed_by', (select display_name from hq_staff s where s.user_id = p.proposed_by), 'mine', p.proposed_by = auth.uid())
-  from billing_entity_changes p where p.status = 'pending'
-$$;
+  language sql stable security definer set search_path = public as $$ select null::json $$;
 revoke all on function public.hq_billing_entity_decide(bigint, boolean), public.hq_billing_entity_pending() from public, anon, authenticated;
 grant execute on function public.hq_billing_entity_decide(bigint, boolean) to authenticated;
 

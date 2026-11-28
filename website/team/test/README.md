@@ -19,9 +19,9 @@
   and the HQ owner looking at a business) and no HQ function's columns carry a password, secret, key, token, digest or
   sealed copy; Riyeser support can't Show a phone password, only Set a new password (Link Office makes it and says only
   "done"; nothing support typed reaches the office; "requested by" in both histories) (SEC-009); Sales and Support can't
-  email invoices (SEC-010) or approve a Billing entity change (SEC-011). `rules-test.sql` covers SEC-009/010/011 too
-  (the two-person Billing entity change: proposed, the same again changes nothing, the proposer can't approve, a second
-  person approves, safe to repeat, in the HQ history).
+  email invoices (SEC-010); Finance, Sales and Support can't change Riyeser's own billing and bank details (SEC-011:
+  only the HQ Owner can). `rules-test.sql` covers SEC-009/010/011 too (the Billing entity: Finance refused, the Owner's
+  change in force straight away, the same again writes nothing, the HQ history has who, when, before and after).
 - `demo-test.js` and `signin-test.js` (Playwright): build the site (`node website/build-combined.mjs`), serve
   `website/public` on port 8090, then run them with node. The tests use the main address, /link/;
   `oldaddress-test.js` checks the old address, /team/, still works (`?signup`, `?join=`, a sign-in link's `#...`).

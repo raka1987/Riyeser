@@ -247,7 +247,7 @@ reset role;
 reset statement_timeout;
 create function pg_temp.refused(who text, fns text[]) returns text language sql as $$
   select string_agg(f, ', ') from unnest(fns) f
-  where exists (select 1 from pg_temp.out o where o.who = refused.who and o.fn = f and (o.outcome = 'ran' or o.result <> 'Your HQ role can''t do that.'))
+  where exists (select 1 from pg_temp.out o where o.who = refused.who and o.fn = f and (o.outcome = 'ran' or o.result not like 'Your HQ role can''t do that.%'))
      or not exists (select 1 from pg_temp.out o where o.who = refused.who and o.fn = f) $$;
 do $$ declare bad text; begin
   -- developers: versions, downloads and diagnostics only; no customers, tickets, emails, licences, billing or history
@@ -264,8 +264,8 @@ do $$ declare bad text; begin
   bad := pg_temp.refused('sales', array['hq_billing_resend', 'hq_billing_entity_decide', 'hq_diagnostic', 'hq_ticket_reply', 'hq_message_customer', 'hq_refunds', 'hq_emails', 'hq_reset_2fa',
     'hq_edit_business', 'hq_change_owner', 'hq_audit_search', 'hq_set_module', 'hq_set_staff']);
   assert bad is null, 'sales not refused: ' || bad;
-  -- finance: no diagnostics, account fix-ups or staff
-  bad := pg_temp.refused('finance', array['hq_diagnostic', 'hq_reset_2fa', 'hq_change_owner', 'hq_edit_business', 'hq_set_staff']);
+  -- finance: no diagnostics, account fix-ups, staff, or Riyeser's own bank details (only the HQ Owner: SEC-011)
+  bad := pg_temp.refused('finance', array['hq_diagnostic', 'hq_reset_2fa', 'hq_change_owner', 'hq_edit_business', 'hq_set_staff', 'hq_set_billing_entity']);
   assert bad is null, 'finance not refused: ' || bad;
   -- the HQ owner without two-step sign-in, and a customer: nothing at all (hq_me only says who you are)
   select string_agg(fn, ', ') into bad from pg_temp.out where who in ('owner without 2FA', 'customer') and fn not in ('hq_me')

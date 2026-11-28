@@ -45,19 +45,15 @@ const BASE = (process.env.HQ_URL || 'http://127.0.0.1:8090').replace(/\/$/, '');
   // the Billing entity
   for (const [k, v] of [['name', 'Riyeser Pty Ltd'], ['address', '1 George St, Sydney NSW 2000'], ['tax_number', '12 345 678 901'], ['bank.account_name', 'Riyeser Pty Ltd'], ['bank.bank_name', 'Westpac'], ['bank.bsb', '032-000'], ['bank.account_number', '123456']]) await pg.fill(`#entf [name="${k}"]`, v);
   await pg.click('#entf .btn.p'); await pg.waitForTimeout(400);
-  // SEC-011: two people. It's only proposed; Riki can withdraw it but not approve it; Finance Fi approves it
-  check((await flash()).includes('Change proposed') && await pg.isVisible('#entPending') && await pg.isVisible('#addbank'), 'bank details proposed: waiting, the reminder stays until approved');
-  const pend = await text('#entPending');
-  check(pend.includes('Waiting for a second person') && pend.includes('Riki proposed') && pend.includes('032-000') && pend.includes('123456') && !(await pg.$('#entYes')) && !!(await pg.$('#entNo')),
-    `the waiting change: who, what changes, no Approve for the proposer (${pend.slice(0, 120)})`);
-  await shot(pg, 'hq-entity-pending.png', '#entity');
-  await pg.selectOption('#demoAs', 's3'); await pg.waitForTimeout(400); await pg.goto(`${BASE}/hq/?demo#/payments`); await pg.waitForSelector('#entPending');
-  check(!!(await pg.$('#entYes')) && (await text('#entPending')).includes('Riki proposed'), 'Finance sees Approve');
-  await pg.click('#entYes'); await pg.waitForTimeout(500);
-  check(!(await pg.$('#entPending')) && !(await pg.$('#addbank')) && (await flash()).includes('Approved'), 'approved by a second person: in force, the reminder goes');
+  // SEC-011 (the owner's decision): only the HQ Owner (Riki) enters or changes it; it's in force straight away
+  check((await flash()).includes('Billing entity saved') && !(await pg.$('#addbank')) && !(await pg.$('#entPending')), 'the Owner saved the bank details: in force, the reminder goes');
+  await shot(pg, 'hq-entity-owner.png', '#entity');
+  await pg.selectOption('#demoAs', 's3'); await pg.waitForTimeout(400); await pg.goto(`${BASE}/hq/?demo#/payments`); await pg.waitForSelector('#entity');
+  check(!!(await pg.$('#entf [name="bank.account_number"][readonly]')) && !(await pg.$('#entf .btn.p')) && (await text('#entOwnerOnly')) === 'Only the Owner can change these.'
+    && (await pg.inputValue('#entf [name="bank.bsb"]')) === '032-000', 'Finance: the details read-only, "Only the Owner can change these."');
   await pg.selectOption('#demoAs', 's1'); await pg.waitForTimeout(400);
   await pg.goto(`${BASE}/hq/?demo#/history`); await pg.waitForTimeout(500);
-  const hist = await text('#main'); check(hist.includes('marked a bank transfer paid') && hist.includes('proposed a billing entity change') && hist.includes('approved a billing entity change'), 'all in the HQ history');
+  const hist = await text('#main'); check(hist.includes('marked a bank transfer paid') && hist.includes('changed the billing entity'), 'both are in the HQ history');
   // the customer page: Money tab
   await pg.goto(`${BASE}/hq/?demo#/company/w2/money`); await pg.waitForSelector('#coBilling');
   check((await text('#coBilling')).includes('RI-10002') && (await text('#coBilling')).includes('…7Q2X9K') && (await text('#coPays')).includes('…4T7Y2A'), 'Money tab: invoices and payments, ids masked');
