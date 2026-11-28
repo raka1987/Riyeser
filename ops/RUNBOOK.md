@@ -381,6 +381,21 @@ You need a PayPal **Business** account (yours is an Australian one). Charges are
    webhook with the same events to the **Live** app. Update the GitHub secrets `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`,
    `PAYPAL_WEBHOOK_ID` with the **Live** values and set `PAYPAL_ENV` to `live`. Run **Deploy PayPal payments**.
    HQ's PayPal card then says **Live**. Make one small real payment yourself and refund it in PayPal to be sure.
+8. **After going live: clear your practice payments.** Practice (sandbox) payments never stop a real one, and the website
+   never links to PayPal's practice site once PayPal is live. But programs paid only with practice money still show
+   "Practice payment (test)". To put them back on their free trial: HQ → **Overview** shows **Practice payments to clear**
+   (Owner only) → **Invoices & payments** → **Practice payments to clear** → click the business → **Money** tab →
+   **Clear practice payments for this business** → **Clear practice payments**. Live PayPal and bank transfer payments are
+   never touched. It's in the HQ history, and **Put practice payments back** on the same tab undoes it (until a real payment
+   comes in).
+9. **A real test (small):** on riyeser.com/link, your Riyeser home → **Your plan** → **Buy now** on one program (or
+   **Add to my plan / Pay**, tick one program, choose **Buy now: start my paid plan today**) → **Pay with PayPal** → approve
+   with your real PayPal account. Back on riyeser.com: "Thanks, we're confirming your payment", then **Billing** shows the
+   subscription (Active) and the payment with its receipt; HQ → Invoices & payments shows it and "Last webhook: just now".
+   Then **Billing → Cancel subscription** (two-step sign-in needed): PayPal won't charge again and the program works until
+   the paid date. Refund the payment in PayPal (Activity → the payment → Refund) if you want the money back; Riyeser's
+   records keep the payment and the paid time. (Choosing **Start paying when my free trial ends** instead charges nothing
+   today: it tests the approval and cancelling without moving money.)
 
 The workflow passes the secrets straight to Supabase without printing them. A secret missing from GitHub is left as it is in Supabase.
 

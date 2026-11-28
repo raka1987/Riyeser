@@ -2,10 +2,13 @@
 //
 //   GET  /functions/v1/paypal/status      -> { ready, env, credentials, webhooks, message }   (no sign-in: the website
 //                                            and HQ use it to show or hide "Pay with PayPal")
-//   POST /functions/v1/paypal/subscribe   { ws, modules, people, billing, users?, tills? }   (the owner's Supabase session;
-//                                         pricing v2: users per program {module: n} and POS tills, both optional)
+//   POST /functions/v1/paypal/subscribe   { ws, modules, people, billing, users?, tills?, buy_now? }   (the owner's Supabase session;
+//                                         pricing v2: users per program {module: n} and POS tills, both optional;
+//                                         buy_now: "Buy now: start my paid plan today": no start_time, PayPal charges today)
 //                                         -> { approve_url, ref }   (the owner approves at PayPal, then comes back)
 //   POST /functions/v1/paypal/cancel      { ws }   (the owner, with two-step sign-in) -> { ok, works_until }
+//                                         PAYPAL-LIVE: a practice (sandbox) subscription while PayPal is live is removed on
+//                                         Riyeser's side only (billing_practice_cancel): PayPal's live API is never called with it.
 //   POST /functions/v1/paypal/webhook     PayPal's webhooks: the signature is checked with PayPal's
 //                                         verify-webhook-signature API, then billing_paypal_event applies it once.
 //
@@ -83,7 +86,13 @@ export const apiBase = (mode: "sandbox" | "live") => (mode === "live" ? "https:/
 // ---------------------------------------------------------------- PayPal's API
 class PayPalError extends Error { constructor(public status: number, public detail: unknown) { super(`PayPal ${status}`); } }
 const tokens = new Map<string, { token: string; until: number }>();
-export function forgetTokens() { tokens.clear(); }
+// PAYPAL-LIVE: the database is told which PayPal this function uses (billing_paypal_env_now), once per running copy.
+let envNoted: string | null = null;
+export function forgetTokens() { tokens.clear(); envNoted = null; }
+async function noteEnv(s: Setup, svc: Rpc) {
+  if (!s.credentials || !s.env || envNoted === s.env) return;
+  try { const r = await svc("billing_paypal_env_now", { env: s.env }); if (r.ok) envNoted = s.env; } catch { /* an older database: it learns from the webhooks */ }
+}
 async function token(s: Setup, f: typeof fetch): Promise<string> {
   const key = `${s.env}:${s.clientId}`;
   const t = tokens.get(key);
@@ -177,6 +186,7 @@ export async function handle(req: Request, deps: Deps = {}): Promise<Response> {
   const open = s.ready || practice;
 
   if (req.method === "GET" && route === "status") {
+    if (s.credentials) await noteEnv(s, deps.rpcService ?? defaultRpcService(env));
     if (practice) return json(200, { ready: true, practice: true, env: s.env, credentials: s.credentials, webhooks: s.webhooks,
       message: "Practice mode: only you (Riyeser HQ) can see Pay with PayPal. Use a PayPal sandbox buyer account." });
     return json(200, { ready: s.ready, env: s.env, credentials: s.credentials, webhooks: s.webhooks,
@@ -221,9 +231,18 @@ export async function handle(req: Request, deps: Deps = {}): Promise<Response> {
 
   try {
     if (route === "cancel") {
+      await noteEnv(s, svc);   // a real subscription is picked before a practice one once the database knows PayPal is live
       const c = await rpc("billing_cancel_start", { ws });
       if (!c.ok) return json(c.status === 401 ? 401 : 403, { error: plainDbError(c.body) });
-      const x = c.body as { order_id: string; subscription_id: string; paid_through?: string };
+      const x = c.body as { order_id: string; subscription_id: string; paid_through?: string; env?: string | null };
+      // PAYPAL-LIVE: a subscription made with the other PayPal is never sent to this one. A practice (sandbox) one while
+      // live is removed on Riyeser's side only; a live one while this function is in practice mode is refused (it's real).
+      if (x.env && x.env !== s.env) {
+        if (x.env === "live") return json(409, { error: "This is a real PayPal subscription, but Riyeser's PayPal is in practice mode right now. Cancel it at paypal.com (Settings → Payments → Automatic payments), or contact Riyeser." });
+        const pc = await rpc("billing_practice_cancel", { ws });
+        if (!pc.ok) return json(pc.status === 401 ? 401 : 403, { error: plainDbError(pc.body) });
+        return json(200, { ok: true, practice: true, works_until: x.paid_through ?? null });
+      }
       try {
         await pp(s, f, "POST", `/v1/billing/subscriptions/${encodeURIComponent(x.subscription_id)}/cancel`, { reason: "Cancelled by the business owner on riyeser.com" });
       } catch (e) {
@@ -236,7 +255,9 @@ export async function handle(req: Request, deps: Deps = {}): Promise<Response> {
 
     const mods = Array.isArray(b.modules) ? b.modules.map(String).slice(0, 10) : [];
     const period = b.billing === "yearly" ? "yearly" : "monthly";
-    const args: Record<string, unknown> = { ws, mods, people: Math.trunc(Number(b.people) || 3), billing_period: period, pay_method: "paypal" };
+    const buyNow = b.buy_now === true;
+    const args: Record<string, unknown> = { ws, mods, people: Math.trunc(Number(b.people) || 3), billing_period: period, pay_method: "paypal", ...(buyNow ? { buy_now: true } : {}) };
+    await noteEnv(s, svc);   // so the database knows a practice subscription doesn't count once PayPal is live
     // Pricing v2: users per program and POS tills go to the database as they are (it checks and caps them). A database
     // that hasn't had the pricing v2 team-chat.sql yet doesn't take them: then it's asked again without.
     const users = b.users && typeof b.users === "object" && !Array.isArray(b.users)
@@ -245,7 +266,10 @@ export async function handle(req: Request, deps: Deps = {}): Promise<Response> {
     const tills = Math.trunc(Number(b.tills) || 1);
     const extra = users && Object.keys(users).length ? { users, tills } : tills > 1 ? { tills } : null;
     let st = await rpc("billing_start", extra ? { ...args, ...extra } : args);
-    if (extra && !st.ok && /PGRST202|could not find|does not exist/i.test(JSON.stringify(st.body ?? ""))) st = await rpc("billing_start", args);
+    const olderDb = !st.ok && /PGRST202|could not find|does not exist/i.test(JSON.stringify(st.body ?? ""));
+    // Buy now needs a database that knows it: never fall back to "start when the trial ends" without saying so
+    if (olderDb && buyNow) return json(503, { error: "Buy now isn't switched on yet. Choose \"Start paying when my free trial ends\", or try again later." });
+    if (extra && olderDb) st = await rpc("billing_start", args);
     if (!st.ok) return json(st.status === 401 ? 401 : 403, { error: plainDbError(st.body) });
     const o = st.body as { id: string; ref: string; amount: number; first_amount: number | null; early_bird: boolean; early_cycles: number; module_names: string[]; starts_on?: string | null };
     const early = !!o.early_bird && o.first_amount != null && o.early_cycles > 0;
@@ -256,7 +280,7 @@ export async function handle(req: Request, deps: Deps = {}): Promise<Response> {
       : [{ sequence: 1, total_cycles: 0, pricing_scheme: price(o.amount) }];
     // The first charge waits for the end of the free trial (the database's starts_on, S10): PayPal's start_time.
     // Today (or a date that isn't later than now) means PayPal charges straight away, as before.
-    const start = startTime(o.starts_on);
+    const start = buyNow ? null : startTime(o.starts_on);
     const sub = await pp(s, f, "POST", "/v1/billing/subscriptions", {
       plan_id: plan,
       custom_id: o.id,
