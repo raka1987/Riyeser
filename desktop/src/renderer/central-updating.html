@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'">
+  <title>Updating Riyeser Central</title>
+  <!-- Shown for a moment when Riyeser Central starts and installs its own update first (central/auto-update.js). -->
+  <style>
+    :root { color-scheme: light dark; --bg: #ffffff; --text: #13213d; --muted: #5d6a82; --accent: #5b54d6; --track: #e8ecf6; --line: #e3e8f1; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #15213a; --text: #e8eef9; --muted: #9aa9c4; --accent: #8f88ff; --track: #24345a; --line: #24345a; } }
+    html, body { height: 100%; margin: 0; }
+    body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; box-sizing: border-box; padding: 0 24px;
+      border: 1px solid var(--line); background: var(--bg); color: var(--text); text-align: center;
+      font: 14px "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif; -webkit-app-region: drag; user-select: none; }
+    img { width: 52px; height: 52px; }
+    b { font-size: 16px; font-weight: 600; white-space: nowrap; }
+    small { color: var(--muted); font-size: 12.5px; line-height: 1.45; max-width: 300px; }
+    .bar { width: 180px; height: 4px; border-radius: 2px; background: var(--track); overflow: hidden; margin: 2px 0; }
+    .bar i { display: block; width: 40%; height: 100%; border-radius: 2px; background: var(--accent); animation: go 1.3s ease-in-out infinite; }
+    @keyframes go { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
+    @media (prefers-reduced-motion: reduce) { .bar i { animation: none; width: 100%; opacity: .6; } }
+  </style>
+</head>
+<body role="status" aria-live="polite">
+  <img src="icon-central.png" alt="">
+  <b>Updating Riyeser Central…</b>
+  <div class="bar" aria-hidden="true"><i></i></div>
+  <small>This takes a moment. Riyeser Central opens again by itself, and your information is kept.</small>
+</body>
+</html>
