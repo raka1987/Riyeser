@@ -1,0 +1,42 @@
+// Riyeser PDF: open a PDF, Sign menu, Ask someone to sign: the flow appears (real Electron, synthetic files). node ask-to-sign.js DESK OUT
+const { _electron } = require(process.env.PLAYWRIGHT || 'playwright');
+const fs = require('fs'); const path = require('path');
+const [DESK, OUT] = process.argv.slice(2);
+const HOME = fs.mkdtempSync('/dev/shm/integ-ask-');
+const ok = (c, m) => { console.log(c ? 'PASS' : 'FAIL', m); if (!c) process.exitCode = 1; };
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+(async () => {
+  const work = path.join(HOME, 'Work'); fs.cpSync(process.env.PDF_FILES || '/dev/shm/pdfh-files', work, { recursive: true });
+  const app = await _electron.launch({ executablePath: require(path.join(DESK, 'node_modules', 'electron')), args: ['--no-sandbox', '--lang=en-AU', path.join(DESK, 'src', 'pdf-main.js')], env: { ...process.env, HOME, TMPDIR: '/dev/shm', LANG: 'en_AU.UTF-8' } });
+  const w = await app.firstWindow();
+  const errors = [];
+  w.on('pageerror', (e) => errors.push(e.message));
+  w.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  await w.waitForFunction(() => window.__editor, null, { timeout: 30000 });
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1366, 768));
+  await E(w, (f) => window.__editor.openFiles([f]), path.join(work, 'Quote Q-2041 v1.pdf'));
+  await wait(2500);
+  ok(await E(w, () => !!window.__editor.st.doc), 'a PDF is open');
+  ok(await E(w, () => !document.querySelector('#sr-askbtn') && !document.querySelector('#sr-menuitem') && !document.querySelector('#sr-menuhead')), 'no extra buttons next to Sign or in Tools');
+  await w.click('#signbtn'); await wait(400);
+  const items = await E(w, () => [...document.querySelectorAll('#signmenu [role=menuitem]')].filter((b) => !b.hidden).map((b) => b.textContent.trim()));
+  console.log('Sign menu:', JSON.stringify(items));
+  ok(items.filter((t) => /Ask someone to sign/.test(t)).length === 1, 'one "Ask someone to sign…" entry in the Sign menu');
+  ok(items.some((t) => /Sent for signing/.test(t)), '"Sent for signing" is there too');
+  ok(await E(w, () => [...document.querySelectorAll('button')].filter((b) => /Ask someone to sign/.test(b.textContent)).length) === 1, 'one such button in the whole window');
+  await w.screenshot({ path: path.join(OUT, 'INTEG-pdf-signmenu-1366.png') });
+  await w.click('[data-cmd="signrequest"]'); await wait(1500);
+  const flow = await E(w, () => { const o = document.querySelector('#sr-flow'); return o && !o.hidden ? o.innerText : ''; });
+  console.log('Flow:', flow.replace(/\s+/g, ' ').slice(0, 220));
+  ok(/Ask someone to sign/.test(flow) && /Sign in to your Riyeser account/.test(flow), 'the flow appears, asking to sign in with the Riyeser account');
+  ok(await E(w, () => getComputedStyle(document.querySelector('#sr-flow')).position === 'fixed'), 'drawn over the editor (its stylesheet is loaded)');
+  await w.screenshot({ path: path.join(OUT, 'INTEG-pdf-askflow-1366.png') });
+  await w.keyboard.press('Escape'); await wait(300);
+  ok(await E(w, () => !document.querySelector('#sr-flow')), 'Esc closes it');
+  await w.click('#signbtn'); await wait(300); await w.click('[data-cmd="signstatus"]'); await wait(1200);
+  ok(await E(w, () => /Sign in to your Riyeser account/.test((document.querySelector('#sr-flow') || {}).innerText || '')), 'Sent for signing also asks to sign in first');
+  ok(!errors.length, `no page errors ${errors.length ? JSON.stringify(errors.slice(0, 3)) : ''}`);
+  await app.close();
+  fs.rmSync(HOME, { recursive: true, force: true });
+})().catch((e) => { console.log('FAIL', e.message); process.exit(1); });
+function E(w, fn, a) { return w.evaluate(fn, a); }

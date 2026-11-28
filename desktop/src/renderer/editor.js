@@ -1568,20 +1568,25 @@ document.addEventListener('keydown', (e) => {
 }, true);
 
 // ---------------- the "Ask someone to sign…" hook ----------------
-// HOOK (sign-request): "Ask someone to sign…" (online) is built separately (feat/pdf-sign-request). When its module
+// HOOK (sign-request): "Ask someone to sign…" (online, feat/pdf-sign-request). When its module
 // src/renderer/sign-request.js is installed next to this file, the Sign menu shows the entry and calls it:
 //   export async function askToSign(ctx)  with ctx = { file, dirty, save(), buildPdf(), toast(msg), dialog(html), bridge }
-//   export function isAvailable()         optional: return false to keep the entry hidden (e.g. not signed in)
-// Without the module the entry stays hidden and nothing else changes.
+//   export function isAvailable()         optional: return false to keep the entry hidden
+//   export function openStatus()          optional: "Sent for signing" (the requests sent from here) below it
+// window.__signMenuHook tells the module this menu shows its entries, so it adds no buttons of its own.
+// Without the module the entries stay hidden and nothing else changes.
 let signRequest = null;
 async function loadSignRequest() {
+  window.__signMenuHook = true;
   try {
     if (!(await bridge.call('pdf:hasModule', 'sign-request.js'))) return;
     const mod = await import('./sign-request.js');
     if (typeof mod.askToSign !== 'function') return;
     if (typeof mod.isAvailable === 'function' && !(await mod.isAvailable())) return;
+    if (typeof mod.init === 'function') mod.init({ menu: true });
     signRequest = mod;
     $('#signrequestsep').hidden = false; $('[data-cmd="signrequest"]').hidden = false;
+    if (typeof mod.openStatus === 'function') $('[data-cmd="signstatus"]').hidden = false;
   } catch (e) { console.warn('sign-request', e.message); }
 }
 async function askSomeoneToSign() {
@@ -1897,6 +1902,7 @@ const commands = {
   mysignature: () => { closeMenus(); return placeMine('signature'); },
   myinitials: () => { closeMenus(); return placeMine('initials'); },
   signrequest: () => { closeMenus(); return askSomeoneToSign(); },
+  signstatus: () => { closeMenus(); return signRequest && signRequest.openStatus(); },
   sigclose: closeSigModal,
   sigclear: resetPad,
   sigplace: placeSignature,

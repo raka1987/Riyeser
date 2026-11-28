@@ -1,8 +1,11 @@
 // Riyeser PDF: "Ask someone to sign" and "Sent for signing" (the sender's side).
-// Loaded by the editor's Sign menu (or, while the editor has no hook for it, by src/sign-request-ipc.js). The hook can
-//   set window.__signMenuHook = true, import('./sign-request.js'), call  init({ menu: true })  and show  menuItems()
-//   ([{ id, label, run }]) itself. init() without menu: true adds "Ask someone to sign" next to Sign and "Sent for
-//   signing" to the Tools menu (and a later init({ menu: true }) takes those two away again).
+// Loaded by the editor's Sign menu hook (editor.js loadSignRequest): it sets window.__signMenuHook = true, imports this
+//   file, calls  init({ menu: true })  and shows "Ask someone to sign…" (askToSign(ctx)) and "Sent for signing"
+//   (openStatus()) in the Sign menu itself. An editor with no such hook gets the entries added by init() without
+//   menu: true (loaded by src/sign-request-ipc.js): "Ask someone to sign" next to Sign and "Sent for signing" in the
+//   Tools menu (and a later init({ menu: true }) takes those two away again). menuItems() lists the same two.
+// An account is asked for only when someone chooses Ask someone to sign: in Riyeser Central through its shared
+//   question (window.RiyeserCompany.needAccount('sign')), in Riyeser PDF with this module's own sign-in.
 // Also on window.RiyeserSignRequest: { open(), openStatus(), menuItems() }.
 // Main-process side: src/sign-request-ipc.js (signreq:*). Database: sign_* in website/team/team-chat.sql.
 // Wording: "electronic signature with an audit trail"; no claim of meeting any particular law.
@@ -350,6 +353,20 @@ function row(r) {
 }
 
 // ---------------------------------------------------------------- hooking into the editor
+/** Always offered: an account is asked for when it's chosen, not before. */
+export function isAvailable() { return true; }
+/** The Sign menu's "Ask someone to sign…". ctx (from the editor): { file, dirty, save(), buildPdf(), toast(msg), dialog(html), bridge } */
+export async function askToSign(ctx = {}) {
+  if (!hasDom) return false;
+  const say = typeof ctx.toast === 'function' ? ctx.toast : toast;
+  if (!window.__signRequestLoaded) init({ menu: true });
+  if (!ctx.file) { say('Save this PDF first, then choose Ask someone to sign.'); return false; }
+  if (ctx.dirty) { say('Save your changes first, so the people signing see this version.'); return false; }
+  const co = window.RiyeserCompany;
+  if (co && typeof co.needAccount === 'function') return co.needAccount('sign', { then: () => open() });   // Riyeser Central's shared question
+  await open();   // Riyeser PDF: open() signs in with this module's own screen when needed
+  return true;
+}
 export function menuItems() {
   return [{ id: 'sign-request', label: '✉ Ask someone to sign…', run: open }, { id: 'sign-status', label: '📋 Sent for signing', run: openStatus }];
 }
@@ -361,7 +378,7 @@ export function init(ctx = {}) {
   }
   window.__signRequestLoaded = true;
   if (!$('link[href="sign-request.css"]')) { const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = 'sign-request.css'; document.head.appendChild(l); }
-  window.RiyeserSignRequest = { open, openStatus, menuItems };
+  window.RiyeserSignRequest = { open, openStatus, menuItems, askToSign };
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('.sr-ask') && ($('#sr-flow') || $('#sr-list'))) { e.stopPropagation(); closeAll(); } }, true);
   if (window.api && window.api.on) window.api.on('signreq:changed', () => { if ($('#sr-list')) refreshList(); });
   if (!ctx.menu) {   // no Sign menu hook in this editor: add the two entries ourselves

@@ -228,5 +228,46 @@ test('wording: an electronic signature with an audit trail, and no claim about a
   assert.match(src, /electronic signature with an audit trail/);
   assert.doesNotMatch(src, /ESIGN|eIDAS|UETA|legally binding|compliant|complies with/i);
   assert.match(fs.readFileSync(path.join(__dirname, '..', 'src', 'pdf-main.js'), 'utf8'), /registerSignRequest/);
-  assert.doesNotMatch(fs.readFileSync(path.join(__dirname, '..', 'src', 'renderer', 'editor.html'), 'utf8'), /sign-request/, 'the editor itself is left to its Sign menu hook');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'src', 'renderer', 'editor.html'), 'utf8');
+  assert.doesNotMatch(html, /<script[^>]*sign-request|<link[^>]*sign-request/, 'the editor loads it only through its Sign menu hook');
+});
+
+// A very small pretend window: enough for init() and the first screen of open().
+function fakeWindow(extra = {}) {
+  const made = [];
+  const el = (tag) => { const e = { tag, attrs: {}, children: [], hidden: false, setAttribute(k, v) { this.attrs[k] = v; }, appendChild(c) { this.children.push(c); made.push(c); }, after(c) { made.push(c); }, remove() {}, querySelector: () => null, querySelectorAll: () => [], classList: { add() {}, remove() {} } }; return e; };
+  const document = { head: el('head'), body: el('body'), querySelector: () => null, querySelectorAll: () => [], createElement: el, addEventListener() {} };
+  const calls = [];
+  const window = { api: { call: async (...a) => { calls.push(a); throw new Error('No handler for signreq:status'); }, on() {} }, ...extra };
+  return { window, document, calls, made };
+}
+async function freshModule(fake) {
+  globalThis.window = fake.window; globalThis.document = fake.document;
+  try { return await import(`../src/renderer/sign-request.js?t=${Math.random()}`); } finally { /* globals removed by the caller */ }
+}
+const clearFake = () => { delete globalThis.window; delete globalThis.document; };
+
+test('the Sign menu hook: askToSign(ctx) and isAvailable(), no buttons of its own', async (t) => {
+  t.after(clearFake);
+  // Riyeser PDF: no shared account question, so this module's own sign-in (it asks the main process who is signed in)
+  const pdf = fakeWindow({ __signMenuHook: true, __editor: { st: { file: 'C:\\Docs\\Lease.pdf', dirty: false } } });
+  const m = await freshModule(pdf);
+  assert.strictEqual(m.isAvailable(), true, 'the entry is always offered; the account is asked for when it is chosen');
+  const toasts = [];
+  assert.strictEqual(await m.askToSign({ file: null, toast: (x) => toasts.push(x) }), false);
+  assert.strictEqual(await m.askToSign({ file: 'x.pdf', dirty: true, toast: (x) => toasts.push(x) }), false);
+  assert.match(toasts.join(' | '), /Save this PDF first.*Save your changes first/);
+  assert.strictEqual(pdf.calls.length, 0, 'nothing asked online before it can go ahead');
+  assert.strictEqual(await m.askToSign({ file: 'C:\\Docs\\Lease.pdf', dirty: false, toast: (x) => toasts.push(x) }), true);
+  assert.deepStrictEqual(pdf.calls[0], ['signreq:status'], 'Riyeser PDF: its own sign-in check');
+  assert.ok(pdf.window.__signRequestLoaded && pdf.window.RiyeserSignRequest.askToSign, 'set up once');
+  assert.ok(!pdf.made.some((e) => ['sr-askbtn', 'sr-menuitem', 'sr-menuhead'].includes(e.id)), 'no extra buttons next to Sign or in Tools');
+
+  // Riyeser Central: its shared account question is used
+  const asked = [];
+  const central = fakeWindow({ __signMenuHook: true, RiyeserCompany: { needAccount: async (what, o) => { asked.push([what, typeof o.then]); return false; } } });
+  const m2 = await freshModule(central);
+  assert.strictEqual(await m2.askToSign({ file: 'Lease.pdf', dirty: false }), false, 'Not now: nothing else happens');
+  assert.deepStrictEqual(asked, [['sign', 'function']]);
+  assert.strictEqual(central.calls.length, 0, 'the flow starts only once there is an account (needAccount runs then())');
 });

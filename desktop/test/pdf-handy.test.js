@@ -347,3 +347,20 @@ test('Print to PDF inbox: a PDF saved into the folder opens once it has finished
   w.stop();
   assert.deepStrictEqual(opened, ['Printed from Word.pdf']);
 });
+
+// ---------------------------------------------------------------- the Sign menu's hook for "Ask someone to sign"
+test('Sign menu: one "Ask someone to sign…" entry (and "Sent for signing"), shown only when the sign-request module is there', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'src', 'renderer', 'editor.html'), 'utf8');
+  const menu = html.slice(html.indexOf('id="signmenu"'), html.indexOf('id="stampbtn"'));
+  assert.strictEqual((menu.match(/Ask someone to sign/g) || []).length, 1, 'one entry in the Sign menu');
+  assert.match(menu, /data-cmd="signrequest" hidden/); assert.match(menu, /data-cmd="signstatus" hidden/);
+  assert.doesNotMatch(html.replace(menu, ''), /Ask someone to sign|data-cmd="signstatus"/, 'and nowhere else');
+  const js = fs.readFileSync(path.join(ROOT, 'src', 'renderer', 'editor.js'), 'utf8');
+  const hook = js.slice(js.indexOf('async function loadSignRequest'), js.indexOf('async function askSomeoneToSign'));
+  assert.ok(hook.indexOf('window.__signMenuHook = true') < hook.indexOf('await '), 'tells the module straight away that this menu shows its entries');
+  assert.match(hook, /mod\.init\(\{ menu: true \}\)/);
+  assert.match(js, /signRequest\.askToSign\(\{ file: st\.file, dirty: st\.dirty/);
+  // the main process says whether the module is installed (only that one name), and it is installed
+  assert.match(fs.readFileSync(path.join(ROOT, 'src', 'pdf', 'handy-ipc.js'), 'utf8'), /handle\('pdf:hasModule', \(name\) => \(name === 'sign-request\.js' \? fs\.existsSync/);
+  assert.ok(fs.existsSync(path.join(ROOT, 'src', 'renderer', 'sign-request.js')));
+});

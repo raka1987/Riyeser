@@ -6,4 +6,5 @@ Needs Playwright (PLAYWRIGHT=/path/to/node_modules/playwright if it isn't instal
   xvfb-run -a node test/e2e/pdf-handy/multi.js .     right-click "Combine selected" with 3 files: 3 starts, one Combine page; Open adds a tab
   xvfb-run -a node test/e2e/pdf-handy/kb.js .        keyboard: menus, signature window, Ctrl+W, closing a changed tab asks
   xvfb-run -a node test/e2e/pdf-handy/webshots.js . <out>   website/assets/shots pdf-markup and pdf-tools (1280x800)
+  xvfb-run -a node test/e2e/pdf-handy/ask-to-sign.js $PWD <out>   Sign menu: one "Ask someone to sign…" entry, the flow (sign-in) appears
 Each prints PASS/FAIL lines. tabs/webshots also use a drawing, "Site plan Level 2 - A-201.pdf" (the website's sample site plan), in PDF_FILES.
