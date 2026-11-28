@@ -120,3 +120,57 @@ test('every step has a banner line', () => {
   for (const stage of ['downloading', 'checking', 'installing', 'restarting', 'failed']) assert.ok(L9.updateStep({ stage, name: 'X', pct: 1 }));
   assert.strictEqual(L9.updateStep({ stage: 'downloading', name: 'Riyeser POS', pct: 1 }), 'Downloading Riyeser POS… 100%');
 });
+
+// ---------- the Updates panel and the Update now? box (avatar menu → Updates) ----------
+const AU = require('../src/central/auto-update');
+
+test('Set a time…: a picked time holds the update until then, then it may install (work hours or not)', () => {
+  const u = { id: 'pos', to: '2.11.0' };
+  const mon10 = new Date(2026, 10, 30, 10, 0).getTime(); const mon23 = new Date(2026, 10, 30, 23, 0).getTime();
+  const state = { approval: null, tonight: { items: { pos: '2.11.0' }, after: mon23 } };
+  assert.strictEqual(AU.timeGate(u, { when: { mode: 'outside' }, state, now: mon10 }), 'scheduled');
+  assert.strictEqual(AU.timeGate(u, { when: { mode: 'outside' }, state, now: mon23 + 1000 }), null);
+  assert.strictEqual(AU.timeGate(u, { when: { mode: 'approve' }, state, now: mon23 + 1000 }), null);
+  // a time picked inside work hours (approved by an owner or admin in central-main.js) also goes ahead at that time
+  const noon = new Date(2026, 10, 30, 12, 0).getTime();
+  assert.strictEqual(AU.timeGate(u, { when: { mode: 'outside' }, state: { tonight: { items: { pos: '2.11.0' }, after: noon } }, now: noon + 1 }), null);
+  // an older Tonight (no time) still waits for after work
+  assert.strictEqual(AU.timeGate(u, { when: { mode: 'outside' }, state: { tonight: { items: { pos: '2.11.0' } } }, now: mon10 }), 'work-hours');
+});
+
+test('Tonight (after hours) is the end of today\'s work hours, or now when it\'s already after work', () => {
+  const mon10 = new Date(2026, 10, 30, 10, 0).getTime();
+  assert.strictEqual(AU.afterWork(mon10, { days: [1, 2, 3, 4, 5], start: '08:00', end: '18:00' }), new Date(2026, 10, 30, 18, 0).getTime());
+  const sat = new Date(2026, 10, 28, 10, 0).getTime();
+  assert.strictEqual(AU.afterWork(sat, {}), sat);
+});
+
+test('the automatic updater remembers a picked time and the items', () => {
+  const store = { d: {}, get(k, def) { return k in this.d ? this.d[k] : def; }, set(k, v) { this.d[k] = v; }, update(k, def, fn) { this.d[k] = fn(this.get(k, def)); } };
+  const au = AU.createAutoUpdater({ store, when: () => ({ mode: 'outside' }), isDemo: () => false, allowed: () => true, manualBusy: () => false, cacheDir: '/tmp/x',
+    status: async () => ({ updates: [] }), download: async () => {}, verify: async () => ({ ok: true }), running: async () => [], busy: async () => ({}), idle: async () => false,
+    install: async () => ({ ok: true }), installBatch: async () => ({}), installSelf: () => {}, log: () => {}, onChange: () => {}, reported: () => {} }, { now: () => 1000 });
+  const sum = au.tonight({ by: 'owner@example.com', items: { pos: '2.11.0' }, after: 5000 });
+  assert.deepStrictEqual(sum.tonight.items, { pos: '2.11.0' }); assert.strictEqual(sum.tonight.after, 5000);
+  assert.match(L9.scheduleLine(sum, 1000), /^Update scheduled for /);
+});
+
+test('the schedule line and the times read plainly', () => {
+  const today = new Date(2026, 10, 30, 10, 0).getTime();
+  assert.strictEqual(L9.clock(new Date(2026, 10, 30, 23, 0).getTime(), today), '11:00 pm');
+  assert.strictEqual(L9.clock(new Date(2026, 11, 1, 8, 30).getTime(), today), 'tomorrow 8:30 am');
+  assert.strictEqual(L9.scheduleLine({ mode: 'outside', inWork: true, hours: { end: '18:00' } }), 'Automatic updates: tonight, after 6:00 pm');
+  assert.strictEqual(L9.scheduleLine({ mode: 'approve' }), 'Automatic updates: only when an owner or admin approves');
+  assert.strictEqual(L9.scheduleLine({ mode: 'asap' }), 'Automatic updates: as soon as each program is closed');
+  assert.strictEqual(L9.scheduleLine({ demo: true }), 'Automatic updates: off while demo mode is on');
+  assert.strictEqual(L9.scheduleLine({ mode: 'outside', tonight: { after: new Date(2026, 10, 30, 23, 0).getTime(), items: { pos: '2.11.0' } } }, today), 'Update scheduled for 11:00 pm');
+  assert.strictEqual(L9.scheduleLine(null), '');
+});
+
+test('the panel lists each installed program with its version, the newest and Up to date / Update available', () => {
+  const rows = L9.updateRows({ versions: { installed: { central: '1.9.1', pdf: '0.26.0', pos: '2.10.1' }, latest: { central: '1.9.2', pdf: '0.26.0', pos: '2.11.0' } },
+    updates: [{ id: 'central', from: '1.9.1', to: '1.9.2' }, { id: 'pos', from: '2.10.1', to: '2.11.0' }], ids: ['central', 'pdf', 'pos', 'payroll'], names: { pdf: 'Riyeser PDF', pos: 'Riyeser POS', payroll: 'Riyeser Payroll' } });
+  assert.deepStrictEqual(rows.map((r) => [r.name, r.installed, r.newest, r.status]), [
+    ['Riyeser Central', '1.9.1', '1.9.2', 'Update available'], ['Riyeser PDF', '0.26.0', '0.26.0', 'Up to date'],
+    ['Riyeser POS', '2.10.1', '2.11.0', 'Update available'], ['Riyeser Payroll', '', '', 'Not in the latest release']]);
+});

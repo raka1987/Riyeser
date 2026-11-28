@@ -936,7 +936,34 @@ function registerIpc() {
   setTimeout(resumeIfOnline, 15 * 1000); setInterval(resumeIfOnline, 2 * 60 * 1000);
   handle('firstrun:resume', () => { resumeIfOnline(); return true; });
   handle('central:updates', (force) => updateStatus(!!force));
-  handle('central:installUpdates', (ids) => manualUpdatesWhenFree(ids));
+  // Update now (the Update now? box): during work hours an owner or admin approves it, the same rule as Install now
+  const workGate = async () => {
+    if (demoOn() || !autoUpdate.inWorkHours(Date.now(), updateWhen().hours)) return { inWork: false, by: null };
+    try { return { inWork: true, by: await approver() }; } catch (e) { return { inWork: true, by: null, needsAdmin: true, message: e.message }; }
+  };
+  handle('central:updateGate', () => workGate());
+  handle('central:installUpdates', async (ids) => {
+    const g = await workGate();
+    if (g.needsAdmin) throw new Error('It’s work hours, so an owner or admin approves updates. Unlock 🔒 Admin and try again, or pick a time after work with Set a time…');
+    if (g.by) installLog({ id: 'central', stage: 'approved', how: 'update now', detail: `during work hours, by ${g.by}` });
+    return manualUpdatesWhenFree(ids);
+  });
+  // Set a time… (the Update now? box): Tonight (after work hours) or a time picked. A time inside work hours needs the
+  // same approval as Update now. -> the automatic updates' summary (its tonight.after is the time)
+  handle('central:scheduleUpdates', async (ids, at) => {
+    const st = await updateStatus(false);
+    const items = Object.fromEntries(st.updates.filter((u) => !ids || ids.includes(u.id)).map((u) => [u.id, u.to]));
+    if (!Object.keys(items).length) throw new Error('Everything is up to date.');
+    const hours = updateWhen().hours; let after = Number(at) || 0;
+    if (!after) after = autoUpdate.afterWork(Date.now(), hours);   // Tonight (after hours)
+    if (after < Date.now() - 60000) throw new Error('Choose a time later today or tomorrow.');
+    let by = 'this PC';
+    if (!demoOn() && autoUpdate.inWorkHours(after, hours)) by = await approver();
+    if (!autoUpdater) throw new Error('Updates can be scheduled in the installed Riyeser Central on Windows.');
+    autoUpdater.tonight({ by, items, after });
+    setTimeout(() => autoUpdater.tick(), 1000);
+    return autoUpdater.summary();
+  });
   // Admin panel → Updates: "When to install updates", work hours, the last automatic update, what's waiting and why,
   // "N updates ready" with Install now / Tonight, Try again
   const noAuto = () => ({ mode: updateWhen().mode, hours: updateWhen().hours, demo: demoOn(), allowed: false, last: null, history: [], waiting: {}, attention: [], pending: [], ready: [], week: false, counts: {} });

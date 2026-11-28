@@ -291,7 +291,41 @@
       default: return '';
     }
   }
-  const api = { updateStep, ORDER, JOBS, byOrder, autoLine, firstName, greeting, audience, planLine, payLine, onlineToday, liveLine, tiles, jobsFor, chips, attention, searchLocal };
+  /** "11:00 pm" (and "tomorrow 8:30 am" when it isn't today) for a time in ms, in the PC's time zone. */
+  function clock(ms, now = Date.now()) {
+    const d = new Date(ms); const h = d.getHours(); const m = d.getMinutes();
+    const t = `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'am' : 'pm'}`;
+    const day = (x) => new Date(x).toDateString();
+    if (day(ms) === day(now)) return t;
+    if (day(ms) === day(now + 24 * 3600 * 1000)) return `tomorrow ${t}`;
+    return `${d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })} ${t}`;
+  }
+  /** "HH:MM" (end of work hours) -> "6:00 pm". */
+  const hhmmText = (t) => { const [h, m] = String(t || '18:00').split(':').map(Number); return `${h % 12 || 12}:${String(m || 0).padStart(2, '0')} ${h < 12 ? 'am' : 'pm'}`; };
+  /** The Updates panel's schedule line, from the automatic updates' summary (central:autoUpdate). '' when none. */
+  function scheduleLine(au, now = Date.now()) {
+    if (!au) return '';
+    if (au.demo) return 'Automatic updates: off while demo mode is on';
+    if (au.tonight && au.tonight.after && au.tonight.after > now - 60 * 60000 && Object.keys(au.tonight.items || {}).length) return `Update scheduled for ${clock(au.tonight.after, now)}`;
+    if (au.mode === 'asap') return 'Automatic updates: as soon as each program is closed';
+    if (au.mode === 'approve') return 'Automatic updates: only when an owner or admin approves';
+    const end = hhmmText(au.hours && au.hours.end);
+    return au.inWork ? `Automatic updates: tonight, after ${end}` : 'Automatic updates: now, outside work hours, while each program is closed';
+  }
+  /**
+   * The Updates panel's rows: every installed program with its version on this PC, the newest and its status.
+   * versions: central:versions ({ installed, latest }); updates: central:updates' list; names: { id: full name }.
+   */
+  function updateRows({ versions, updates, ids, names = {} }) {
+    const v = versions || { installed: {}, latest: {} };
+    return (ids || []).map((id) => {
+      const u = (updates || []).find((x) => x.id === id);
+      const have = (v.installed || {})[id] || (u && u.from) || ''; const newest = (u && u.to) || (v.latest || {})[id] || '';
+      return { id, name: id === 'central' ? 'Riyeser Central' : names[id] || id, installed: have, newest, update: !!u,
+        status: u ? 'Update available' : newest ? 'Up to date' : 'Not in the latest release' };
+    });
+  }
+  const api = { updateStep, clock, scheduleLine, updateRows, ORDER, JOBS, byOrder, autoLine, firstName, greeting, audience, planLine, payLine, onlineToday, liveLine, tiles, jobsFor, chips, attention, searchLocal };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.RiyeserLauncher = api;
 }(typeof window !== 'undefined' ? window : null));
