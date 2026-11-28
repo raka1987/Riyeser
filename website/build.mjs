@@ -753,7 +753,7 @@ const CI = {
 };
 const ci = (k) => `<svg viewBox="0 0 24 24" aria-hidden="true">${CI[k]}</svg>`;
 const centralMock = (up) => `<div class="cmock-wrap" aria-label="Riyeser Central home screen" role="img"><div class="cmock">
-  <div class="cm-side"><div class="cm-logo"><img src="${up}assets/logo-r.png" alt="">Riyeser Central</div>
+  <div class="cm-side"><div class="cm-logo"><img src="${up}assets/apps/central.png" alt="">Riyeser Central</div>
     <span class="on">${ci('home')}Home</span><span>${ci('book')}Books</span><span>${ci('people')}Payroll</span><span>${ci('invoice')}Invoices</span><span>${ci('folder')}Documents</span><span>${ci('pdf')}PDF</span>
     <hr><span>${ci('key')}Licence</span><span>${ci('help')}Help</span></div>
   <div class="cm-main"><div class="cm-ctl"><i></i><i></i><i></i></div>
@@ -1336,7 +1336,7 @@ page({
   description: 'Download Riyeser Central for Windows 10 and 11, then add the programs you need. No account, no card.',
   body: (up) => `${bandHero({ title: 'Download Riyeser for Windows', lead: 'Get Riyeser Central, then add the programs you need.' })}
 <section class="c" style="padding-top:44px">
-  <div class="central-dl"><img src="${up}assets/logo-r.png" alt="">
+  <div class="central-dl"><img src="${up}assets/apps/central.png" alt="">
     <div><h2>Riyeser Central</h2><p>The home screen and installer for Riyeser programs. It shows what else you can add and keeps everything up to date.</p></div>
     <span class="sep"></span>
     <div class="act"><a class="btn p big" href="${dl(prog('central'), up)}">${WINDL}</a><small>${WINLOGO} Windows 10 &amp; 11</small></div>
@@ -1816,7 +1816,7 @@ writeFileSync(join(OUT, 'sign', 'index.html'), withCsp(`<!doctype html>
 <a class="skip" href="#main">Skip to the document</a>
 <header class="top"><a class="brand" href="${BASE}"><picture><source srcset="${BASE}assets/logo-wordmark-light.svg" media="(prefers-color-scheme: dark)"><img src="${BASE}assets/logo-wordmark.svg" alt="Riyeser" width="96" height="30"></picture></a><span class="tagline">Electronic signature with an audit trail</span></header>
 <div class="wrap" id="app"><main id="main" class="loading" tabindex="-1">Loading…</main></div>
-<footer class="foot">Sent with Riyeser PDF · <a href="${BASE}">riyeser.com</a><span id="live" class="sr" aria-live="polite"></span></footer>
+<footer class="foot">Powered by <a href="${BASE}">Riyeser</a> · sent with Riyeser PDF<span id="live" class="sr" aria-live="polite"></span></footer>
 <script type="module" src="${BASE}sign/sign.js?v=${stamp8(signJs)}"></script>
 </body>
 </html>

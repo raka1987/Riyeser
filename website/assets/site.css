@@ -216,7 +216,7 @@ a.card:hover { transform: translateY(-3px); box-shadow: var(--shadow); border-co
 
 /* ---------- downloads ---------- */
 .central-dl { display: grid; grid-template-columns: auto 1fr auto auto; gap: 34px; align-items: center; border: 1px solid var(--line); border-radius: 16px; padding: 30px 40px; background: var(--card); box-shadow: var(--shadow-sm); }
-.central-dl > img { width: 120px; }
+.central-dl > img { width: 120px; border-radius: 26px; }
 .central-dl h2 { font-size: 36px; letter-spacing: -.8px; margin-bottom: 6px; }
 .central-dl p { margin: 0; font-size: 18px; color: var(--text); }
 .central-dl .sep { width: 1px; align-self: stretch; background: var(--line); }
@@ -423,7 +423,7 @@ footer { background: #fff; }
   border: 6px solid #12224a; box-shadow: 0 30px 60px -24px rgba(10, 30, 80, .45); font-size: 13px; color: #0f1d3d; line-height: 1.3; }
 .cm-side { background: #0f2150; color: #e7eeff; padding: 14px 10px 18px; display: flex; flex-direction: column; gap: 3px; }
 .cm-logo { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; padding: 4px 8px 14px; color: #fff; }
-.cm-logo img { width: 22px; height: 22px; filter: brightness(0) invert(1); }
+.cm-logo img { width: 22px; height: 22px; border-radius: 6px; }
 .cm-side span { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; font-size: 12.5px; white-space: nowrap; overflow: hidden; }
 .cm-side span.on { background: #1f62f0; color: #fff; font-weight: 600; }
 .cm-side svg, .cm-row svg, .cm-cards em svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
