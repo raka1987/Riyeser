@@ -230,6 +230,20 @@
       out.push({ id: `install-${id}`, title: `${p ? p.full : id} didn't install`, detail: x.message || '', act: { label: 'Try again', attrs: `data-install="${id}"` } });
     }
     if (ctx.updError) out.push({ id: 'updates', title: 'Updates didn\'t finish', detail: ctx.updError, act: { label: 'Try again', attrs: 'data-adm-go="updates"' }, admin: true });
+    // updates waiting for a time or an approval (central/auto-update.js): one quiet item; owners and admins approve
+    const au = ctx.autoUpd;
+    if (au && !au.demo && (au.week || (au.ready && au.ready.length))) {
+      const n = au.week ? (au.pending || []).length : au.ready.length; const can = ctx.canApprove !== false;
+      const install = { label: 'Install now', attrs: 'data-autoapprove' }; const later = { label: 'Tonight', attrs: 'data-autotonight' };
+      if (au.week) out.push({ id: 'auto-week', title: 'Updates have been waiting a week: install now or leave the PC on overnight', detail: can ? '' : 'An owner or admin can install them.', acts: can ? [install] : [], admin: true });
+      else if (!can) out.push({ id: 'auto-ready', title: 'Updates are waiting for an administrator', detail: `${n} update${n === 1 ? '' : 's'} ready. An owner or admin can install them.`, acts: [], admin: true });
+      else {
+        const end = (au.hours && au.hours.end) || '18:00';
+        const detail = au.mode === 'approve' ? 'They wait for your approval. Programs that are open update once they\'re closed.'
+          : `They install by themselves after work hours (after ${end}). Install now, or leave them for tonight.`;
+        out.push({ id: 'auto-ready', title: `${n} update${n === 1 ? '' : 's'} ready`, detail, acts: [install, later], admin: true });
+      }
+    }
     // an automatic update that didn't install twice (central/auto-update.js): one line each, with Try again
     for (const f of ctx.autoFailed || []) {
       const nm = f.id === 'central' ? 'Riyeser Central' : (ctx.names || {})[f.id] || f.name || f.id;

@@ -1,6 +1,8 @@
 // Windows runner check: Riyeser Central's automatic updates (central/auto-update.js) with real installers.
 //   node scripts/central-autoupdate-check.js --dir=<downloaded release installers> --out=report.json
 // A released Riyeser PDF is installed, then a made-up newer release (99.0.0, the same installer file) is offered:
+//   0. during work hours (set here to every day, all day) nothing installs, not even with PDF closed, and Central
+//      doesn't update itself at a start; then "As soon as possible" for the rest:
 //   1. while Riyeser PDF is open, nothing installs (it waits: "Installs once it's closed");
 //   2. once it's closed, the next look installs it quietly with the real installer (its program file is rewritten);
 //   3. Riyeser Central's own update waits for the next start; at that start it's handed over and installs quietly
@@ -54,9 +56,10 @@ const quiet = async (file, args) => { const r = await run.runInstaller({ file, a
     { id: 'central', name: 'Riyeser Central', from: '1.0.0', to: '99.0.0', url: `${base}RiyeserCentral-Setup.exe`, file: 'RiyeserCentral-Setup.exe', args: ['/S'], self: true, elevate: false, digest: await sha(centralSetup), src: centralSetup },
   ];
   const left = new Set(['pdf', 'central']);
+  let when = { mode: 'outside', hours: { days: [0, 1, 2, 3, 4, 5, 6], start: '00:00', end: '00:00' } };   // always work time
   const logs = []; const selfRuns = [];
   const au = A.createAutoUpdater({
-    store, cacheDir: path.join(work, 'updates'), allowed: () => true, enabled: () => true, isDemo: () => false,
+    store, cacheDir: path.join(work, 'updates'), allowed: () => true, when: () => when, isDemo: () => false,
     status: async () => ({ updates: release.filter((u) => left.has(u.id)), latest: { manifest: null } }),
     download: async (u, file) => fs.copyFileSync(u.src, file),
     verify: (file, u, manifest) => check.checkInstaller({ file, name: u.file, manifest, digest: u.digest, publicKey: '' }),
@@ -67,6 +70,13 @@ const quiet = async (file, args) => { const r = await run.runInstaller({ file, a
     installSelf: (u, file, when) => selfRuns.push({ when }),
     log: (e) => logs.push(e),
   });
+
+  // 0. work hours: downloaded, nothing installed (PDF is closed), no self-update at a start
+  const r0 = await au.check();
+  step('during work hours nothing installs, even with the program closed', r0.installed && !r0.installed.length && r0.waiting.pdf === 'work-hours', { waiting: r0.waiting });
+  step('a Central start during work hours doesn\'t update itself', au.atStart({ appVersion: '1.0.0', newer: updates.newer }) === null);
+  step('the "updates ready" item lists both', au.summary().ready.length === 2);
+  when = { mode: 'asap' };
 
   // 1. Riyeser PDF open: it waits
   const pdf = spawn(PDF_EXE, [], { detached: true, stdio: 'ignore' }); pdf.unref();

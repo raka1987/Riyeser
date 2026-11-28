@@ -10,6 +10,7 @@ const { newer } = require('../src/central/updates');
 const L9 = require('../src/renderer/launcher');
 
 const HOUR = 3600 * 1000; const DAY = 24 * HOUR;
+const ASAP = { mode: 'asap' };   // the mechanics below, without the time rules (those have their own tests)
 const memStore = () => { const m = {}; return { get: (k, f) => (k in m ? m[k] : f), set: (k, v) => { m[k] = JSON.parse(JSON.stringify(v)); return v; }, m }; };
 const U = (id, from, to, extra = {}) => ({ id, name: `Riyeser ${id}`, from, to, url: `https://github.com/raka1987/riyeser-downloads/releases/download/t/${id}.exe`, file: `${id}.exe`, args: ['/S'], self: id === 'central', elevate: false, digest: null, ...extra });
 const cached = (...ups) => ({ ...A.read(memStore()), cache: Object.fromEntries(ups.map((u) => [u.id, { version: u.to, file: `/c/${u.id}.exe` }])) });
@@ -17,13 +18,13 @@ const cached = (...ups) => ({ ...A.read(memStore()), cache: Object.fromEntries(u
 test('decide: a closed program installs, an open one waits, and "couldn\'t tell" counts as open', () => {
   const pdf = U('pdf', '0.25.0', '0.26.0'); const desk = U('desk', '1.0.0', '1.1.0');
   const st = cached(pdf, desk);
-  let d = A.decide({ updates: [pdf, desk], state: st, running: new Set(['desk']), now: 0 });
+  let d = A.decide({ when: ASAP, updates: [pdf, desk], state: st, running: new Set(['desk']), now: 0 });
   assert.deepEqual(d.install.map((u) => u.id), ['pdf']);
   assert.equal(d.waiting.desk, 'running');
-  d = A.decide({ updates: [pdf], state: st, running: null, now: 0 });
+  d = A.decide({ when: ASAP, updates: [pdf], state: st, running: null, now: 0 });
   assert.deepEqual(d.install, []); assert.equal(d.waiting.pdf, 'running');
   // not downloaded yet
-  d = A.decide({ updates: [U('payroll', '2.0.0', '2.1.0')], state: st, running: new Set(), now: 0 });
+  d = A.decide({ when: ASAP, updates: [U('payroll', '2.0.0', '2.1.0')], state: st, running: new Set(), now: 0 });
   assert.equal(d.waiting.payroll, 'downloading');
 });
 
@@ -31,7 +32,7 @@ test('decide: busy signals hold a program back (open till, unsent website news)'
   const pos = U('pos', '1.0.0', '1.1.0'); const inv = U('invoices', '1.0.0', '1.1.0'); const pdf = U('pdf', '0.25.0', '0.26.0');
   const busy = A.busyFrom({ company: { tillOpen: true, unsent: 2 } });
   assert.equal(busy.pos, 'till-open'); assert.equal(busy.invoices, 'unsent'); assert.equal(busy.accounting, 'unsent'); assert.equal(busy.pdf, undefined);
-  const d = A.decide({ updates: [pos, inv, pdf], state: cached(pos, inv, pdf), running: new Set(), busy, now: 0 });
+  const d = A.decide({ when: ASAP, updates: [pos, inv, pdf], state: cached(pos, inv, pdf), running: new Set(), busy, now: 0 });
   assert.deepEqual(d.install.map((u) => u.id), ['pdf']);
   assert.equal(d.waiting.pos, 'till-open'); assert.equal(d.waiting.invoices, 'unsent');
   assert.deepEqual(A.busyFrom({ company: { tillOpen: false, unsent: 0 }, centralPending: 3 }), { central: 'unsent' });
@@ -48,50 +49,51 @@ test('runningIds: Windows\' list of running programs -> the Riyeser programs tha
 test('decide: whole-PC updates go together, only while idle with nothing open, at most one prompt a day', () => {
   const lo = U('linkoffice', '1.2.0', '1.3.0', { elevate: true }); const x = U('other', '1.0.0', '1.1.0', { elevate: true });
   const st = cached(lo, x); const now = 10 * DAY;
-  let d = A.decide({ updates: [lo, x], state: st, running: new Set(), idle: false, now });
+  let d = A.decide({ when: ASAP, updates: [lo, x], state: st, running: new Set(), idle: false, now });
   assert.deepEqual(d.elevate, []); assert.equal(d.waiting.linkoffice, 'idle');
-  d = A.decide({ updates: [lo, x], state: st, running: new Set(['pdf']), idle: true, now });
+  d = A.decide({ when: ASAP, updates: [lo, x], state: st, running: new Set(['pdf']), idle: true, now });
   assert.deepEqual(d.elevate, [], 'another Riyeser program open: not now');
-  d = A.decide({ updates: [lo, x], state: st, running: new Set(), idle: true, now });
+  d = A.decide({ when: ASAP, updates: [lo, x], state: st, running: new Set(), idle: true, now });
   assert.deepEqual(d.elevate.map((u) => u.id), ['linkoffice', 'other'], 'both in one prompt');
-  d = A.decide({ updates: [lo, x], state: { ...st, lastPrompt: now - 5 * HOUR }, running: new Set(), idle: true, now });
+  d = A.decide({ when: ASAP, updates: [lo, x], state: { ...st, lastPrompt: now - 5 * HOUR }, running: new Set(), idle: true, now });
   assert.deepEqual(d.elevate, []); assert.equal(d.waiting.other, 'prompt-today');
-  d = A.decide({ updates: [lo], state: { ...st, lastPrompt: now - 25 * HOUR }, running: new Set(), idle: true, now });
+  d = A.decide({ when: ASAP, updates: [lo], state: { ...st, lastPrompt: now - 25 * HOUR }, running: new Set(), idle: true, now });
   assert.equal(d.elevate.length, 1, 'a day later: asked again');
 });
 
 test('decide: Central goes last, only while idle with no Riyeser program open; otherwise the next start', () => {
   const me = U('central', '1.9.1', '1.9.3'); const pdf = U('pdf', '0.25.0', '0.26.0');
   const st = cached(me, pdf);
-  let d = A.decide({ updates: [me, pdf], state: st, running: new Set(), idle: true, now: 0 });
+  let d = A.decide({ when: ASAP, updates: [me, pdf], state: st, running: new Set(), idle: true, now: 0 });
   assert.equal(d.self, null); assert.equal(d.waiting.central, 'after-others'); assert.equal(d.install[0].id, 'pdf');
-  d = A.decide({ updates: [me], state: st, running: new Set(), idle: false, now: 0 });
+  d = A.decide({ when: ASAP, updates: [me], state: st, running: new Set(), idle: false, now: 0 });
   assert.equal(d.waiting.central, 'next-start');
-  d = A.decide({ updates: [me], state: st, running: new Set(['payroll']), idle: true, now: 0 });
+  d = A.decide({ when: ASAP, updates: [me], state: st, running: new Set(['payroll']), idle: true, now: 0 });
   assert.equal(d.waiting.central, 'next-start');
-  d = A.decide({ updates: [me], state: st, running: new Set(), idle: true, now: 0 });
+  d = A.decide({ when: ASAP, updates: [me], state: st, running: new Set(), idle: true, now: 0 });
   assert.equal(d.self.id, 'central');
-  d = A.decide({ updates: [me], state: st, running: new Set(), idle: true, busy: { central: 'unsent' }, now: 0 });
+  d = A.decide({ when: ASAP, updates: [me], state: st, running: new Set(), idle: true, busy: { central: 'unsent' }, now: 0 });
   assert.equal(d.self, null); assert.equal(d.waiting.central, 'unsent');
 });
 
-test('decide: the setting off, or demo mode, installs nothing', () => {
-  const pdf = U('pdf', '0.25.0', '0.26.0');
-  assert.deepEqual(A.decide({ updates: [pdf], state: cached(pdf), running: new Set(), on: false }).waiting, { pdf: 'off' });
-  assert.deepEqual(A.decide({ updates: [pdf], state: cached(pdf), running: new Set(), demo: true }).waiting, { pdf: 'demo' });
-  assert.equal(A.settingOn({}), true, 'on by default');
-  assert.equal(A.settingOn({ autoUpdate: false }), false);
+test('decide: "Only when I approve", or demo mode, installs nothing by itself', () => {
+  const pdf = U('pdf', '0.25.0', '0.26.0'); const night = new Date(2026, 10, 30, 23, 0).getTime();
+  assert.deepEqual(A.decide({ when: { mode: 'approve' }, updates: [pdf], state: cached(pdf), running: new Set(), now: night }).waiting, { pdf: 'approval' });
+  assert.deepEqual(A.decide({ when: ASAP, updates: [pdf], state: cached(pdf), running: new Set(), demo: true }).waiting, { pdf: 'demo' });
+  assert.equal(A.modeOf({}), 'outside', 'outside work hours by default');
+  assert.equal(A.modeOf({ autoUpdate: false }), 'approve', 'an earlier "off" means only when approved');
+  assert.equal(A.modeOf({ updateWhen: 'asap' }), 'asap');
 });
 
 /** A scheduler with stand-ins for Windows: a temp cache folder and a fake release. */
 function rig(over = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'riy-auto-'));
-  const store = memStore(); let now = 100 * DAY;
-  const t = { updates: [U('pdf', '0.25.0', '0.26.0')], open: new Set(), busy: {}, idle: false, on: true, demo: false, allowed: true, manual: false,
+  const store = memStore(); let now = over.start || 100 * DAY; delete over.start;
+  const t = { updates: [U('pdf', '0.25.0', '0.26.0')], open: new Set(), busy: {}, idle: false, when: ASAP, demo: false, allowed: true, manual: false,
     installs: [], batches: [], selfRuns: [], logs: [], downloads: 0, reported: 0, verifyOk: true, installResult: () => ({ ok: true }), batchResult: (list) => Object.fromEntries(list.map(({ u }) => [u.id, { ok: true }])) };
   Object.assign(t, over);
   const au = A.createAutoUpdater({
-    store, now: () => now, enabled: () => t.on, isDemo: () => t.demo, allowed: () => t.allowed, manualBusy: () => t.manual, cacheDir: dir,
+    store, now: () => now, when: () => t.when, isDemo: () => t.demo, allowed: () => t.allowed, manualBusy: () => t.manual, cacheDir: dir,
     status: async () => ({ updates: t.updates.filter((u) => !u.done), latest: { manifest: { kind: 'test' } } }),
     download: async (u, file) => { t.downloads++; fs.writeFileSync(file, `installer ${u.id} ${u.to}`); },
     verify: async () => ({ ok: t.verifyOk, error: t.verifyOk ? null : 'not genuine' }),
@@ -222,13 +224,13 @@ test('Central\'s own update while someone works: waits for the next start, then 
   assert.equal(s.cache.central, undefined); assert.ok(!fs.existsSync(c.file));
 });
 
-test('Central\'s update at start: never in demo mode, with the setting off, with unsent online marks, or after two tries', async () => {
+test('Central\'s update at start: never in demo mode, while waiting for approval, with unsent online marks, or after two tries', async () => {
   const me = U('central', '1.9.1', '1.9.3');
   const { au, t } = rig({ updates: [me] });
   await au.check();
   t.demo = true; assert.equal(au.atStart({ appVersion: '1.9.1', newer }), null);
-  t.demo = false; t.on = false; assert.equal(au.atStart({ appVersion: '1.9.1', newer }), null);
-  t.on = true; assert.equal(au.atStart({ appVersion: '1.9.1', newer, busy: { central: 'unsent' } }), null);
+  t.demo = false; t.when = { mode: 'approve' }; assert.equal(au.atStart({ appVersion: '1.9.1', newer }), null);
+  t.when = ASAP; assert.equal(au.atStart({ appVersion: '1.9.1', newer, busy: { central: 'unsent' } }), null);
   t.allowed = false; assert.equal(au.atStart({ appVersion: '1.9.1', newer }), null, 'a developer copy never updates itself');
   t.allowed = true;
   assert.ok(au.atStart({ appVersion: '1.9.1', newer }), 'first try');
@@ -237,11 +239,11 @@ test('Central\'s update at start: never in demo mode, with the setting off, with
   assert.equal(au.state().items.central.fails, 1);
 });
 
-test('the setting off: nothing is downloaded or installed', async () => {
-  const { au, t } = rig({ on: false });
-  const r = await au.check();
-  assert.ok(r.skipped); assert.equal(t.downloads, 0); assert.equal(t.installs.length, 0);
-  assert.equal(au.summary().on, false);
+test('"Only when I approve": downloads in the background, installs nothing until approved', async () => {
+  const { au, t } = rig({ when: { mode: 'approve' } });
+  await au.check();
+  assert.equal(t.downloads, 1, 'downloading is fine any time'); assert.equal(t.installs.length, 0);
+  assert.equal(au.summary().ready.length, 1);
 });
 
 test('demo mode: never updates by itself', async () => {
@@ -289,4 +291,154 @@ test('Central\'s company-file busy check reads an open till and unsent website n
   const f2 = make('CREATE TABLE company (id INTEGER PRIMARY KEY)');   // an older program: no till, no outbox
   assert.deepEqual(await sources.companyBusy(f2, { now }), { found: true, tillOpen: false, unsent: 0 });
   assert.deepEqual(await sources.companyBusy(path.join(dir, 'none.db')), { found: false, tillOpen: false, unsent: 0 });
+});
+
+// ---------- when updates may install: work hours, approval, "As soon as possible", the week reminder ----------
+// Local times on this PC (Monday 30 November 2026 is a Monday).
+const at = (day, h, m = 0) => new Date(2026, 10, 30 + day, h, m).getTime();   // day 0 = Mon … 5 = Sat, 6 = Sun
+const OUTSIDE = { mode: 'outside' };
+
+test('work hours: Mon–Fri 8:00–18:00 by default, in the PC\'s local time', () => {
+  assert.equal(A.inWorkHours(at(0, 10), {}), true);
+  assert.equal(A.inWorkHours(at(0, 7, 59), {}), false);
+  assert.equal(A.inWorkHours(at(0, 8), {}), true);
+  assert.equal(A.inWorkHours(at(0, 18), {}), false, '18:00 is after work');
+  assert.equal(A.inWorkHours(at(4, 17, 59), {}), true, 'Friday');
+  assert.equal(A.inWorkHours(at(5, 10), {}), false, 'Saturday');
+  assert.equal(A.inWorkHours(at(6, 10), {}), false, 'Sunday');
+  assert.equal(A.inWorkHours(at(5, 10), { days: [1, 2, 3, 4, 5, 6] }), true, 'Saturday ticked as a work day');
+  assert.deepEqual(A.workHours({ days: [9, 'x', 1], start: '25:00', end: '17:30' }), { days: [1], start: '08:00', end: '17:30' });
+});
+
+test('work hours across midnight belong to the day they start on (a Friday night shift runs into Saturday)', () => {
+  const night = { days: [5], start: '22:00', end: '06:00' };
+  assert.equal(A.inWorkHours(at(4, 23), night), true, 'Friday 23:00');
+  assert.equal(A.inWorkHours(at(5, 5, 59), night), true, 'Saturday 05:59, still Friday\'s shift');
+  assert.equal(A.inWorkHours(at(5, 6), night), false, 'Saturday 06:00');
+  assert.equal(A.inWorkHours(at(5, 23), night), false, 'Saturday night is not a work night');
+  assert.equal(A.inWorkHours(at(4, 5), night), false, 'Friday 05:00: Thursday has no shift');
+  assert.equal(A.inWorkHours(at(3, 12), night), false);
+  assert.equal(A.inWorkHours(at(2, 3), { days: [3], start: '00:00', end: '00:00' }), true, 'start = end: the whole Wednesday');
+});
+
+test('work hours follow the time zone: the same moment is work time in Fiji and evening in London', () => {
+  const t = Date.UTC(2026, 10, 30, 21, 0);   // Monday 21:00 UTC
+  assert.deepEqual(A.localParts(t, 'Pacific/Fiji'), { day: 2, minutes: 9 * 60 });          // Tuesday 09:00
+  assert.deepEqual(A.localParts(t, 'Europe/London'), { day: 1, minutes: 21 * 60 });         // Monday 21:00
+  assert.deepEqual(A.localParts(t, 'America/New_York'), { day: 1, minutes: 16 * 60 });      // Monday 16:00
+  assert.equal(A.inWorkHours(t, {}, 'Pacific/Fiji'), true);
+  assert.equal(A.inWorkHours(t, {}, 'Europe/London'), false);
+  assert.equal(A.inWorkHours(t, {}, 'America/New_York'), true);
+  // Saturday morning in Sydney is still Friday evening in UTC
+  assert.equal(A.inWorkHours(Date.UTC(2026, 11, 4, 23, 0), {}, 'Australia/Sydney'), false);
+});
+
+test('outside work hours (the default): nothing installs during work, everything goes in after work', async () => {
+  const { au, t, advance } = rig({ when: OUTSIDE, start: at(0, 10), updates: [U('pdf', '0.25.0', '0.26.0'), U('central', '1.9.1', '1.9.3')], idle: true });
+  const r = await au.check();
+  assert.equal(t.downloads, 2, 'downloads during work are fine');
+  assert.deepEqual(r.installed, []); assert.equal(t.installs.length, 0); assert.equal(t.selfRuns.length, 0);
+  assert.equal(r.waiting.pdf, 'work-hours'); assert.equal(au.summary().waiting.pdf, A.WAITING['work-hours']);
+  assert.equal(au.summary().inWork, true); assert.equal(au.summary().ready.length, 2);
+  advance(8 * HOUR + 30 * 60 * 1000);   // 18:30
+  assert.deepEqual((await au.tick()).installed, ['pdf']);
+  assert.deepEqual((await au.tick()).installed, ['central'], 'then Central, last');
+});
+
+test('the Windows permission prompt never appears during work hours, even when the PC is idle', async () => {
+  const lo = U('linkoffice', '1.2.0', '1.3.0', { elevate: true });
+  const { au, t, advance } = rig({ when: OUTSIDE, start: at(1, 11), updates: [lo], idle: true });
+  await au.check();
+  assert.deepEqual(t.batches, []); assert.equal(au.summary().waiting.linkoffice, A.WAITING['work-hours']);
+  advance(9 * HOUR);   // 20:00
+  await au.tick();
+  assert.deepEqual(t.batches, [['linkoffice']]);
+});
+
+test('Central doesn\'t update itself at a start during work hours; it waits for a start after work', async () => {
+  const { au, advance } = rig({ when: OUTSIDE, start: at(2, 9), updates: [U('central', '1.9.1', '1.9.3')] });
+  await au.check();
+  assert.equal(au.atStart({ appVersion: '1.9.1', newer }), null, 'a 9 am start opens straight away');
+  advance(11 * HOUR);   // 20:00
+  assert.ok(au.atStart({ appVersion: '1.9.1', newer }), 'an evening start installs it first');
+});
+
+test('"Install now": the approval installs during work hours, open programs once they close, and is in the history', async () => {
+  const lo = U('linkoffice', '1.2.0', '1.3.0', { elevate: true });
+  const { au, t, store } = rig({ when: OUTSIDE, start: at(0, 10), updates: [U('pdf', '0.25.0', '0.26.0'), U('payroll', '2.4.0', '2.4.1'), lo], open: new Set(['payroll']), idle: false });
+  await au.check();
+  assert.equal(t.installs.length, 0);
+  const r = await au.approve({ by: 'sam@coastal.example' });
+  assert.deepEqual(r.installed, ['pdf'], 'closed programs now');
+  assert.equal(r.waiting.payroll, 'running', 'Payroll is open: it waits, never closed for you');
+  assert.equal(r.waiting.linkoffice, 'idle', 'the permission prompt waits until no Riyeser program is open');
+  const h = store.get(A.STATE).history;
+  const ap = h.find((x) => x.kind === 'approval');
+  assert.equal(ap.by, 'sam@coastal.example'); assert.ok(ap.at); assert.deepEqual(ap.ids.sort(), ['linkoffice', 'payroll', 'pdf']);
+  assert.equal(h.find((x) => x.id === 'pdf').approvedBy, 'sam@coastal.example');
+  assert.equal(au.summary().ready.length, 0, 'the "updates ready" item goes once approved');
+  t.open = new Set();
+  assert.deepEqual((await au.tick()).installed, ['payroll', 'linkoffice'], 'closed later the same morning: installs, then the one prompt (no idle wait, no daily limit: approved)');
+  assert.deepEqual(t.batches, [['linkoffice']]);
+  const last = au.state().history.find((x) => x.id === 'payroll');
+  assert.equal(L9.autoLine(last, 'Payroll', last.at + 60000), 'Updated Payroll to 2.4.1 · 1 min ago');
+});
+
+test('"Tonight": the item goes quiet and the updates wait for after work (in "Only when I approve" too)', async () => {
+  const { au, t, advance } = rig({ when: { mode: 'approve' }, start: at(0, 10) });
+  await au.check();
+  assert.equal(au.summary().ready.length, 1);
+  au.tonight({ by: 'sam@coastal.example' });
+  assert.equal(au.summary().ready.length, 0);
+  assert.equal(au.state().history[0].kind, 'tonight');
+  await au.tick(); assert.equal(t.installs.length, 0, 'not during work');
+  advance(10 * HOUR); await au.tick();
+  assert.equal(t.installs.length, 1, 'that evening');
+});
+
+test('approval is for owners and admins only; staff see "Updates are waiting for an administrator"', () => {
+  assert.equal(A.approverFrom({ adminState: { needed: false } }), 'the owner on this PC', 'a person on their own');
+  assert.equal(A.approverFrom({ adminState: { needed: true, open: true, email: 'owner@x.example' } }), 'owner@x.example');
+  assert.equal(A.approverFrom({ adminState: { needed: true, open: false }, role: 'admin', email: 'admin@x.example' }), 'admin@x.example');
+  assert.equal(A.approverFrom({ adminState: { needed: true, open: false }, role: 'member', email: 'staff@x.example' }), null);
+  assert.equal(A.approverFrom({ adminState: { needed: true, open: false }, role: null, email: '' }), null);
+  assert.equal(A.approverFrom({ adminState: { needed: true, open: true, demo: true, email: 'd@x' } }), null, 'demo mode');
+  const au = { mode: 'outside', hours: A.WORK_DEFAULT, ready: [{ id: 'pdf' }, { id: 'payroll' }], pending: [{ id: 'pdf' }, { id: 'payroll' }] };
+  const owner = L9.attention({ autoUpd: au, canApprove: true })[0];
+  assert.equal(owner.title, '2 updates ready');
+  assert.deepEqual(owner.acts.map((a) => a.label), ['Install now', 'Tonight']);
+  assert.match(owner.detail, /after work hours \(after 18:00\)/);
+  const staff = L9.attention({ autoUpd: au, canApprove: false })[0];
+  assert.equal(staff.title, 'Updates are waiting for an administrator'); assert.deepEqual(staff.acts, []);
+  assert.deepEqual(L9.attention({ autoUpd: { ...au, ready: [] } }), [], 'nothing waiting: nothing to say');
+});
+
+test('"As soon as possible": installs during work hours as soon as each program is closed, no "ready" item', async () => {
+  const { au, t } = rig({ when: { mode: 'asap' }, start: at(0, 10), open: new Set(['pdf']) });
+  await au.check();
+  assert.equal(t.installs.length, 0); assert.equal(au.summary().ready.length, 0);
+  t.open = new Set();
+  assert.deepEqual((await au.tick()).installed, ['pdf']);
+});
+
+test('a PC switched off every night for a week: "Updates have been waiting a week", with Install now', async () => {
+  const { au, advance } = rig({ when: OUTSIDE, start: at(0, 9) });
+  await au.check();
+  for (let d = 1; d <= 6; d++) { advance(DAY); if (d <= 4) await au.tick(); }   // on at 9:00 Tue–Fri, off by evening and all weekend
+  assert.equal(au.summary().week, false, '6 days: not yet');
+  advance(DAY); await au.tick();   // the next Monday 9:00
+  const s = au.summary();
+  assert.equal(s.week, true);
+  const item = L9.attention({ autoUpd: s, canApprove: true })[0];
+  assert.equal(item.title, 'Updates have been waiting a week: install now or leave the PC on overnight');
+  assert.deepEqual(item.acts.map((a) => a.label), ['Install now']);
+  assert.deepEqual(L9.attention({ autoUpd: s, canApprove: false })[0].acts, [], 'staff: no button');
+});
+
+test('the week reminder stays away while the PC is on after work some nights', async () => {
+  const { au, advance } = rig({ when: OUTSIDE, start: at(0, 9), open: new Set(['pdf']) });   // PDF left open: it can't install
+  await au.check();
+  advance(10 * HOUR); await au.tick();   // Monday 19:00: the PC was on after work
+  advance(5 * DAY); await au.tick();
+  assert.equal(au.summary().week, false);
 });

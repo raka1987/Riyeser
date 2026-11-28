@@ -373,9 +373,10 @@ async function installUpdates(ids) {
 }
 
 // ---------- automatic updates (central/auto-update.js has the rules) ----------
-// Admin panel → Updates → "Install updates automatically" (prefs.autoUpdate; on unless turned off).
+// Admin panel → Updates → "When to install updates" (prefs.updateWhen: outside work hours, the default; only when an
+// owner or admin approves; as soon as possible) and this PC's work hours (prefs.workHours, Mon–Fri 8:00–18:00).
 let autoUpdater = null;
-const autoOn = () => autoUpdate.settingOn((store && store.get('prefs', {})) || {});
+const updateWhen = () => { const p = (store && store.get('prefs', {})) || {}; return { mode: autoUpdate.modeOf(p), hours: autoUpdate.workHours(p.workHours) }; };   // the PC's own time zone
 // Only an installed Central on Windows (a developer's copy, a build check or the self-tests never update anything).
 const autoAllowed = () => app.isPackaged && process.platform === 'win32' && !process.argv.some((a) => a.startsWith('--self-test'));
 /** The busy signals: an open till shift or unsent website news in the company file, Central's own unsent online marks. */
@@ -401,7 +402,7 @@ function runSelfInstaller(file, { minimized = false } = {}) {
 }
 function makeAutoUpdater() {
   autoUpdater = autoUpdate.createAutoUpdater({
-    store, enabled: autoOn, isDemo: demoOn, allowed: autoAllowed, manualBusy: () => manualUpdating || !!firstRunBusy,
+    store, when: updateWhen, isDemo: demoOn, allowed: autoAllowed, manualBusy: () => manualUpdating || !!firstRunBusy,
     cacheDir: path.join(app.getPath('userData'), 'updates'),
     status: async (o) => { const r = await checkUpdates(!!(o && o.fresh)); return { latest: r.latest, updates: r.latest ? updates.availableUpdates(r.installed || {}, r.latest) : [] }; },
     download: (u, file) => download(u.url, file, () => {}),
@@ -916,15 +917,36 @@ function registerIpc() {
   handle('firstrun:resume', () => { resumeIfOnline(); return true; });
   handle('central:updates', (force) => updateStatus(!!force));
   handle('central:installUpdates', (ids) => manualUpdatesWhenFree(ids));
-  // Admin panel → Updates: "Install updates automatically", the last automatic update, what's waiting, Try again
-  handle('central:autoUpdate', () => (autoUpdater ? autoUpdater.summary() : { on: autoOn(), demo: demoOn(), allowed: false, last: null, history: [], waiting: {}, attention: [], counts: {} }));
-  handle('central:setAutoUpdate', (onOff) => {
+  // Admin panel → Updates: "When to install updates", work hours, the last automatic update, what's waiting and why,
+  // "N updates ready" with Install now / Tonight, Try again
+  const noAuto = () => ({ mode: updateWhen().mode, hours: updateWhen().hours, demo: demoOn(), allowed: false, last: null, history: [], waiting: {}, attention: [], pending: [], ready: [], week: false, counts: {} });
+  handle('central:autoUpdate', () => (autoUpdater ? autoUpdater.summary() : noAuto()));
+  handle('central:setUpdateWhen', (mode) => {
     admin.require();
-    store.update('prefs', {}, (o) => ({ ...(o || {}), autoUpdate: !!onOff }));
-    installLog({ id: 'central', stage: 'setting', how: 'auto', detail: onOff ? 'automatic updates on' : 'automatic updates off' });
-    if (onOff && autoUpdater) setTimeout(() => autoUpdater.check(), 2000);
-    return autoUpdater ? autoUpdater.summary() : { on: !!onOff };
+    if (!autoUpdate.MODES.includes(mode)) throw new Error('Unknown choice.');
+    store.update('prefs', {}, (o) => ({ ...(o || {}), updateWhen: mode }));
+    installLog({ id: 'central', stage: 'setting', how: 'auto', detail: `when to install updates: ${mode}` });
+    if (autoUpdater) setTimeout(() => autoUpdater.tick(), 1000);
+    return autoUpdater ? autoUpdater.summary() : noAuto();
   });
+  handle('central:setWorkHours', (h) => {
+    admin.require();
+    const hours = autoUpdate.workHours(h);
+    store.update('prefs', {}, (o) => ({ ...(o || {}), workHours: hours }));
+    installLog({ id: 'central', stage: 'setting', how: 'auto', detail: `work hours: ${hours.days.join(',')} ${hours.start}-${hours.end}` });
+    return autoUpdater ? autoUpdater.summary() : noAuto();
+  });
+  // Who approves: an owner or admin (the unlocked Admin panel, or signed in here with that role); a person on their own
+  const approver = async () => {
+    const adminState = admin.state();
+    let role = null;
+    if (adminState.needed && !adminState.open) role = await businessRole(online.readCompany(appData)).catch(() => null);
+    const by = autoUpdate.approverFrom({ adminState, role, email: on.session && on.session.user ? on.session.user.email : '' });
+    if (by) return by;
+    const e = new Error(adminState.demo ? 'Demo mode never installs updates.' : 'Updates are waiting for an administrator. An owner or admin can approve them.'); e.notAdmin = true; throw e;
+  };
+  handle('central:autoApprove', async () => { const by = await approver(); if (!autoUpdater) return null; autoUpdater.approve({ by }); return autoUpdater.summary(); });
+  handle('central:autoTonight', async () => { const by = await approver(); return autoUpdater ? autoUpdater.tonight({ by }) : null; });
   handle('central:autoRetry', (id) => { if (!autoUpdater) return null; autoUpdater.retry(id ? String(id) : null); return autoUpdater.summary(); });
   if (autoUpdater) autoUpdater.start();   // a first check a minute after Central starts, then every 6 hours
   handle('central:install', (id) => installProgram(id));
