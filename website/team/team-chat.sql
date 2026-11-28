@@ -1847,10 +1847,24 @@ revoke all on sequence public.support_ticket_no from anon, authenticated;
 -- board and release tracking (later releases): nullable and unused for now. who_acts: who has to do something next.
 -- Diagnostic reports hold technical details only (product, versions, Windows version, error, scrubbed log lines), never
 -- customer records. Emails, long numbers and anything after "password" are masked again here, whoever sends them.
+-- Also (SEC-001): sign-in details in web addresses (https://user:pass@…, ?key=…), sign-in tokens (eyJ…), Riyeser and other
+-- well-known keys (rk_…, whsec_…, sb_secret_…), "Bearer …", words that contain password/secret/token/api key/credential
+-- (access_token=…, SIP_PASSWORD=…, client_secret: …), and the Windows (or Mac/Linux) user name in folder paths
+-- (C:\Users\[user]\…), so a log line can't carry a password, a key or a person's name to Riyeser Support.
 create or replace function public.support_scrub(t text) returns text language sql immutable as $$
-  select regexp_replace(regexp_replace(regexp_replace(regexp_replace(regexp_replace(coalesce(t, ''),
+  select regexp_replace(regexp_replace(regexp_replace(regexp_replace(regexp_replace(
+    regexp_replace(regexp_replace(regexp_replace(regexp_replace(regexp_replace(
+    regexp_replace(regexp_replace(regexp_replace(coalesce(t, ''),
+    '([A-Za-z][A-Za-z0-9+.-]*://)[^/\s:@]+:[^/\s@]+@', '\1[removed]@', 'g'),
+    'eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*', '[removed]', 'g'),
+    '\m(rk_(pub_)?(live|test)_|whsec_|sb_(secret|publishable)_|sk_(live|test)_|pk_(live|test)_|ghp_|gho_|github_pat_|xox[abprs]-|AKIA)[A-Za-z0-9_-]+', '[key removed]', 'g'),
+    '\m(bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}', '\1 [removed]', 'gi'),
+    '([?&;](key|apikey|api_key|token|access_token|refresh_token|sig|signature|secret|password|pass|pwd|auth|code)=)[^&\s#"'']+', '\1[removed]', 'gi'),
+    '([A-Za-z]:[\\/]+(Users|Documents and Settings)[\\/]+)[^\\/\s"'':;]+', '\1[user]', 'gi'),
+    '(/(home|Users)/)[^/\s"'':;]+', '\1[user]', 'g'),
     '([A-Za-z0-9])[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+\.[A-Za-z]{2,})', '\1***@\2', 'g'),
-    '\m(password|passwd|pwd|secret|token|api[_ -]?key)\M.*', '\1 [removed]', 'gin'),
+    '\m([A-Za-z0-9_-]*(password|passwd|pwd|secret|token|api[_ -]?key|apikey|credentials?|authorization)[A-Za-z0-9_-]*)\M.*', '\1 [removed]', 'gin'),
+    '\m(pass|passcode|pin)\s*[=:]\s*\S+', '\1=[removed]', 'gi'),
     '\m\d{4}([ -]\d{4}){3}\M', '[number removed]', 'g'),
     '\m\d{2,3}([ -]\d{3}){2,}\M', '[number removed]', 'g'),
     '\d{7,}', '[number removed]', 'g')
@@ -3447,6 +3461,19 @@ create or replace function public.link_office_caller_ok(ws uuid) returns boolean
     where m.workspace_id = ws and m.user_id = auth.uid()
       and (m.role in ('owner', 'admin') or exists (select 1 from devices d where d.workspace_id = ws and d.user_id = auth.uid())))
 $$;
+-- SEC-004: ...and for THIS office. An owner or admin may act for any of the business's offices. Someone else with a linked
+-- PC only for a new office, one they reported from themselves, or one whose last reporter has left the business. So a
+-- staff member can't read or answer another office's changes, overwrite its phone list or take its relay pass.
+create or replace function public.link_office_acts_for(ws uuid, office text) returns boolean
+  language sql stable security definer set search_path = public as $$
+  select public.link_office_caller_ok(ws) and (
+    exists (select 1 from members m where m.workspace_id = ws and m.user_id = auth.uid() and m.role in ('owner', 'admin'))
+    or not exists (select 1 from link_offices o where o.workspace_id = ws and o.office_id = office)
+    or exists (select 1 from link_offices o where o.workspace_id = ws and o.office_id = office
+               and (o.reported_by is null or o.reported_by = auth.uid()
+                    or not exists (select 1 from members m where m.workspace_id = ws and m.user_id = o.reported_by))))
+$$;
+revoke all on function public.link_office_acts_for(uuid, text) from public, anon, authenticated;
 create or replace function public.link_support_active(ws uuid) returns boolean
   language sql stable security definer set search_path = public as $$
   select exists (select 1 from link_support_access where workspace_id = ws and ended_at is null and expires_at > now())
@@ -3501,7 +3528,7 @@ create or replace function public.link_office_report(ws uuid, office_id text, pa
 #variable_conflict use_column
 declare p jsonb := coalesce(payload, '{}'::jsonb); the_office text := link_office_report.office_id;
 begin
-  if not link_office_caller_ok(ws) then
+  if not link_office_acts_for(ws, the_office) then
     raise exception 'Sign in to Riyeser Link Office as the business''s owner or an admin, or link this PC to the business in Riyeser Central.';
   end if;
   if the_office is null or the_office !~ '^[A-Za-z0-9-]{8,64}$' then raise exception 'That isn''t a Riyeser Link Office id.'; end if;
@@ -3567,7 +3594,7 @@ create or replace function public.link_office_pending(ws uuid, office_id text) r
 #variable_conflict use_column
 declare the_office text := link_office_pending.office_id;
 begin
-  if not link_office_caller_ok(ws) then raise exception 'Sign in to Riyeser Link Office as the business''s owner or an admin, or link this PC in Riyeser Central.'; end if;
+  if not link_office_acts_for(ws, the_office) then raise exception 'Sign in to Riyeser Link Office as the business''s owner or an admin, or link this PC in Riyeser Central.'; end if;
   perform link_sweep();
   update link_offices set last_seen = now() where workspace_id = ws and office_id = the_office and last_seen < now() - interval '20 seconds';
   return (select coalesce(json_agg(json_build_object('id', c.id, 'kind', c.kind, 'data', c.data, 'created_at', c.created_at) order by c.created_at), '[]')
@@ -3581,7 +3608,7 @@ create or replace function public.link_office_done(command uuid, ok boolean, err
 declare c link_office_commands; why text := left(nullif(trim(coalesce(error, '')), ''), 300);
 begin
   select * into c from link_office_commands where id = command for update;
-  if c.id is null or not link_office_caller_ok(c.workspace_id) then raise exception 'That change isn''t for this business.'; end if;
+  if c.id is null or not link_office_acts_for(c.workspace_id, c.office_id) then raise exception 'That change isn''t for this business.'; end if;
   if c.status <> 'pending' then return; end if;
   if ok and c.kind = 'reveal_password' then
     if sealed is null or length(sealed) > 2000 or sealed !~ '^[A-Za-z0-9+/=_-]+$' then ok := false; why := 'Riyeser Link Office didn''t send the password back.';
@@ -3669,6 +3696,11 @@ begin
   elsif hq_role() is not null then
     if not hq_can('link.support') then raise exception 'Your HQ role can''t do that.'; end if;
     if not link_support_active(ws) then raise exception 'Ask the customer to press ''Let Riyeser help'' on their Phones page first.'; end if;
+    -- SEC-009: Riyeser support never sees, sets or receives a password. It can only ask Link Office to make a new one
+    -- (new_password): the office PC makes it, sets the phones up again, and says "done" without sending it anywhere.
+    if kind = 'reveal_password' then
+      raise exception 'Riyeser support can''t see phone passwords. Use Set a new password: Riyeser Link Office makes a new one and sets the phones up again, and nobody at Riyeser sees it.';
+    end if;
     by_hq := true;
   else raise exception 'Only the business''s owner or an admin, signed in with two-step sign-in, can change the phones.';
   end if;
@@ -3774,7 +3806,7 @@ begin
   perform link_sweep();
   select * into r from link_office_reveals where command_id = command for update;
   if r.command_id is null or r.requested_by <> auth.uid() then raise exception 'There''s no password waiting for you.'; end if;
-  if not (public.is_admin(r.workspace_id) or (hq_can('link.support') and link_support_active(r.workspace_id))) then
+  if not public.is_admin(r.workspace_id) then   -- SEC-009: never Riyeser support
     raise exception 'You can''t see this business''s phone passwords any more.';
   end if;
   if r.sealed is null or r.read_at is not null or r.expires_at <= now() then return null; end if;
@@ -3956,7 +3988,7 @@ begin
   perform link_sweep();
   select * into r from link_office_reveals where command_id = command for update;
   if r.command_id is null or r.requested_by <> auth.uid() then raise exception 'There''s no password waiting for you.'; end if;
-  if not (public.is_admin(r.workspace_id) or (hq_can('link.support') and link_support_active(r.workspace_id))
+  if not (public.is_admin(r.workspace_id)   -- SEC-009: never Riyeser support
           or coalesce(r.extension = link_my_ext(r.workspace_id), false)) then   -- null-safe: no extension, no access
     raise exception 'You can''t see this business''s phone passwords any more.';
   end if;
@@ -6049,7 +6081,8 @@ begin
     'entity', (billing_entity_now()).details,
     'bank_ready', coalesce(nullif(trim((billing_entity_now()).details #>> '{bank,account_number}'), ''), '') <> '',
     'grace_days', hq_setting_num('billing.grace_days', 7),
-    'can_mark_paid', hq_can('licences.manage'), 'can_edit_entity', hq_can('settings.manage') or hq_can('licences.manage'));
+    'can_mark_paid', hq_can('licences.manage'), 'can_edit_entity', hq_can('settings.manage') or hq_can('licences.manage'),
+    'entity_pending', hq_billing_entity_pending(), 'can_send_docs', hq_can('licences.manage'));
 end $$;
 -- This business's invoices and payments (the customer page, Money tab).
 create or replace function public.hq_company_billing(ws uuid) returns json
@@ -6086,10 +6119,27 @@ begin
   return json_build_object('receipt', rcpt, 'paid_until', upto);
 end $$;
 -- The Billing entity: who sells Riyeser (on every invoice and receipt). Each change is a new version.
+-- SEC-011: a change (above all the bank details customers pay into) is only PROPOSED here. It takes effect when a
+-- different HQ person (settings.manage or licences.manage: the Owner, Finance) approves it (hq_billing_entity_decide).
+-- One proposal waits at a time: proposing the same again changes nothing; proposing something else replaces it.
+create table if not exists public.billing_entity_changes (
+  id bigint generated always as identity primary key,
+  details jsonb not null,
+  proposed_by uuid references auth.users(id) on delete set null,
+  proposed_at timestamptz not null default now(),
+  status text not null default 'pending' check (status in ('pending', 'approved', 'rejected', 'replaced')),
+  decided_by uuid references auth.users(id) on delete set null,
+  decided_at timestamptz
+);
+create unique index if not exists billing_entity_changes_one_pending on public.billing_entity_changes ((true)) where status = 'pending';
+alter table public.billing_entity_changes enable row level security;
+revoke all on public.billing_entity_changes from anon, authenticated;
+drop trigger if exists billing_entity_changes_keep on public.billing_entity_changes;
+create trigger billing_entity_changes_keep before delete on public.billing_entity_changes for each row execute function public.no_delete();
 create or replace function public.hq_set_billing_entity(details jsonb) returns void
   language plpgsql security definer set search_path = public as $$
 declare d jsonb; b jsonb := coalesce(details -> 'bank', '{}'::jsonb); k text; cur jsonb := (billing_entity_now()).details;
-  t text := '';
+  t text := ''; p billing_entity_changes;
 begin
   if not (hq_can('settings.manage') or hq_can('licences.manage')) then perform hq_need(array['settings.manage']); end if;
   if length(trim(coalesce(details ->> 'name', ''))) < 2 then raise exception 'Type the business name that sells Riyeser.'; end if;
@@ -6100,19 +6150,63 @@ begin
   end loop;
   d := d || jsonb_build_object('bank', (select jsonb_object_agg(x, left(trim(coalesce(b ->> x, '')), case when x = 'note' then 300 else 80 end))
          from unnest(array['account_name', 'bank_name', 'bsb', 'account_number', 'swift', 'note']) x));
-  if d = cur then return; end if;
-  insert into billing_entities (details, created_by) values (d, auth.uid());
-  perform hq_log('billing.entity_changed', jsonb_build_object('name', d ->> 'name', 'bank_set', coalesce(d #>> '{bank,account_number}', '') <> ''));
+  select * into p from billing_entity_changes where status = 'pending' for update;
+  if p.id is not null and p.details = d then return; end if;          -- the same proposal again: nothing to do
+  if p.id is null and d = cur then return; end if;                    -- no change
+  if p.id is not null then
+    update billing_entity_changes set status = 'replaced', decided_by = auth.uid(), decided_at = now() where id = p.id;
+    perform hq_log('billing.entity_replaced', jsonb_build_object('change', p.id));
+  end if;
+  if d = cur then return; end if;                                     -- back to what's in force: the old proposal is simply gone
+  insert into billing_entity_changes (details, proposed_by) values (d, auth.uid()) returning * into p;
+  perform hq_log('billing.entity_proposed', jsonb_build_object('change', p.id, 'name', d ->> 'name',
+    'bank_changed', (d -> 'bank') is distinct from (cur -> 'bank'), 'bank_set', coalesce(d #>> '{bank,account_number}', '') <> ''));
 end $$;
+-- Approve (it takes effect: a new version of the entity) or turn down the waiting change. Approving needs someone other
+-- than whoever proposed it; the proposer may withdraw their own (approve = false). Safe to repeat: a decided change stays decided.
+create or replace function public.hq_billing_entity_decide(change bigint, approve boolean) returns void
+  language plpgsql security definer set search_path = public as $$
+declare p billing_entity_changes;
+begin
+  if not (hq_can('settings.manage') or hq_can('licences.manage')) then perform hq_need(array['settings.manage']); end if;
+  select * into p from billing_entity_changes where id = change for update;
+  if p.id is null then raise exception 'That change isn''t there.'; end if;
+  if p.status <> 'pending' then
+    if (p.status = 'approved') = coalesce(approve, false) and p.decided_by = auth.uid() then return; end if;
+    raise exception 'That change was already dealt with.';
+  end if;
+  if coalesce(approve, false) then
+    if p.proposed_by = auth.uid() then raise exception 'Someone else in Riyeser HQ has to approve a change you made (two-person rule).'; end if;
+    if p.details is distinct from (billing_entity_now()).details then
+      insert into billing_entities (details, created_by) values (p.details, p.proposed_by);
+    end if;
+    update billing_entity_changes set status = 'approved', decided_by = auth.uid(), decided_at = now() where id = p.id;
+    perform hq_log('billing.entity_changed', jsonb_build_object('change', p.id, 'name', p.details ->> 'name', 'proposed_by', p.proposed_by,
+      'bank_set', coalesce(p.details #>> '{bank,account_number}', '') <> ''));
+  else
+    update billing_entity_changes set status = 'rejected', decided_by = auth.uid(), decided_at = now() where id = p.id;
+    perform hq_log('billing.entity_rejected', jsonb_build_object('change', p.id, 'proposed_by', p.proposed_by, 'withdrawn', p.proposed_by = auth.uid()));
+  end if;
+end $$;
+-- The waiting change for the Billing entity card (or null).
+create or replace function public.hq_billing_entity_pending() returns json
+  language sql stable security definer set search_path = public as $$
+  select json_build_object('id', p.id, 'details', p.details, 'proposed_at', p.proposed_at,
+    'proposed_by', (select display_name from hq_staff s where s.user_id = p.proposed_by), 'mine', p.proposed_by = auth.uid())
+  from billing_entity_changes p where p.status = 'pending'
+$$;
+revoke all on function public.hq_billing_entity_decide(bigint, boolean), public.hq_billing_entity_pending() from public, anon, authenticated;
+grant execute on function public.hq_billing_entity_decide(bigint, boolean) to authenticated;
 
--- HQ: send an invoice or receipt again, to the business's billing emails (licences.view), or to another address
+-- HQ: send an invoice or receipt again, to the business's billing emails (licences.manage: Finance and the Owner only,
+-- SEC-010; Sales and Support can look but not send), or to another address
 -- (a wrong email); update_contact also makes that the business's email (customers.edit or licences.manage). In the HQ history: who,
 -- which document, when, and where to (the address shortened; the full one is on the email itself, in Emails).
 create or replace function public.hq_billing_resend(doc_ref text, to_email text, update_contact boolean) returns json
   language plpgsql security definer set search_path = public as $$
 declare d billing_documents; addr text := lower(trim(coalesce(to_email, ''))); sent text[]; a text; m text[];
 begin
-  perform hq_need(array['licences.view']);
+  perform hq_need(array['licences.manage']);
   select * into d from billing_documents where ref = upper(trim(coalesce(doc_ref, '')));
   if d.id is null then raise exception 'There''s no invoice or receipt with that number.'; end if;
   if addr <> '' then
@@ -6338,16 +6432,20 @@ end $$;
 
 -- Every day (hq-jobs.yml): yesterday's (and any missed day's) totals are added, page views older than 13 months are
 -- deleted (their daily totals stay, with no session ids), and daily totals older than 3 years go too.
+-- Also (SEC-002): call set-up messages (call_signals: who rang whom, and the devices' network addresses) left behind
+-- when a browser closed mid-call are removed once they're a day old. A call never needs them for that long.
 create or replace function public.hq_traffic_sweep() returns json
   language plpgsql security definer set search_path = public as $$
-declare k int; rolled int;
+declare k int; rolled int; cs int;
 begin
   rolled := site_traffic_roll((now() at time zone 'UTC')::date - 400, (now() at time zone 'UTC')::date - 1);
   delete from site_visits where at < now() - interval '13 months';
   get diagnostics k = row_count;
   delete from site_traffic_daily where day < current_date - interval '3 years';
   delete from site_traffic_days where day < current_date - interval '3 years';
-  return json_build_object('deleted', k, 'days_added', rolled);
+  delete from call_signals where created_at < now() - interval '1 day';
+  get diagnostics cs = row_count;
+  return json_build_object('deleted', k, 'days_added', rolled, 'call_signals_removed', cs);
 end $$;
 
 revoke all on function public.site_visit_path(text), public.site_visit_text(text, int), public.hq_traffic_sweep(),
@@ -8604,7 +8702,7 @@ create or replace function public.link_relay_token(ws uuid, office_id text) retu
   language plpgsql security definer set search_path = public as $$
 declare o link_offices; exp bigint := floor(extract(epoch from now()))::bigint + 6 * 3600; k bytea;
 begin
-  if not public.link_office_caller_ok(ws) then raise exception 'Sign in as the business''s owner or an admin, or link this PC to the business, to connect to the relay.'; end if;
+  if not public.link_office_acts_for(ws, link_relay_token.office_id) then raise exception 'Sign in as the business''s owner or an admin, or link this PC to the business, to connect to the relay.'; end if;
   select * into o from link_offices x where x.workspace_id = ws and x.office_id = link_relay_token.office_id;
   if o.office_id is null then raise exception 'This Riyeser Link Office hasn''t been in touch with Riyeser Link yet. It will be within a few minutes.'; end if;
   if not relay_enabled(ws) then raise exception 'The Riyeser relay is switched off for this business. Switch it on in Riyeser Link: Phones → Sites and the relay.'; end if;
@@ -8619,7 +8717,7 @@ end $$;
 create or replace function public.link_relay_report(ws uuid, office_id text, state jsonb) returns void
   language plpgsql security definer set search_path = public as $$
 begin
-  if not public.link_office_caller_ok(ws) then raise exception 'Not allowed.'; end if;
+  if not public.link_office_acts_for(ws, link_relay_report.office_id) then raise exception 'Not allowed.'; end if;
   update link_offices o set relay = jsonb_strip_nulls(jsonb_build_object(
       'state', link_text(link_relay_report.state -> 'state', 20), 'relay', link_text(link_relay_report.state -> 'relay', 40), 'region', link_text(link_relay_report.state -> 'region', 60),
       'rtt_ms', link_int(link_relay_report.state -> 'rtt_ms'), 'backup', link_bool(link_relay_report.state -> 'backup'), 'udp', link_text(link_relay_report.state -> 'udp', 20),

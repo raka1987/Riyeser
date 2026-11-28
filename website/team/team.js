@@ -3979,7 +3979,7 @@
         <div data-lopane="help"${ui.tab === 'help' ? '' : ' hidden'}>
       <section class="lo-card lo-help-us"><h4>🤝 Let Riyeser help</h4>${support
         ? `<p id="losupport">Riyeser support can see and change your phone set-up until <b>${esc(timeShort(support.until))}</b>. Everything they do is in your 🕘 History.</p><button class="btn" id="losupend">End it now</button>`
-        : `<p id="losupport">Stuck? Give Riyeser support access to your phone set-up for 1 hour. They can do what you can on this page, including showing a phone's password to set it up with you. Everything they do is in your 🕘 History, and you can end it early.</p><button class="btn" id="losupon">Let Riyeser help</button>`}</section>
+        : `<p id="losupport">Stuck? Give Riyeser support access to your phone set-up for 1 hour. They can do what you can on this page, except see passwords: if a phone needs one, they can ask Riyeser Link Office to make a new password, and only you can see it. Everything they do is in your 🕘 History, and you can end it early.</p><button class="btn" id="losupon">Let Riyeser help</button>`}</section>
         </div>
         </div>
       </div>`;
