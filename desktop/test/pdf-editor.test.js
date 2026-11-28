@@ -137,5 +137,5 @@ test('QA PDF-RED-02: redacting clears the document properties and XMP metadata, 
   assert.strictEqual(out.catalog.get(L.PDFName.of('Metadata')), undefined);
   // the editor uses it for redacted files, before removeUnused() drops the unlinked XMP stream
   const e = src('renderer/editor.js');
-  assert.match(e, /st\.lastRedacted = orderList\.some\(\(e\) => \(st\.anns\[e\.src\] \|\| \[\]\)\.some\(\(a\) => a\.type === 'redact'\)\);\n  if \(st\.lastRedacted\) T\.clearDocInfo\(window\.PDFLib, doc\);\n  removeUnused\(doc\);/);
+  assert.match(e, /st\.lastRedacted = orderList\.some\(\(e\) => \(st\.anns\[e\.src\] \|\| \[\]\)\.some\(\(a\) => a\.type === 'redact'\)\);\r?\n  if \(st\.lastRedacted\) T\.clearDocInfo\(window\.PDFLib, doc\);\r?\n  removeUnused\(doc\);/);
 });
