@@ -50,5 +50,8 @@ fs.writeFileSync(path.join(OUT, 'package.json'), JSON.stringify({
     publish: [],
   },
 }, null, 2));
+// Minify the app's own JavaScript (the back office and the browser scripts in public/) before node_modules are
+// added, so the shipped installer carries no readable source once the code repository goes private. See minify-app.js.
+execSync(`node ${JSON.stringify(path.join(__dirname, 'minify-app.js'))} ${JSON.stringify(OUT)}`, { stdio: 'inherit' });
 execSync('npm install --omit=dev --no-audit --no-fund', { cwd: OUT, stdio: 'inherit' });
 console.log('Prepared', OUT);
