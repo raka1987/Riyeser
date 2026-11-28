@@ -88,6 +88,7 @@ const LOGO = { team: 'team', linkoffice: 'link', invoices: 'invoices', bookings:
 const logo = (p, size = 22) => `<img class="logo-i" src="logos/${p.id === 'services' && /as built/i.test(p.name || '') ? 'as-built' : LOGO[p.id]}.png" alt="" style="width:${size}px;height:${size}px">`;
 let programs = []; let today = null; let upd = { updates: [] }; let updating = false; let view = 'home';
 let sync = null; let backups = null; let updError = ''; let demoMsg = '';
+let auto = null;   // the automatic updates (Admin → Updates → "Install updates automatically"): central:autoUpdate
 const has = (id) => programs.some((p) => p.id === id && p.status !== 'missing');
 const accId = () => (has('accounting') ? 'accounting' : has('accounting-basics') ? 'accounting-basics' : null); // Plus wins when both are there
 const hasAcc = () => !!accId();
@@ -98,7 +99,7 @@ const who = () => L9.audience({ company: coState().company, kind: coState().kind
 let tileList = [];
 const homeCtx = () => ({ programs, today: today || {}, lic, LUI, upd, cl, inst: instState, installing, unread, sync, names: NAMES(), audience: who() });
 function attentionItems() {
-  return L9.attention({ sync, lic, LUI, company: coState(), demoNote: demoMsg, inst: instState, programs, updError, backups, names: NAMES(),
+  return L9.attention({ sync, lic, LUI, company: coState(), demoNote: demoMsg, inst: instState, programs, updError, backups, names: NAMES(), autoFailed: auto && auto.attention, autoUpd: auto, canApprove: who().who !== 'staff',
     installedIds: programs.filter((p) => p.status !== 'missing').map((p) => p.id) });
 }
 function renderTop() {
@@ -154,13 +155,15 @@ function renderChips() {
 }
 
 // ---------- the popover: "Needs attention" and what a chip is about (never opens by itself) ----------
+/** An attention item's buttons (most have one; "N updates ready" has Install now and Tonight). */
+const attActs = (x) => { const list = x.acts || (x.act ? [x.act] : []); return list.length ? `<span class="attacts">${list.map((a, i) => `<button class="btn sm${i ? ' s' : ''}" ${a.attrs}>${esc(a.label)}</button>`).join('')}</span>` : ''; };
 let popFor = null; let popAnchor = null;
 function popHtml(kind) {
   const m = (today || {}).money;
   if (kind === 'attention') {
     const att = attentionItems(); const a = who();
     if (!att.length) return '<h3>All good</h3><p class="lbl">Nothing needs attention. Riyeser tells you here, quietly, if something stops working.</p>';
-    return `<h3>Needs attention</h3><ul class="attl">${att.map((x) => `<li><div class="grow"><b>${esc(x.title)}</b>${x.detail ? `<small>${esc(x.detail)}</small>` : ''}</div>${x.act ? `<button class="btn sm" ${x.act.attrs}>${esc(x.act.label)}</button>` : ''}</li>`).join('')}</ul>
+    return `<h3>Needs attention</h3><ul class="attl">${att.map((x) => `<li><div class="grow"><b>${esc(x.title)}</b>${x.detail ? `<small>${esc(x.detail)}</small>` : ''}</div>${attActs(x)}</li>`).join('')}</ul>
       ${a.who !== 'individual' && att.some((x) => x.admin) ? `<p class="lbl">${a.who === 'staff' ? 'An owner or admin can see more in ' : 'More in '}<button class="lnk" data-adm-go="overview">🔒 Admin</button>.</p>` : ''}`;
   }
   if (kind === 'overdue' && m && m.found) {
@@ -574,6 +577,27 @@ function updFailHtml(f) {
     ${f.failed.map((x) => `<div class="lbl updfail">${f.failed.length > 1 ? `<b>${esc(x.name)}:</b> ` : ''}${esc(x.message)}${x.fix ? ` ${esc(x.fix)}` : ''}</div>`).join('')}
     ${f.done && f.done.length ? `<div class="lbl">Updated: ${esc(f.done.join(', '))}.</div>` : ''}</div>
     <button class="go" data-updretry>Try again</button><button class="btn sm s" data-act="gethelp">Get help</button>`;
+const progName = (id) => (id === 'central' ? 'Riyeser Central' : NAMES()[id] || id);
+const DAYS = [[1, 'Mon'], [2, 'Tue'], [3, 'Wed'], [4, 'Thu'], [5, 'Fri'], [6, 'Sat'], [0, 'Sun']];
+const WHEN = [['outside', 'Outside work hours', 'Updates install by themselves only outside the work hours below, while each program is closed.'],
+  ['approve', 'Only when I approve', 'Nothing installs by itself. Install now under “Updates ready” when it suits you.'],
+  ['asap', 'As soon as possible', 'Each program updates as soon as it’s closed, any time of day.']];
+/** Admin → Updates: "When to install updates", this PC's work hours, "N updates ready" and the last automatic update. */
+function autoHtml(au) {
+  const h = au.hours || { days: [1, 2, 3, 4, 5], start: '08:00', end: '18:00' }; const dis = au.demo ? ' disabled' : '';
+  const line = au.demo ? 'Demo mode is on, so nothing updates by itself.' : au.last ? L9.autoLine(au.last, progName(au.last.id)) : 'Nothing updated by itself yet.';
+  const n = (au.ready || []).length; const can = who().who !== 'staff';
+  const ready = au.demo || (!n && !au.week) ? '' : `<div class="autoready"><div class="grow"><b>${au.week ? 'Updates have been waiting a week' : `${n} update${n === 1 ? '' : 's'} ready`}</b>
+    <small>${au.week ? 'Install now or leave the PC on overnight.' : au.mode === 'approve' ? 'They wait for your approval. Open programs update once they’re closed.' : `They install by themselves after work hours (after ${esc(h.end)}). Install now, or leave them for tonight.`}</small></div>
+    ${can ? `<button class="btn sm" data-autoapprove>Install now</button>${au.week ? '' : '<button class="btn sm s" data-autotonight>Tonight</button>'}` : '<small>Updates are waiting for an administrator.</small>'}</div>`;
+  return `<div class="autorow"><b class="autoh">When to install updates</b>
+    <div class="autowhen" role="radiogroup" aria-label="When to install updates">${WHEN.map(([v, t, d]) => `<label class="setrow"><input type="radio" name="updwhen" value="${v}"${au.mode === v ? ' checked' : ''}${dis}><span><b>${t}${v === 'outside' ? ' <span class="rec">recommended</span>' : ''}</b><small>${d}</small></span></label>`).join('')}</div>
+    <div class="workh"${au.mode === 'outside' ? '' : ' hidden'}><span class="lbl">Work hours on this PC</span>
+      <span class="days">${DAYS.map(([d, t]) => `<label class="day"><input type="checkbox" data-wday="${d}"${h.days.includes(d) ? ' checked' : ''}${dis}><span>${t}</span></label>`).join('')}</span>
+      <span class="hrs"><input type="time" id="whstart" value="${esc(h.start)}" aria-label="Work starts"${dis}> to <input type="time" id="whend" value="${esc(h.end)}" aria-label="Work ends"${dis}></span></div>
+    <p class="lbl autonote">${au.mode === 'outside' ? (au.inWork ? 'It’s work time now: updates wait until after work. ' : 'It’s outside work hours now: updates can install. ') : ''}Downloads happen in the background at any time. Nothing pops up.</p></div>
+    ${ready}<p class="lbl autolast" id="admautolast">${esc(line)}</p>`;
+}
 }
 function renderUpdates() {
   const list = upd.updates || [];
@@ -583,7 +607,7 @@ function renderUpdates() {
     if (updating) continue; // progress is drawn by the update-progress events
     if (updFailed) { box.innerHTML = updFailHtml(updFailed); continue; }
     box.innerHTML = `<div style="font-size:24px">⬆</div><div class="grow"><b>${list.length === 1 ? 'An update is ready' : `${list.length} updates are ready`}</b>
-      <div class="lbl">${list.map((u) => `${esc(u.name)}${u.self ? ' (this app)' : ''} ${esc(u.from)} → ${esc(u.to)}`).join(' · ')}</div></div>
+      <div class="lbl">${list.map((u) => `${esc(u.name)}${u.self ? ' (this app)' : ''} ${esc(u.from)} → ${esc(u.to)}`).join(' · ')}${auto && !auto.demo ? `<br>${auto.mode === 'asap' ? 'These install by themselves as soon as each program is closed.' : auto.mode === 'approve' ? 'These wait for an owner or admin to approve them.' : 'These install by themselves after work hours, while each program is closed.'}` : ''}</div></div>
       <button class="go" data-updall>Update ${list.length === 1 ? '' : 'all'}</button>`;
     if (box.id === 'updates') box.querySelector('[data-updall]').id = 'updall';
   }
@@ -902,7 +926,7 @@ async function renderAdminSection(sec) {
   const put = (id, html) => { const el = $(`#adm-${id}`); if (el) el.innerHTML = html; };
   if (sec === 'overview') {
     const att = attentionItems(); const n = programs.filter((p) => p.status !== 'missing').length;
-    put('overview', `${att.length ? `<div class="attbox"><b>Needs attention</b><ul class="attl">${att.map((x) => `<li><div class="grow"><b>${esc(x.title)}</b>${x.detail ? `<small>${esc(x.detail)}</small>` : ''}</div>${x.act ? `<button class="btn sm" ${x.act.attrs}>${esc(x.act.label)}</button>` : ''}</li>`).join('')}</ul></div>` : '<div class="okbox">✓ Nothing needs attention. Everything on this PC is working.</div>'}
+    put('overview', `${att.length ? `<div class="attbox"><b>Needs attention</b><ul class="attl">${att.map((x) => `<li><div class="grow"><b>${esc(x.title)}</b>${x.detail ? `<small>${esc(x.detail)}</small>` : ''}</div>${attActs(x)}</li>`).join('')}</ul></div>` : '<div class="okbox">✓ Nothing needs attention. Everything on this PC is working.</div>'}
       <div class="kvs">${kv('This PC', `Riyeser Central ${esc(appVersion)}`)}${kv('Programs installed', String(n))}${a.who !== 'individual' ? kv('Business', esc(a.business || '—')) : ''}${kv('Signed in', esc(co.signedIn || (demoState.on ? 'Demo mode' : 'Not signed in')))}${kv('Updates', (upd.updates || []).length ? `${upd.updates.length} ready · <button class="lnk" data-adm="updates">See updates</button>` : 'Up to date')}${kv('Last backup', backups && backups.backups && backups.backups[0] ? esc(whenAgo(backups.backups[0].when)) : 'Not yet')}</div>`);
   }
   if (sec === 'pcs') {
@@ -935,11 +959,24 @@ async function renderAdminSection(sec) {
     const ids = [...new Set(['central', ...Object.keys(v.installed), ...programs.filter((p) => p.status === 'installed').map((p) => p.id)])].filter((id) => id === 'central' || programs.some((p) => p.id === id)).sort(byOrder);
     if (!v.installed.central && appVersion) v.installed.central = appVersion;
     const nm = (id) => (id === 'central' ? 'Riyeser Central' : (programs.find((p) => p.id === id) || {}).full || id);
-    put('updates', `<table class="tbl wide"><tr><th>Program</th><th>On this PC</th><th>Latest</th><th></th></tr>${ids.map((id) => { const u = (upd.updates || []).find((x) => x.id === id);
-      return `<tr><td>${esc(nm(id))}</td><td>${esc(v.installed[id] || '—')}</td><td>${esc(v.latest[id] || '—')}</td><td>${u ? '<span class="warn">Update ready</span>' : v.latest[id] ? '<span class="ok">Up to date</span>' : ''}</td></tr>`; }).join('') || `<tr><td colspan="4" class="lbl">Versions show here once Central has checked.</td></tr>`}</table>
+    if (!auto) auto = await bridge.call('central:autoUpdate').catch(() => null);
+    const au = auto || { mode: 'outside', waiting: {} };
+    const modeWhy = { outside: 'Installs after work hours', approve: 'Waits for an owner or admin to approve it', asap: 'Installs once it’s closed' };
+    const waitWhy = (id) => (au.demo ? '' : (au.waiting && au.waiting[id]) || ((au.pending || []).some((p) => p.id === id) ? modeWhy[au.mode] || '' : ''));
+    put('updates', `${autoHtml(au)}<table class="tbl wide"><tr><th>Program</th><th>On this PC</th><th>Latest</th><th></th></tr>${ids.map((id) => { const u = (upd.updates || []).find((x) => x.id === id);
+      return `<tr><td>${esc(nm(id))}</td><td>${esc(v.installed[id] || '—')}</td><td>${esc(v.latest[id] || '—')}</td><td${u && waitWhy(id) ? ` title="${esc(waitWhy(id))}"` : ''}>${u ? `<span class="warn">Update ready</span>${waitWhy(id) ? `<small class="uwhy">${esc(waitWhy(id))}</small>` : ''}` : v.latest[id] ? '<span class="ok">Up to date</span>' : ''}</td></tr>`; }).join('') || `<tr><td colspan="4" class="lbl">Versions show here once Central has checked.</td></tr>`}</table>
       <div class="row"><button class="btn sm s" id="admcheck">Check now</button><label class="inl">Updates channel <select id="admchan"><option value="stable"${v.channel === 'stable' ? ' selected' : ''}>Stable (recommended)</option><option value="early"${v.channel === 'early' ? ' selected' : ''}>Early access</option></select></label></div>
       <p class="lbl">${v.note ? `${esc(v.note)} ` : v.release ? `Release: ${esc(v.release)}. ` : ''}Early access gets new versions a little sooner, before everyone else.</p>`);
     $('#admcheck').onclick = () => safe(async () => { versions = await bridge.call('central:versions', true); await checkForUpdates(false, false); renderAdminSection('updates'); });
+    document.querySelectorAll('#adm-updates input[name=updwhen]').forEach((r) => { r.onchange = () => safe(async () => {
+      auto = await bridge.call('central:setUpdateWhen', r.value);
+      toast({ outside: 'Updates install outside work hours.', approve: 'Updates wait for your approval.', asap: 'Updates install as soon as each program is closed.' }[r.value]);
+      renderAdminSection('updates'); renderHome(); }); });
+    const saveHours = () => safe(async () => {
+      const days = [...document.querySelectorAll('#adm-updates [data-wday]')].filter((c) => c.checked).map((c) => Number(c.dataset.wday));
+      auto = await bridge.call('central:setWorkHours', { days, start: $('#whstart').value, end: $('#whend').value }); toast('Work hours saved.'); renderHome();
+    });
+    document.querySelectorAll('#adm-updates [data-wday], #whstart, #whend').forEach((el) => { el.onchange = saveHours; });
     $('#admchan').onchange = (e) => safe(async () => { await bridge.call('central:setChannel', e.target.value); versions = null; toast(e.target.value === 'early' ? 'Early access is on for this PC.' : 'Back on the stable channel.'); await checkForUpdates(true); renderAdminSection('updates'); });
   }
   if (sec === 'online') put('online', '<p class="lbl">Bookings, orders and payments from your website come in through one PC. <button class="lnk" data-os="guide">Connect your website</button> · <button class="lnk" data-os="trail">Activity</button></p>');
@@ -1034,6 +1071,14 @@ document.addEventListener('click', (e) => {
   if (ta) { safe(() => tileAction(ta.dataset.tact, ta.dataset.id)); return; }
   const ch = e.target.closest('[data-chip]');
   if (ch) { const c = L9.chips({ programs, today: today || {}, sync, cl }).find((x) => x.id === ch.dataset.chip); if (c && c.pop) openPop(c.pop, ch); else if (c && c.open) safe(() => bridge.call('central:open', c.open, null)); return; }
+  const ap = e.target.closest('[data-autoapprove], [data-autotonight]');
+  if (ap) { closePop(); const now = ap.hasAttribute('data-autoapprove'); safe(async () => {
+    try { auto = await bridge.call(now ? 'central:autoApprove' : 'central:autoTonight'); }
+    catch (x) { if (who().who !== 'staff' && !(await adminReady())) { toast('Unlock 🔒 Admin to approve updates.'); openAdmin('updates'); return; } throw x; }
+    toast(now ? 'Installing now. Programs that are open update once they’re closed.' : 'They’ll install tonight, after work hours.');
+    renderHome(); if (adminOpen() && adm.sec === 'updates') renderAdminSection('updates'); }); return; }
+  const ar = e.target.closest('[data-autoretry]');
+  if (ar) { closePop(); safe(async () => { toast('Trying again in the background…'); auto = await bridge.call('central:autoRetry', ar.dataset.autoretry); renderHome(); }); return; }
   const ag = e.target.closest('[data-adm-go]');
   if (ag) { if (ag.dataset.admGo === 'updates') updError = ''; openAdmin(ag.dataset.admGo); return; }
   const cp = e.target.closest('[data-copy]');
@@ -1093,6 +1138,8 @@ $('#q').addEventListener('keydown', (e) => {
 });
 $('#qclear').addEventListener('click', () => { $('#q').value = ''; Object.assign(finder, { q: '', type: null, year: null, kind: null }); safe(runSearch); $('#q').focus(); });
 if (bridge && bridge.on) bridge.on('online-sync', (s) => { sync = s; renderHome(); });
+// the automatic updates: quietly redrawn (an update went in, one is waiting, one needs a look)
+if (bridge && bridge.on) bridge.on('auto-update', (a) => { const had = auto && auto.last && auto.last.at; auto = a; renderHome(); if (adminOpen() && adm.sec === 'updates') renderAdminSection('updates'); if (a && a.last && a.last.at !== had) checkForUpdates(true); });
 
 let appVersion = '';
 (async () => {
@@ -1101,6 +1148,7 @@ let appVersion = '';
   $('#setver').textContent = `Riyeser Central ${appVersion}. Shows information from your other Riyeser programs and never changes it.`;
   await loadDemo();
   await safe(refresh);
+  auto = await bridge.call('central:autoUpdate').catch(() => null);
   checkForUpdates(false);
   loadLicence();
   setInterval(loadLicence, 6 * 3600 * 1000);

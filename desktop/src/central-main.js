@@ -1,9 +1,10 @@
 // Riyeser Central: the Riyeser home screen. Opens every Riyeser program and shows, like a PA would, what needs
 // attention today: meetings, to-dos, money owed and owing, and recent documents, plus one search for every file.
 // It only READS the other programs' data, so it can never damage their files.
-const { app, BrowserWindow, ipcMain, shell, dialog, nativeTheme, net, session, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, nativeTheme, net, session, clipboard, powerMonitor } = require('electron');
 const { execFile, spawn } = require('child_process');
 const updates = require('./central/updates');
+const autoUpdate = require('./central/auto-update');
 const installerCheck = require('./central/installer-check');
 const installRun = require('./central/install-run');
 const updateRun = require('./central/update-run');
@@ -350,6 +351,13 @@ async function installProgram(id) {
   }
 }
 
+let manualUpdating = false;   // "Update all" or a tile's Update is running: the automatic updates wait
+async function manualUpdatesWhenFree(ids) {
+  // the automatic updates may be part-way through one: wait for it (a minute or two at most), then go
+  for (let i = 0; i < 240 && autoUpdater && autoUpdater.busy(); i++) await new Promise((ok) => setTimeout(ok, 500));
+  manualUpdating = true;
+  try { return await installUpdates(ids); } finally { manualUpdating = false; }
+}
 /** "Update all" (and a tile's Update): central/update-run.js has the steps and the rules. */
 async function installUpdates(ids) {
   const st = await updateStatus(false);
@@ -382,6 +390,103 @@ async function installUpdates(ids) {
   }
   store.set('updateCheck', null);
   return r;
+}
+
+// ---------- automatic updates (central/auto-update.js has the rules) ----------
+// Admin panel → Updates → "When to install updates" (prefs.updateWhen: outside work hours, the default; only when an
+// owner or admin approves; as soon as possible) and this PC's work hours (prefs.workHours, Mon–Fri 8:00–18:00).
+let autoUpdater = null;
+const updateWhen = () => { const p = (store && store.get('prefs', {})) || {}; return { mode: autoUpdate.modeOf(p), hours: autoUpdate.workHours(p.workHours) }; };   // the PC's own time zone
+// Only an installed Central on Windows (a developer's copy, a build check or the self-tests never update anything).
+const autoAllowed = () => app.isPackaged && process.platform === 'win32' && !process.argv.some((a) => a.startsWith('--self-test'));
+/** The busy signals: an open till shift or unsent website news in the company file, Central's own unsent online marks. */
+async function updateBusy() {
+  let company = null;
+  try { company = await sources.companyBusy(sources.accountingDbPath()); } catch { company = null; }
+  const pending = ((store && store.get('online-sync-pending', [])) || []).length;
+  return autoUpdate.busyFrom({ company, centralPending: pending });
+}
+/** Which Riyeser programs are open (Windows' own list); null when Central couldn't tell (then nothing installs). */
+const runningPrograms = async () => autoUpdate.runningIds(await freshstart.runningImages(), PROGRAMS);
+/** Idle: nobody has used the keyboard or mouse for 10 minutes, and Central's window isn't the one in front. */
+const pcIdle = async () => {
+  let secs = 0; try { secs = powerMonitor.getSystemIdleTime(); } catch { secs = 0; }
+  const inUse = (w) => w && !w.isDestroyed() && (w.isFocused() || (w === teamWin && w.isVisible()));   // Central in front, or a Link call open
+  return secs >= 10 * 60 && !inUse(win) && !inUse(teamWin);
+};
+/** Central's own installer: Central closes, the installer runs quietly, then Central opens again. */
+function runSelfInstaller(file, { minimized = false } = {}) {
+  const again = minimized ? ' --minimized' : '';
+  const cmd = `timeout /t 2 /nobreak >nul & "${file}" /S & start "" "${process.execPath}"${again}`;
+  spawn('cmd.exe', ['/d', '/c', cmd], { detached: true, stdio: 'ignore', windowsHide: true, windowsVerbatimArguments: true }).unref();
+}
+function makeAutoUpdater() {
+  autoUpdater = autoUpdate.createAutoUpdater({
+    store, when: updateWhen, isDemo: demoOn, allowed: autoAllowed, manualBusy: () => manualUpdating || !!firstRunBusy,
+    cacheDir: path.join(app.getPath('userData'), 'updates'),
+    status: async (o) => { const r = await checkUpdates(!!(o && o.fresh)); return { latest: r.latest, updates: r.latest ? updates.availableUpdates(r.installed || {}, r.latest) : [] }; },
+    download: (u, file) => download(u.url, file, () => {}),
+    verify: (file, u, manifest) => installerCheck.checkInstaller({ file, name: u.file || path.basename(file), manifest, digest: u.digest }),
+    running: runningPrograms, busy: updateBusy, idle: pcIdle,
+    // quietly, and never through the permission prompt here: that's only the once-a-day batch below
+    install: async (u, file) => {
+      const r = await installRun.runInstaller({ file, args: u.args, elevate: false, retryElevated: false, spawn });
+      const f = installRun.installFailure(r, { name: u.name, args: u.args });
+      installLog({ id: u.id, version: u.to, file: path.basename(file), stage: f.ok ? 'ran' : 'failed', elevated: r.elevated, code: r.code, startError: r.startError, reason: f.reason, ms: r.ms, detail: r.detail, how: 'auto' });
+      return f;
+    },
+    installBatch: async (list) => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'riyeser-auto-batch-'));
+      try {
+        const { results } = await installRun.runElevatedBatch({ items: list.map(({ u, file }) => ({ id: u.id, file, args: u.args })), spawn, dir });
+        return Object.fromEntries(list.map(({ u, file }) => {
+          const r = results[u.id] || {}; const f = installRun.installFailure(r, { name: u.name, args: u.args });
+          installLog({ id: u.id, version: u.to, file: path.basename(file), stage: f.ok ? 'ran' : 'failed', elevated: true, code: r.code, startError: r.startError, reason: f.reason, detail: r.detail, how: `auto batch of ${list.length}` });
+          return [u.id, f];
+        }));
+      } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+    },
+    // while idle: Central closes and opens again the way it was (minimised when it was out of the way)
+    installSelf: (u, file) => {
+      const minimized = !win || win.isDestroyed() || win.isMinimized() || !win.isVisible();
+      runSelfInstaller(file, { minimized });
+      setTimeout(() => { quitting = true; app.quit(); }, 300);
+    },
+    log: (e) => installLog(e), onChange: (st) => send('auto-update', st), reported: () => programsReporter.soon(),
+  });
+  return autoUpdater;
+}
+/** The small "Updating Riyeser Central…" window shown while Central's own update starts (at Central's start). */
+function showUpdatingSplash(version) {
+  const w = new BrowserWindow({ width: 380, height: 220, frame: false, resizable: false, movable: true, center: true, show: false, skipTaskbar: false, title: 'Updating Riyeser Central',
+    icon: path.join(__dirname, 'renderer', process.platform === 'win32' ? 'icon-central.ico' : 'icon-central.png'),
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true } });
+  w.removeMenu();
+  w.loadFile(path.join(__dirname, 'renderer', 'central-updating.html'));
+  w.once('ready-to-show', () => w.show());
+  return w;
+}
+/**
+ * At start, before the window: Central's own update, when one is downloaded and checked (and the setting is on, not
+ * demo mode, nothing waiting to go out). Shows the splash, starts the installer and quits. -> true when it did.
+ */
+async function updateSelfAtStart() {
+  if (!autoUpdater) return false;
+  let busy = {}; try { busy = autoUpdate.busyFrom({ centralPending: ((store.get('online-sync-pending', [])) || []).length }); } catch { busy = {}; }
+  const c = autoUpdater.atStart({ appVersion: app.getVersion(), newer: updates.newer, busy });
+  if (!c) return false;
+  let r; try { r = await installerCheck.checkInstaller({ file: c.file, name: c.name || path.basename(c.file), manifest: c.manifest, digest: c.digest }); } catch (e) { r = { ok: false, error: e.message }; }
+  if (!r.ok) {   // changed since it was downloaded: thrown away, downloaded again later
+    try { fs.rmSync(c.file, { force: true }); } catch { /* gone */ }
+    store.update(autoUpdate.STATE, {}, (s) => { const x = { ...(s || {}) }; x.cache = { ...(x.cache || {}) }; delete x.cache.central; x.self = null; return x; });
+    installLog({ id: 'central', version: c.version, stage: 'failed', reason: 'check', how: 'auto (start)', detail: r.error });
+    return false;
+  }
+  showUpdatingSplash(c.version);
+  await new Promise((ok) => setTimeout(ok, 1200));   // long enough to read
+  runSelfInstaller(c.file);
+  setTimeout(() => { quitting = true; app.quit(); }, 1500);
+  return true;
 }
 
 // ---------- first run, "One installer": the plan's programs, one after another (first-run.js has the rules) ----------
@@ -831,7 +936,39 @@ function registerIpc() {
   setTimeout(resumeIfOnline, 15 * 1000); setInterval(resumeIfOnline, 2 * 60 * 1000);
   handle('firstrun:resume', () => { resumeIfOnline(); return true; });
   handle('central:updates', (force) => updateStatus(!!force));
-  handle('central:installUpdates', (ids) => installUpdates(ids));
+  handle('central:installUpdates', (ids) => manualUpdatesWhenFree(ids));
+  // Admin panel → Updates: "When to install updates", work hours, the last automatic update, what's waiting and why,
+  // "N updates ready" with Install now / Tonight, Try again
+  const noAuto = () => ({ mode: updateWhen().mode, hours: updateWhen().hours, demo: demoOn(), allowed: false, last: null, history: [], waiting: {}, attention: [], pending: [], ready: [], week: false, counts: {} });
+  handle('central:autoUpdate', () => (autoUpdater ? autoUpdater.summary() : noAuto()));
+  handle('central:setUpdateWhen', (mode) => {
+    admin.require();
+    if (!autoUpdate.MODES.includes(mode)) throw new Error('Unknown choice.');
+    store.update('prefs', {}, (o) => ({ ...(o || {}), updateWhen: mode }));
+    installLog({ id: 'central', stage: 'setting', how: 'auto', detail: `when to install updates: ${mode}` });
+    if (autoUpdater) setTimeout(() => autoUpdater.tick(), 1000);
+    return autoUpdater ? autoUpdater.summary() : noAuto();
+  });
+  handle('central:setWorkHours', (h) => {
+    admin.require();
+    const hours = autoUpdate.workHours(h);
+    store.update('prefs', {}, (o) => ({ ...(o || {}), workHours: hours }));
+    installLog({ id: 'central', stage: 'setting', how: 'auto', detail: `work hours: ${hours.days.join(',')} ${hours.start}-${hours.end}` });
+    return autoUpdater ? autoUpdater.summary() : noAuto();
+  });
+  // Who approves: an owner or admin (the unlocked Admin panel, or signed in here with that role); a person on their own
+  const approver = async () => {
+    const adminState = admin.state();
+    let role = null;
+    if (adminState.needed && !adminState.open) role = await businessRole(online.readCompany(appData)).catch(() => null);
+    const by = autoUpdate.approverFrom({ adminState, role, email: on.session && on.session.user ? on.session.user.email : '' });
+    if (by) return by;
+    const e = new Error(adminState.demo ? 'Demo mode never installs updates.' : 'Updates are waiting for an administrator. An owner or admin can approve them.'); e.notAdmin = true; throw e;
+  };
+  handle('central:autoApprove', async () => { const by = await approver(); if (!autoUpdater) return null; autoUpdater.approve({ by }); return autoUpdater.summary(); });
+  handle('central:autoTonight', async () => { const by = await approver(); return autoUpdater ? autoUpdater.tonight({ by }) : null; });
+  handle('central:autoRetry', (id) => { if (!autoUpdater) return null; autoUpdater.retry(id ? String(id) : null); return autoUpdater.summary(); });
+  if (autoUpdater) autoUpdater.start();   // a first check a minute after Central starts, then every 6 hours
   handle('central:install', (id) => installProgram(id));
   // Help: each program's guide in the Riyeser Help Centre.
   handle('central:help', (id) => {
@@ -1042,6 +1179,7 @@ function createWindow() {
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
   });
   win.removeMenu();
+  if (process.argv.includes('--minimized')) win.minimize();   // opened again after an automatic update while away
   win.loadFile(path.join(__dirname, 'renderer', 'central.html'));
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/i.test(url)) shell.openExternal(url); return { action: 'deny' }; });
   // Closing Central closes the hidden Link window too, so Central really quits.
@@ -1081,6 +1219,9 @@ app.whenReady().then(async () => {
     app.exit(0);
     return;
   }
+  // Central's own update, downloaded earlier: installed now, before the window shows (never while someone works in it)
+  makeAutoUpdater();
+  if (await updateSelfAtStart().catch(() => false)) return;
   registerIpc();
   createWindow();
   // Used by the Windows build check: the home screen as people see it (the launcher's tiles, pill and chips, any page

@@ -455,3 +455,24 @@ table.ot td:nth-child(2) { min-width: 260px; } table.ot td:nth-child(3) { min-wi
 .wcard:has(.frsteps) { padding: 24px 32px; } .wcard:has(.frsteps) .wlogo { margin-bottom: 10px; } .wcard:has(.frsteps) h1 { font-size: 24px; } .wcard:has(.frsteps) .wsub { margin-bottom: 14px; }
 .grid:focus { outline: none; }
 .banner .updfail { margin-top: 4px; } .banner [data-act="gethelp"] { margin-left: -4px; }
+/* Admin → Updates: "When to install updates", work hours, "N updates ready", the last automatic update, why one is waiting */
+.autorow { padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
+.autoh { display: block; font-size: 13.5px; margin-bottom: 8px; }
+.autowhen .setrow + .setrow { margin-top: 8px; }
+.autowhen .rec { font-weight: 500; font-size: 11.5px; color: var(--ok); background: var(--ok-soft); border-radius: 999px; padding: 1px 7px; margin-left: 4px; }
+.workh { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 12px 0 0 28px; }
+.workh[hidden] { display: none; }
+.workh .days { display: flex; flex-wrap: wrap; gap: 4px; }
+.workh .day { position: relative; cursor: pointer; }
+.workh .day input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.workh .day span { display: inline-block; min-width: 38px; text-align: center; padding: 4px 6px; border-radius: 7px; border: 1px solid var(--line); background: var(--panel); font-size: 12.5px; color: var(--muted); }
+.workh .day input:checked + span { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.workh .day input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 1px; }
+.workh .hrs { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); white-space: nowrap; }
+.workh input[type=time] { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 3px 6px; }
+.autonote { margin: 10px 0 0; }
+.autoready { display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; margin-top: 10px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.autoready .grow { flex: 1; min-width: 220px; } .autoready small { display: block; color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+.autolast { margin: 8px 2px 4px; }
+.tbl td .uwhy { display: block; color: var(--muted); font-size: 12px; white-space: normal; line-height: 1.35; }
+.attacts { display: inline-flex; gap: 6px; flex-shrink: 0; }
