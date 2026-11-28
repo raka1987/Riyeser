@@ -323,3 +323,5 @@ h3.qopts-on{margin-top:var(--sp-4)}
 .login.login-wide{max-width:880px}.setup-h{font-size:17px;margin:6px 0 6px}.setup-skip{margin-top:18px;border-top:1px solid var(--line);padding-top:12px}
 .setup-skip summary{cursor:pointer;font-weight:600}.setup-review .card{box-shadow:none;padding:var(--sp-4)}
 @media (max-width:520px){.login.login-wide{margin:16px;padding:20px}}
+.cr-change{margin:6px 0 2px;font-weight:600}.cr-change-note{display:block;white-space:normal}
+.cr-change-box{margin-top:var(--sp-3);padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:#f8fafc}

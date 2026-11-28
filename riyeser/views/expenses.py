@@ -108,7 +108,7 @@ def new():
 
 
 def _gst_rate(db):
-    tc = db.execute("SELECT * FROM tax_codes WHERE kind='gst' ORDER BY code='GST' DESC, id LIMIT 1").fetchone()
+    tc = db.execute("SELECT * FROM tax_codes WHERE kind='gst' ORDER BY active DESC, code='GST' DESC, id LIMIT 1").fetchone()
     return tc
 
 

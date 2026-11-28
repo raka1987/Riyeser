@@ -190,7 +190,10 @@ def review(db, cc, company=None):
             status = "same"
         else:
             status = "different"
-        codes.append(dict(t, status=status, yours=dict(h) if h else None))
+        # same purpose (kind), different rate: the review offers "Change my GST code to 15% for new transactions"
+        can_change = status == "different" and h["kind"] == t["kind"] and t["kind"] in ("gst", "capital")
+        codes.append(dict(t, status=status, yours=dict(h) if h else None, can_change=can_change,
+                          retired_as=retired_code(db, t["code"], h["rate"]) if can_change else None))
     tzs = p["timezones"]
     return {"cc": p["code"], "p": p, "codes": codes,
             "timezone": tzs[0] if len(tzs) == 1 else None,
@@ -211,11 +214,68 @@ def confirm(db, form, who):
     upd.update(country_confirmed_by=who, country_confirmed_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     db.execute("UPDATE company SET " + ", ".join(f"{k}=?" for k in upd) + " WHERE id=1", tuple(upd.values()))
     added = add_codes(db, wanted_codes(form))
+    for code, rate in rate_changes(db, form):
+        change_rate(db, code, rate, who)
     ensure_not_reportable(db)
     audit(db, "country_settings", f"Country and tax settings confirmed by {who}: {name_of(cc)}"
           + (f"; tax codes added: {', '.join(added)}" if added else ""))
     db.commit()
     return added
+
+
+def rate_changes(db, form):
+    """[(code, new rate)] the person ticked on the review screen ("Change my GST code to 15% for new transactions").
+    Only offered (and only done) for a code already in the file with the same kind and a different rate."""
+    cc = (form.get("country") or "").strip().upper()
+    rate = _rate(form)
+    p = preset(cc)
+    std_code = p.get("standard_code")
+    out = []
+    for t in review(db, cc)["codes"]:
+        if t["can_change"] and form.get(f"change_{t['code']}") == "1":
+            out.append((t["code"], rate if t["code"] == std_code and rate is not None else t["rate"]))
+    return out
+
+
+def retired_code(db, code, old_rate):
+    """The name the old code is kept under: GST -> GST10 (GST10-2, ... if taken)."""
+    base = f"{code}{old_rate:g}".replace(".", "_")[:8]
+    have = {r["code"] for r in db.execute("SELECT code FROM tax_codes")} if db is not None else set()
+    name, n = base, 2
+    while name in have:
+        name, n = f"{base[:6]}-{n}", n + 1
+    return name
+
+
+def change_rate(db, code, new_rate, who):
+    """A new rate for new transactions only. Document and journal lines keep their own net and tax amounts, but not
+    the rate: quotes with options, unsent quotes converted later, credit notes copied from an invoice and the tax
+    detail report all read the rate from the code. So the rate on the existing code is never changed. Instead:
+      1. the existing code keeps its id and rate, is renamed (GST -> GST10) and is no longer offered (In use off),
+         so everything already saved still points at it, at the old rate;
+      2. a new code with the original name (GST) is added at the new rate, same kind and tax accounts;
+      3. the defaults for new transactions (accounts, items, contacts) move to the new code.
+    Audited."""
+    old = db.execute("SELECT * FROM tax_codes WHERE code=?", (code,)).fetchone()
+    if not old or abs((old["rate"] or 0) - new_rate) < 1e-9:
+        return None
+    today = datetime.now().strftime("%Y-%m-%d")
+    keep_as = retired_code(db, code, old["rate"])
+    db.execute("UPDATE tax_codes SET code=?, name=?, active=0 WHERE id=?",
+               (keep_as, f"{old['name']} ({old['rate']:g}%, until {today})"[:80], old["id"]))
+    tax = db.execute("SELECT tax_name FROM company WHERE id=1").fetchone()
+    tax = (tax["tax_name"] if tax and tax["tax_name"] and tax["tax_name"].lower() not in NO_TAX else code)
+    new_id = db.execute("INSERT INTO tax_codes (code, name, rate, kind, collected_account_id, paid_account_id, active)"
+                        " VALUES (?,?,?,?,?,?,1)", (code, f"{tax} {new_rate:g}%", float(new_rate), old["kind"],
+                                                    old["collected_account_id"], old["paid_account_id"])).lastrowid
+    for table, col in (("accounts", "tax_code_id"), ("contacts", "tax_code_id"), ("items", "sale_tax_code_id"),
+                       ("items", "purchase_tax_code_id")):
+        db.execute(f"UPDATE {table} SET {col}=? WHERE {col}=?", (new_id, old["id"]))
+    from .db import audit
+    audit(db, "tax_rate_change", f"{code} changed from {old['rate']:g}% to {new_rate:g}% for new transactions by {who}. "
+          f"The {old['rate']:g}% code is kept as {keep_as} (no longer offered), so past invoices, quotes and postings "
+          f"keep {old['rate']:g}%.")
+    return keep_as
 
 
 def settings_from_form(form):
@@ -360,9 +420,10 @@ def tax_code_id(db, role):
     """The tax code a screen uses when it needs "the" standard (taxable), free (zero-rated or exempt) or
     not-reportable code, whatever this file's codes are called (GST, VAT, FRE, ZER, N-T...)."""
     if role == "standard":
-        q = ("SELECT id FROM tax_codes WHERE kind='gst' ORDER BY code='GST' DESC, code='VAT' DESC, rate DESC, id LIMIT 1")
+        q = ("SELECT id FROM tax_codes WHERE kind='gst' ORDER BY active DESC, code='GST' DESC, code='VAT' DESC, rate DESC,"
+             " id LIMIT 1")
     elif role == "free":
-        q = ("SELECT id FROM tax_codes WHERE kind IN ('gst_free','export','input_taxed') ORDER BY code='FRE' DESC,"
+        q = ("SELECT id FROM tax_codes WHERE kind IN ('gst_free','export','input_taxed') ORDER BY active DESC, code='FRE' DESC,"
              " kind='gst_free' DESC, kind='export' DESC, id LIMIT 1")
     else:
         q = "SELECT id FROM tax_codes WHERE kind='not_reportable' ORDER BY code='N-T' DESC, id LIMIT 1"

@@ -404,3 +404,67 @@ def test_money_formats():
     assert C.format_money(123456, C.preset("CH")["currency_format"]) == "CHF 1’234.56"
     assert C.format_money(0, None, blank_zero=True) == ""
     assert C.format_money(5, None) == "$0.05"
+
+
+# ---------------------------------------------------------------- "Change my GST code to 15% for new transactions"
+def test_changing_an_existing_codes_rate_only_affects_new_transactions(app, client):
+    with app.app_context():
+        db = get_db()
+        acc, tc = ids(db)
+        cust = db.execute("INSERT INTO contacts (kind, name, tax_code_id) VALUES ('customer','Synthetic Customer',?)",
+                          (tc["GST"],)).lastrowid
+        item = db.execute("INSERT INTO items (sku, name, is_sold, income_account_id, sell_price, sale_tax_code_id,"
+                          " purchase_tax_code_id, active) VALUES ('S1','Service',1,?,10000,?,?,1)",
+                          (acc["4-2000"], tc["GST"], tc["GST"])).lastrowid
+        db.commit()
+        old_inv = sell(db, cust, "GST", 10000)                      # $100 + $10 GST, posted
+        old_quote = L.save_document(db, "sale", dict(contact_id=cust, date=TODAY),
+                                    [dict(item_id=item, qty=1, unit_price=20000, account_id=acc["4-2000"],
+                                          tax_code_id=tc["GST"])], "quote")
+        db.commit()
+        snap = lambda: ([tuple(r) for r in db.execute("SELECT * FROM documents ORDER BY id")],
+                        [tuple(r) for r in db.execute("SELECT * FROM document_lines ORDER BY id")],
+                        [tuple(r) for r in db.execute("SELECT * FROM journal_lines ORDER BY id")])
+        before = snap()
+        r = {t["code"]: t for t in C.review(db, "NZ")["codes"]}
+        assert r["GST"]["can_change"] and r["GST"]["retired_as"] == "GST10"
+        old_id = tc["GST"]
+        form = review_form("NZ", db, timezone="Pacific/Auckland", change_GST="1")
+    page = client.get("/setup/country/review?country=NZ").get_data(as_text=True)
+    assert 'name="change_GST"' in page and "for new transactions" in page and "kept as GST10" in page
+    assert 'name="change_GST" value="1" checked' not in page            # unticked unless the person ticks it
+    client.post("/setup/country/review", data=form)
+    with app.app_context():
+        db = get_db()
+        assert snap() == before                                          # past documents identical
+        old = dict(db.execute("SELECT * FROM tax_codes WHERE id=?", (old_id,)).fetchone())
+        assert (old["code"], old["rate"], old["active"]) == ("GST10", 10.0, 0)   # still what they point at
+        new = dict(db.execute("SELECT * FROM tax_codes WHERE code='GST'").fetchone())
+        assert (new["rate"], new["kind"], new["active"]) == (15.0, "gst", 1) and new["id"] != old_id
+        assert (new["collected_account_id"], new["paid_account_id"]) == (old["collected_account_id"], old["paid_account_id"])
+        # the defaults for new transactions moved to the new code
+        assert db.execute("SELECT tax_code_id FROM accounts WHERE code='4-2000'").fetchone()[0] == new["id"]
+        assert db.execute("SELECT tax_code_id FROM contacts WHERE id=?", (cust,)).fetchone()[0] == new["id"]
+        assert tuple(db.execute("SELECT sale_tax_code_id, purchase_tax_code_id FROM items WHERE id=?", (item,)).fetchone()) \
+            == (new["id"], new["id"])
+        assert db.execute("SELECT details FROM audit_log WHERE action='tax_rate_change'").fetchone()[0].startswith(
+            "GST changed from 10% to 15% for new transactions by admin")
+        new_inv = sell(db, cust, "GST", 10000)                           # a new invoice: 15%
+        db.commit()
+        assert tuple(db.execute("SELECT subtotal, tax_total, total FROM documents WHERE id=?", (new_inv,)).fetchone()) \
+            == (10000, 1500, 11500)
+        assert tuple(db.execute("SELECT tax_total, total FROM documents WHERE id=?", (old_inv,)).fetchone()) == (1000, 11000)
+        assert not books_consistent(db)
+    text = pdf_text(client, old_quote)                                   # the old quote still says 10%
+    assert "$20.00" in text and "$220.00" in text
+    assert '>GST10</option>' not in client.get("/sale/new").get_data(as_text=True)   # no longer offered
+
+
+def test_the_change_is_only_done_when_ticked(app, client):
+    with app.app_context():
+        form = review_form("NZ", get_db(), timezone="Pacific/Auckland")
+    client.post("/setup/country/review", data=form)
+    with app.app_context():
+        db = get_db()
+        assert codes(db)["GST"] == (10.0, "gst") and "GST10" not in codes(db)
+        assert not db.execute("SELECT 1 FROM audit_log WHERE action='tax_rate_change'").fetchone()

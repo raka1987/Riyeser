@@ -23,10 +23,14 @@
 <div><label for="cr-tz">Time zone</label><select id="cr-tz" name="timezone"{% if r.timezones|length > 1 and p.code != C.OTHER %} required{% endif %}>{% if not r.timezone %}<option value="">Choose your time zone</option>{% endif %}{% for z in r.timezones %}<option {{ 'selected' if z == r.timezone }}>{{ z }}</option>{% endfor %}</select><small class="muted">{{ 'Where the business is, for online bookings and the day\'s figures.' if r.timezones|length > 1 else '' }}</small></div>
 </div></div>
 <div class="card"><h3>Tax codes</h3>
-{% if r.codes %}<p class="muted" style="margin-top:0">Ticked codes are added if they aren't in the company file yet. Codes already there are kept exactly as they are. You can add, change or stop using codes any time under Tax codes.</p>
+{% if r.codes %}<p class="muted" style="margin-top:0">Ticked codes are added if they aren't in the company file yet. Codes already there are kept as they are, unless you tick "Change my … code" (new transactions only). You can add, change or stop using codes any time under Tax codes.</p>
 <div class="tbl"><table><tr><th>Add</th><th>Code</th><th>Description</th><th class="n">Rate</th><th>In your file now</th></tr>
 {% for t in r.codes %}<tr><td><input type="checkbox" name="add_{{ t.code }}" value="1" aria-label="Add {{ t.code }}" {{ 'checked' if t.status == 'add' }}{{ ' disabled' if t.status != 'add' }}></td><td><b>{{ t.code }}</b></td><td>{{ t.name }}</td><td class="n">{{ '%g'|format(t.rate) }}%</td>
-<td class="wrap">{% if t.status == 'add' %}Not yet: will be added{% elif t.status == 'same' %}Already there{% else %}<b>Already there at {{ '%g'|format(t.yours.rate) }}%: kept as it is.</b> Change it under Tax codes if it should be {{ '%g'|format(t.rate) }}%.{% endif %}</td></tr>{% endfor %}</table></div>
+<td class="wrap">{% if t.status == 'add' %}Not yet: will be added{% elif t.status == 'same' %}Already there{% else %}<b>Already there at {{ '%g'|format(t.yours.rate) }}%: kept as it is.</b>{% if not t.can_change %} Change it under Tax codes if it should be {{ '%g'|format(t.rate) }}%.{% endif %}{% endif %}</td></tr>{% endfor %}</table></div>
+{% for t in r.codes if t.can_change %}<div class="cr-change-box"><label class="check cr-change"><input type="checkbox" name="change_{{ t.code }}" value="1"> <span>Change my {{ t.code }} code to <span class="cr-newrate" data-std="{{ '1' if t.code == p.standard_code else '' }}">{{ '%g'|format(t.rate) }}</span>% for new transactions</span></label>
+<small class="muted cr-change-note">It's {{ '%g'|format(t.yours.rate) }}% in your file now. Past invoices, quotes and postings keep {{ '%g'|format(t.yours.rate) }}%: that code is kept as {{ t.retired_as }} and no longer offered.</small></div>{% endfor %}
+<script>(function () { var r = document.getElementById('cr-rate'); if (!r) return;
+  r.addEventListener('input', function () { document.querySelectorAll('.cr-newrate[data-std="1"]').forEach(function (s) { s.textContent = r.value.trim() || '?'; }); }); })();</script>
 {% elif p.tax_name == 'None' %}<p class="muted" style="margin:0">No tax codes are added. A not-reportable code (N-T) is always kept for transfers and loans.</p>
 {% else %}<p class="muted" style="margin:0">No codes are filled in for this country. If you type a standard rate above, a code for it is added. Add any others under Tax codes.</p>{% endif %}
 </div>

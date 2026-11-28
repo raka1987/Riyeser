@@ -48,7 +48,8 @@ CREATE TABLE tax_codes (
     rate REAL NOT NULL DEFAULT 0,
     kind TEXT NOT NULL CHECK (kind IN ('gst','gst_free','export','input_taxed','capital','not_reportable')),
     collected_account_id INTEGER REFERENCES accounts(id),
-    paid_account_id INTEGER REFERENCES accounts(id)
+    paid_account_id INTEGER REFERENCES accounts(id),
+    active INTEGER NOT NULL DEFAULT 1   -- 0 = no longer offered (what it was used on keeps it)
 );
 
 -- Control accounts used automatically by each kind of transaction
