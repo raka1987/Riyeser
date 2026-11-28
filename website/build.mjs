@@ -675,7 +675,7 @@ INDUSTRIES.push(
       ['documents', ['Scan, file and find receipts and papers', 'Find any document by a word inside it', 'Free forever']],
       ['invoices', ['Unlimited quotes, invoices, customers and payments', 'Turn an accepted quote into an invoice in one click', 'Print or save any invoice as a PDF', 'Free forever']],
       ['pdf', ['Fill in and sign forms', 'Combine, split and reorder pages', 'Free forever']]] },
-  { id: 'appointments', name: 'Appointment businesses', icon: 'calendar', photo: 'appointments-salon.webp', photoPos: '50% 22%', short: 'Staff calendars, online bookings and reminder emails.',
+  { id: 'appointments', name: 'Appointment businesses', icon: 'calendar', photo: 'appointments-salon.webp', photoPos: '60% 35%', short: 'Staff calendars, online bookings and reminder emails.',
     title: 'Appointment Businesses', lead: 'Salons, studios and other businesses that work by appointment: every booking on one calendar, from one Windows PC.',
     h: 'Every appointment on one calendar', p: 'See each person\'s day and week with double-booking warnings, let customers book online from your website or your own riyeser.com booking page (beta), and send reminder emails the day before.',
     shot: 'shots/bookings-week.webp', shotName: 'Riyeser Bookings', shotApp: 'bookings', shotW: 1440, shotH: 585, cta: ['bookings', 'Explore Bookings'],
