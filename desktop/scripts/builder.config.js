@@ -20,7 +20,9 @@ const APPS = {
     extraMetadata: { name: 'desk-assistant', version: '1.0.0', productName: 'Riyeser Documents', description: 'Riyeser Documents (Riyeser Group): scan, file and find the office\'s documents.' } },
   pdf: { name: 'Riyeser PDF', appId: 'com.deskassistant.pdf', ico: 'build/pdf/icon.ico', out: 'dist-pdf', artifact: 'RiyeserPDF',
     extraMetadata: { main: 'src/pdf-main.js', name: 'desk-pdf' } },
+  // build/central/installer.nsh counts installs for the free trial's history (HKCU\Software\Riyeser\Trial, never removed)
   central: { name: 'Riyeser Central', appId: 'com.riyeser.central', ico: 'build/central/icon.ico', out: 'dist-central', artifact: 'RiyeserCentral',
+    include: 'build/central/installer.nsh',
     extraMetadata: { main: 'src/central-main.js', name: 'riyeser-central', version: '1.9.0', productName: 'Riyeser Central' } },
   // As Built was called Riyeser Services. Only the name people see changed: the app id, install folder (riyeser-services),
   // program file (Riyeser Services.exe), saved projects and release file (RiyeserServices-Setup.exe) stay the same,

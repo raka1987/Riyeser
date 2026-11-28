@@ -34,7 +34,9 @@ do $$ declare extra text; begin
     and not exists (select 1 from pg_depend d where d.objid = p.oid and d.deptype = 'e')
     and p.proname not in ('guest_ticket', 'invite_info', 'track_install', 'track_visit', 'hq_record_downloads',
       'relay_enroll_claim', 'relay_leave', 'relay_sync', 'can_see_channel', 'is_admin', 'is_member', 'is_owner',
-      'audit_change', 'ring_group_for_branch', 'ring_group_member_left');
+      'audit_change', 'ring_group_for_branch', 'ring_group_member_left',
+      -- the free trial's anonymous PC record: one PC code's own dates only, earliest kept, rate-limited (trial guard)
+      'pc_trial_seen');
   assert extra is null, 'unreviewed functions signed-out visitors can run: ' || extra;
 end $$;
 
@@ -57,7 +59,7 @@ select (public.support_report(:'ws_a', '{"what_happened":"A problem","blocked":f
 select pg_temp.as_user('33333333-3333-3333-3333-333333333333');
 select public.create_team('Corner Cafe', 'Kim') as ws_b \gset
 reset role;
-select set_config('test.ws_a', :'ws_a', false), set_config('test.ws_b', :'ws_b', false), set_config('test.raw_key', :'raw_key_a', false),
+select set_config('test.ws_a', :'ws_a', false), set_config('test.ws_b', :'ws_b', false), set_config('test.raw_key', :'raw_key_a', false), set_config('test.ticket_a', :'ticket_a', false),
   set_config('test.hook', :'hook_json', false);
 
 -- The calls: every function a signed-in person can run that takes an id, with A's real ids (a person, a chat, the private
@@ -420,5 +422,146 @@ do $$ begin
   assert not exists (select 1 from public.email_outbox where strpos(coalesce(body_text, '') || coalesce(subject, ''), current_setting('test.raw_key')) > 0
                      or strpos(coalesce(body_text, ''), current_setting('test.hook')::json ->> 'secret') > 0 or body_text like '%Typed-By-Support-1%'), 'no email holds a key, secret or password';
 end $$;
+
+-- ===== Trial guard: Riyeser online's anonymous PC record (pc_trials) and the HQ ticket's Trial history
+reset role;
+select set_config('test.pc1', repeat('a1', 32), false), set_config('test.pc2', repeat('b2', 32), false);
+set role anon;
+select set_config('request.jwt.claim.sub', '', false), set_config('request.jwt.claims', '', false);
+do $$ declare r json; pc1 text := current_setting('test.pc1'); pc2 text := current_setting('test.pc2'); begin
+  -- the table can't be read or written by signed-out visitors, only through pc_trial_seen
+  begin perform count(*) from public.pc_trials; raise exception 'anon read pc_trials'; exception when insufficient_privilege then null; end;
+  begin insert into public.pc_trials (pc_id, program, trial_start) values (pc1, 'suite', '2025-01-01'); raise exception 'anon wrote pc_trials';
+  exception when insufficient_privilege then null; end;
+  r := public.pc_trial_seen(pc1, 'suite', '2026-09-03T09:00:00Z', 'Central 1.9.0');
+  assert (r ->> 'trial_start')::timestamptz = '2026-09-03T09:00:00Z', 'registered';
+  assert (select array_agg(k order by k) from json_object_keys(r) k) = array['extra_days', 'first_seen', 'last_seen', 'program', 'trial_start'], 'only dates come back: ' || r::text;
+  -- never moved later; an earlier one (a restored company file) wins
+  r := public.pc_trial_seen(pc1, 'suite', '2026-11-20T00:00:00Z', null);
+  assert (r ->> 'trial_start')::timestamptz = '2026-09-03T09:00:00Z', 'a later date never moves it later';
+  r := public.pc_trial_seen(pc1, 'suite', '2026-08-01T00:00:00Z', null);
+  assert (r ->> 'trial_start')::timestamptz = '2026-08-01T00:00:00Z', 'the earlier date wins';
+  r := public.pc_trial_seen(pc1, 'suite', null, null);
+  assert (r ->> 'trial_start')::timestamptz = '2026-08-01T00:00:00Z', 'look-up only';
+  -- only that PC's dates: another PC code gets its own (or nothing), never pc1's
+  r := public.pc_trial_seen(pc2, 'suite', null, null);
+  assert r ->> 'trial_start' is null, 'a new PC: nothing, and nothing made';
+  r := public.pc_trial_seen(pc2, 'suite', now() + interval '30 days', null);
+  assert (r ->> 'trial_start')::timestamptz <= now() + interval '1 minute', 'a date in the future isn''t believed';
+  assert (r ->> 'trial_start')::timestamptz > '2026-08-02', 'pc2 has its own date, not pc1''s';
+  r := public.pc_trial_seen(pc1, 'estimate', null, null);
+  assert r ->> 'trial_start' is null, 'per program: no Estimate trial started by a look-up';
+  r := public.pc_trial_seen(pc2, 'suite', '1999-01-01', null);
+  assert (r ->> 'trial_start')::timestamptz > '2024-01-01', 'a date before Riyeser''s trials isn''t believed';
+  begin perform public.pc_trial_seen('ABC', 'suite', now(), null); raise exception 'a bad PC code was taken';
+  exception when others then assert sqlerrm like 'That PC code isn''t right%', sqlerrm; end;
+  begin perform public.pc_trial_seen(pc1, 'payroll; drop', now(), null); raise exception 'a bad program was taken';
+  exception when others then assert sqlerrm like 'Unknown program%', sqlerrm; end;
+end $$;
+-- rate limits: 20 an hour per PC code (each call its own transaction, as over the internet)
+do $$ declare i int; n int := 0; begin
+  for i in 1 .. 25 loop
+    begin perform public.pc_trial_seen(repeat('c3', 32), 'suite', '2026-10-01', null); n := n + 1;
+    exception when others then assert sqlerrm like 'Too many requests%', sqlerrm; end;
+  end loop;
+  assert n = 20, 'per-PC limit: ' || n;
+end $$;
+reset role;   -- (request_client_ip is only for the database's own functions)
+-- SEC-017: the client address is Cloudflare's CF-Connecting-IP, else the LAST X-Forwarded-For entry, never the first (a caller writes that)
+do $$ begin
+  perform set_config('request.headers', '{"x-forwarded-for":"198.51.100.7, 203.0.113.9"}', true);
+  assert public.request_client_ip() = '203.0.113.9', 'the last hop, not the spoofable first entry: ' || coalesce(public.request_client_ip(), 'null');
+  perform set_config('request.headers', '{"x-forwarded-for":"198.51.100.7, 203.0.113.9","cf-connecting-ip":"192.0.2.44"}', true);
+  assert public.request_client_ip() = '192.0.2.44', 'CF-Connecting-IP first';
+  perform set_config('request.headers', '{"x-forwarded-for":"not-an-ip"}', true);
+  assert public.request_client_ip() is null, 'rubbish: no address';
+end $$;
+reset role;
+-- signed-in people can't read the table either
+set role authenticated;
+select pg_temp.as_user('11111111-1111-1111-1111-111111111111');
+do $$ begin
+  begin perform count(*) from public.pc_trials; raise exception 'a customer read pc_trials'; exception when insufficient_privilege then null; end;
+end $$;
+-- a ticket with Central's report, including the trial record (and things that must be dropped)
+select (public.support_report(:'ws_a', json_build_object('what_happened', 'My trial ended early', 'blocked', false, 'source', 'central',
+  'trial', json_build_object('pc_id', current_setting('test.pc1'), 'latest_seen', '2026-11-20T00:00:00.000Z', 'clock_back', true, 'installs', 3,
+    'machine_guid', 'f0e1d2c3-b4a5-4697-8879-6a5b4c3d2e1f', 'user', 'C:\Users\alex\AppData',
+    'programs', json_build_array(json_build_object('program', 'suite', 'start', '2026-08-01T00:00:00.000Z', 'ends', '2026-10-30T00:00:00.000Z', 'days_left', 0,
+      'sources', json_build_object('licence_json', '2026-11-01T00:00:00.000Z', 'registry', '2026-08-01T00:00:00.000Z', 'company_file', 'C:\Users\alex\Books.db', 'online', '2026-08-01T00:00:00.000Z')),
+      json_build_object('program', 'evil', 'start', '2026-08-01T00:00:00.000Z'))))::jsonb) ->> 'id') as ticket_t \gset
+reset role;
+select set_config('test.ticket_t', :'ticket_t', false);
+do $$ declare t jsonb; begin
+  select d.trial into t from public.support_diagnostics d join public.support_tickets x on x.diag_id = d.id where x.id = current_setting('test.ticket_t')::uuid;
+  assert t ->> 'pc_id' = current_setting('test.pc1') and (t ->> 'installs')::int = 3 and (t ->> 'clock_back')::boolean, 'the trial record is kept: ' || t::text;
+  assert t::text !~* '(machine_guid|f0e1d2c3|alex|Users|evil)', 'no MachineGuid, user names, paths or unknown programs: ' || t::text;
+  assert t #>> '{programs,0,sources,company_file}' is null and t #>> '{programs,0,sources,registry}' = '2026-08-01T00:00:00.000Z', 'only dates as sources';
+  assert public.support_scrub(t #>> '{programs,0,start}') = t #>> '{programs,0,start}', 'dates pass support_scrub unchanged';
+end $$;
+set role authenticated;
+-- support (trials.view) sees it, with the online record for that PC only; it's in the HQ history
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000001');
+do $$ declare r json; begin
+  assert (public.hq_ticket(current_setting('test.ticket_t')::uuid) ->> 'trial') = 'yes', 'the ticket says it has a trial record';
+  r := public.hq_ticket_trial(current_setting('test.ticket_t')::uuid);
+  assert r #>> '{report,pc_id}' = current_setting('test.pc1'), 'the report';
+  assert json_array_length(r -> 'online') = 1 and (r #>> '{online,0,trial_start}')::timestamptz = '2026-08-01T00:00:00Z', 'that PC''s online record only: ' || (r -> 'online')::text;
+  assert r::text not like '%' || current_setting('test.pc2') || '%', 'never another PC''s';
+  assert r -> 'business' -> 'payroll' ->> 'status' is not null, 'the signed-in business''s server trial dates';
+  assert not (r ->> 'can_extend')::boolean, 'support can''t extend';
+  begin perform public.hq_trial_extend(current_setting('test.ticket_t')::uuid, 'suite', 14, 'Goodwill: ended early'); raise exception 'support extended a trial';
+  exception when others then assert sqlerrm like 'Your HQ role can''t do that.%', sqlerrm; end;
+  -- nothing without a ticket, or a ticket whose report has no trial record
+  begin perform public.hq_ticket_trial(gen_random_uuid()); raise exception 'a trial with no ticket';
+  exception when others then assert sqlerrm like 'That ticket doesn''t exist%', sqlerrm; end;
+  begin perform public.hq_ticket_trial(current_setting('test.ticket_a')::uuid); raise exception 'a trial from a report without one';
+  exception when others then assert sqlerrm like 'This ticket has no diagnostic report with a free-trial record%', sqlerrm; end;
+end $$;
+-- no other role: developer and sales (no trials.view) are refused; the ticket only says "hidden"
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000002');
+do $$ begin
+  begin perform public.hq_ticket_trial(current_setting('test.ticket_t')::uuid); raise exception 'a developer saw a trial';
+  exception when others then assert sqlerrm like 'Your HQ role can''t do that.%', sqlerrm; end;
+  begin perform public.hq_trial_pcs(); raise exception 'a developer counted trial PCs'; exception when others then assert sqlerrm like 'Your HQ role can''t do that.%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000003');
+do $$ begin
+  assert (public.hq_ticket(current_setting('test.ticket_t')::uuid) ->> 'trial') = 'hidden', 'sales: hidden';
+  begin perform public.hq_ticket_trial(current_setting('test.ticket_t')::uuid); raise exception 'sales saw a trial';
+  exception when others then assert sqlerrm like 'Your HQ role can''t do that.%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('11111111-1111-1111-1111-111111111111');
+do $$ begin
+  begin perform public.hq_ticket_trial(current_setting('test.ticket_t')::uuid); raise exception 'a customer saw HQ''s trial history';
+  exception when others then assert sqlerrm like 'Riyeser HQ is for Riyeser staff%', sqlerrm; end;
+end $$;
+-- finance (licences.manage) extends it as a goodwill gesture, with a reason; the counts never show a PC code
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000004');
+do $$ declare r json; c text; begin
+  assert (public.hq_ticket_trial(current_setting('test.ticket_t')::uuid) ->> 'can_extend')::boolean, 'finance can extend';
+  begin perform public.hq_trial_extend(current_setting('test.ticket_t')::uuid, 'suite', 14, ''); raise exception 'no reason';
+  exception when others then assert sqlerrm like 'Say why%', sqlerrm; end;
+  begin perform public.hq_trial_extend(current_setting('test.ticket_t')::uuid, 'suite', 400, 'Too many'); raise exception 'too many days';
+  exception when others then assert sqlerrm like 'Choose between 1 and 90 days%', sqlerrm; end;
+  r := public.hq_trial_extend(current_setting('test.ticket_t')::uuid, 'suite', 14, 'Goodwill: trial ended early');
+  assert (r ->> 'extra_days')::int = 14 and (r ->> 'trial_start')::timestamptz = '2026-08-01T00:00:00Z', 'extended, the start unchanged: ' || r::text;
+  c := public.hq_trial_pcs()::text;
+  assert c like '%"program" : "suite"%' and c not like '%' || current_setting('test.pc1') || '%' and c !~ '[0-9a-f]{64}', 'counts only: ' || c;
+end $$;
+reset role;
+do $$ begin
+  assert exists (select 1 from public.hq_audit where action = 'trial.viewed' and actor = 'c0c0c0c0-0000-4000-8000-000000000001'), 'each look is in the HQ history';
+  assert exists (select 1 from public.hq_audit where action = 'trial.extended' and details ->> 'reason' = 'Goodwill: trial ended early'
+    and (details ->> 'days')::int = 14 and length(details ->> 'pc') = 8), 'the extension is in the HQ history (a short PC code only)';
+  assert (select extra_days from public.pc_trials where pc_id = current_setting('test.pc1') and program = 'suite') = 14, 'kept for the PC';
+end $$;
+-- the PC picks the extension up the next time it's online; the date still never moves later
+set role anon;
+do $$ declare r json; begin
+  r := public.pc_trial_seen(current_setting('test.pc1'), 'suite', '2026-11-01T00:00:00Z', null);
+  assert (r ->> 'extra_days')::int = 14 and (r ->> 'trial_start')::timestamptz = '2026-08-01T00:00:00Z', 'the PC gets +14 days: ' || r::text;
+end $$;
+reset role;
 
 select 'ALL SECURITY TESTS PASSED' as result;

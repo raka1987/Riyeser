@@ -74,14 +74,14 @@
     ['refunds.approve', 'Approve refunds'], ['refunds.pay', 'Mark refunds paid'], ['offers.grant', 'Give free periods'], ['offers.approve', 'Approve free periods (supervisor)'],
     ['emails.view', 'See the email outbox'], ['emails.manage', 'Send held or failed emails again'], ['accounts.inactive', 'Approve removing inactive accounts'],
     ['staff.manage', 'Manage the HQ team'], ['audit.view', 'See the HQ history'], ['settings.manage', 'Change HQ settings'], ['reports.view', 'See reports'],
-    ['link.support', 'Riyeser Link phone support'], ['support.diagnostics', 'Look up diagnostic reports']];
+    ['link.support', 'Riyeser Link phone support'], ['support.diagnostics', 'Look up diagnostic reports'], ['trials.view', 'See a PC\'s free-trial history (from a ticket\'s report)']];
   const BASE = ['overview.view', 'downloads.view'];
   const ROLE_PERMS = {
     owner: PERMS.map((p) => p[0]),
     finance: [...BASE, 'customers.view', 'customers.notes', 'licences.view', 'licences.manage', 'support.view', 'support.reply', 'support.level2', 'support.level3',
-      'support.escalate', 'refunds.view', 'refunds.approve', 'refunds.pay', 'offers.grant', 'offers.approve', 'emails.view', 'reports.view'],
+      'support.escalate', 'refunds.view', 'refunds.approve', 'refunds.pay', 'offers.grant', 'offers.approve', 'emails.view', 'reports.view', 'trials.view'],
     support: [...BASE, 'customers.view', 'customers.notes', 'customers.edit', 'people.reset_2fa', 'licences.view', 'support.view', 'support.reply', 'support.assign',
-      'support.saved_replies', 'support.escalate', 'refunds.view', 'refunds.request', 'offers.grant', 'emails.view', 'link.support', 'support.diagnostics'],
+      'support.saved_replies', 'support.escalate', 'refunds.view', 'refunds.request', 'offers.grant', 'emails.view', 'link.support', 'support.diagnostics', 'trials.view'],
     senior: [...BASE, 'customers.view', 'customers.notes', 'customers.edit', 'people.reset_2fa', 'people.change_owner', 'business.close', 'licences.view', 'support.view',
       'support.reply', 'support.assign', 'support.saved_replies', 'support.escalate', 'support.level2', 'refunds.view', 'refunds.request', 'offers.grant', 'emails.view', 'emails.manage', 'link.support', 'reports.view',
       'support.diagnostics'],
@@ -199,6 +199,9 @@
       ticketSet: (id, fields) => rpc('hq_ticket_set', { ticket: id, fields }),
       ticketNextUpdate: (id, due, owner) => rpc('hq_ticket_next_update', { ticket: id, due: due || null, owner: owner || null }),
       ticketLogCall: (id, dir, who, body) => rpc('hq_ticket_log_call', { ticket: id, direction: dir, call_with: who || null, body }),
+      // a PC's free-trial history, from the ticket's own report (trials.view), and a goodwill extension (licences.manage)
+      ticketTrial: (id) => rpc('hq_ticket_trial', { ticket: id }), trialPcs: () => rpc('hq_trial_pcs'),
+      trialExtend: (id, program, days, reason) => rpc('hq_trial_extend', { ticket: id, program, days, reason }),
       diagnostic: (ref) => rpc('hq_diagnostic', { diag_ref: ref }), noteEdit: (id, body) => rpc('hq_note_edit', { note_id: id, note_body: body }),
       savedReplies: () => rpc('hq_saved_replies'), saveReply: (id, title, body) => rpc('hq_save_reply', { reply_id: id || null, title, body }),
       retireReply: (id) => rpc('hq_retire_reply', { reply_id: id }),
@@ -375,6 +378,17 @@
       'DG-4822': { ref: 'DG-4822', source: 'central', workspace_id: 'w1', product: 'pos', product_version: '1.7.0', error_text: 'Printer not responding (P-12)', os: 'Windows 10 Pro (10.0.19045)', central_version: '1.8.1',
         programs: [{ id: 'central', version: '1.8.1' }, { id: 'pos', version: '1.7.0' }], log_source: null, log_lines: null, reported_at: h(30), created_at: h(30) } };
     Object.values(diags).forEach((d) => { d.line_count = d.log_lines ? d.log_lines.split('\n').length : 0; });
+    // The free trial's record on Harbour Cafe's back-office PC, as Central sends it with Report an issue (core/trial-guard.js),
+    // and Riyeser online's anonymous record for that PC code (pc_trials). Made-up PC code.
+    const PC1 = '5f3c9a7e21b04d6f8a1e3c5b7d9f0a2c4e6b8d0f1a3c5e7b9d1f3a5c7e9b0d2f';
+    const tStart = new Date(new Date(t(40)).setUTCHours(0, 0, 0, 0)).toISOString();
+    const tEnd = new Date(Date.parse(tStart) + 90 * 864e5).toISOString();
+    diags['DG-4821'].trial = { pc_id: PC1, latest_seen: h(26), clock_back: false, installs: 3, programs: [
+      { program: 'suite', start: tStart, ends: tEnd, days_left: Math.max(0, Math.ceil((Date.parse(tEnd) - Date.parse(h(26))) / 864e5)), extra_days: 0,
+        sources: { licence_json: tStart, marker: tStart, registry: tStart, company_file: tStart, online: tStart } }] };
+    const pcTrials = [{ pc_id: PC1, program: 'suite', trial_start: tStart, first_seen: t(40), last_seen: h(26), extra_days: 0 },
+      { pc_id: '9e8d7c6b5a49382716051f2e3d4c5b6a79881726354a5b6c7d8e9f0a1b2c3d4e', program: 'suite', trial_start: t(12), first_seen: t(12), last_seen: t(1), extra_days: 0 },
+      { pc_id: '0a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9', program: 'estimate', trial_start: t(95), first_seen: t(95), last_seen: t(3), extra_days: 0 }];
     const tickets = [
       mk('w1', 'Alex', 'alex@sample.test', 'program', 'Receipt printer stopped after the update', 'new', 1, h(30), [cm('Alex', 'Since the 1.7.0 update the POS receipt printer prints nothing. Kitchen printer is fine.', h(30))]),
       mk('w2', 'Mere', 'mere@harbour.test', 'billing', 'Charged twice in November', 'waiting_us', 1, h(5), [cm('Mere', 'Our card was charged twice for November. Can you check?', h(5))]),
@@ -605,7 +619,8 @@
         const l = c ? demoLicence(c.id) : null;
         return { ticket: { ...x, assignee_name: nameOf(x.assignee), next_update_owner_name: nameOf(x.next_update_owner), who_acts: whoActs(x), messages: undefined,
             update_overdue: x.status !== 'done' && !!x.next_update_due && new Date(x.next_update_due) < new Date(), diag_id: x.diag },
-          diagnostic: dg ? { ...dg } : null, diag_hidden: !!x.diag && !dg, pcs: c ? pcsOf(c) : null,
+          diagnostic: dg ? (({ trial, ...rest }) => rest)(dg) : null, diag_hidden: !!x.diag && !dg, pcs: c ? pcsOf(c) : null,
+          trial: x.diag && diags[x.diag] && diags[x.diag].trial ? (P.includes('trials.view') ? 'yes' : 'hidden') : null,
           support_notes: c ? (notes[c.id] || []).filter((n) => n.pinned).map((n) => ({ id: n.id, body: n.body, at: n.at, by: n.by })) : null,
           staff: staff.filter((y) => y.active).map((y) => ({ user_id: y.user_id, name: y.display_name, can_work: permsOf(y).includes(LEVEL_PERM[x.level]) })),
           messages: x.messages.map((m, i) => ({ kind: 'message', ...m, id: i + 1, from: m.from || 'Riyeser (automatic)' })), escalations: x.escalations,
@@ -634,6 +649,27 @@
         const c = cos.find((y) => y.id === d.workspace_id); log('diagnostic.viewed', { workspace_id: d.workspace_id, diagnostic: d.ref });
         return { diagnostic: { ...d }, business: c ? { id: c.id, name: c.name, company_code: c.company_code } : null,
           tickets: permsOf(me()).includes('support.view') ? tickets.filter((x) => x.diag === d.ref).map((x) => ({ id: x.id, ref: x.ref, subject: x.subject, status: x.status })) : null }; },
+      async ticketTrial(id) { need('trials.view'); const x = tk(id); const d = x.diag ? diags[x.diag] : null;
+        if (!d || !d.trial) throw new Error('This ticket has no diagnostic report with a free-trial record. Ask the customer to use Get help → Report an issue in Riyeser Central.');
+        log('trial.viewed', { ticket: x.ref, workspace_id: x.workspace_id, diagnostic: d.ref });
+        const l = x.workspace_id ? demoLicence(x.workspace_id) : null;
+        return { diag_ref: d.ref, reported_at: d.reported_at, report: JSON.parse(JSON.stringify(d.trial)),
+          online: pcTrials.filter((p) => p.pc_id === d.trial.pc_id).map(({ pc_id, ...r }) => ({ ...r })),
+          business: l ? Object.fromEntries(Object.entries(l.modules).map(([m, v]) => [m, { status: v.status, trial_ends: v.trial_ends, paid_until: v.paid_until, days_left: v.days_left }])) : null,
+          can_extend: permsOf(me()).includes('licences.manage') }; },
+      async trialExtend(id, program, days, reason) { need('licences.manage'); const x = tk(id); const d = x.diag ? diags[x.diag] : null;
+        if (!['suite', 'estimate'].includes(program)) throw new Error('Choose a program.');
+        if (!(days >= 1 && days <= 90)) throw new Error('Choose between 1 and 90 days.');
+        if (String(reason || '').trim().length < 5) throw new Error('Say why (a few words).');
+        if (!d || !d.trial || !d.trial.pc_id) throw new Error('This ticket has no report with a PC code, so there\'s no PC trial to extend.');
+        let r = pcTrials.find((p) => p.pc_id === d.trial.pc_id && p.program === program);
+        if (!r) { r = { pc_id: d.trial.pc_id, program, trial_start: ((d.trial.programs || []).find((p) => p.program === program) || {}).start || now(), first_seen: now(), last_seen: now(), extra_days: 0 }; pcTrials.push(r); }
+        r.extra_days = Math.min(365, r.extra_days + days);
+        log('trial.extended', { ticket: x.ref, workspace_id: x.workspace_id, diagnostic: d.ref, program, days, extra_days: r.extra_days, reason: String(reason).trim(), pc: d.trial.pc_id.slice(0, 8) });
+        return { program, trial_start: r.trial_start, extra_days: r.extra_days, trial_ends: new Date(Date.parse(r.trial_start) + (90 + r.extra_days) * 864e5).toISOString() }; },
+      async trialPcs() { need('licences.view'); const by = {}; pcTrials.forEach((p) => { const b = by[p.program] || (by[p.program] = { program: p.program, pcs: 0, on_trial: 0, seen_30d: 0 }); b.pcs += 1;
+          if (Date.parse(p.trial_start) + (90 + p.extra_days) * 864e5 > Date.now()) b.on_trial += 1; if (Date.parse(p.last_seen) > Date.now() - 30 * 864e5) b.seen_30d += 1; });
+        return Object.values(by).sort((a, b) => a.program.localeCompare(b.program)); },
       async noteEdit(id, body) { need('customers.notes'); if (!String(body || '').trim()) throw new Error('Write the note first.'); const [ws, n] = Object.entries(notes).map(([w, l]) => [w, l.find((x) => x.id === id)]).find(([, x]) => x) || [];
         if (!n) throw new Error('That note doesn\'t exist.'); n.body = body.trim(); log('note.edited', { workspace_id: ws, note: id }); },
       async ticketPriority(id, p) { const x = tk(id); const was = x.priority; x.priority = p; log('ticket.priority', { ticket: x.ref, workspace_id: x.workspace_id, was, now: p }); },
@@ -2252,6 +2288,62 @@
       : ({ mine: 'Nothing is assigned to you right now.', unassigned: 'Every open ticket has an owner.', waiting_customer: 'No tickets are waiting for a customer to reply.',
         waiting_us: 'Nothing is waiting on Riyeser. All caught up.', overdue: 'No promised updates are overdue. Nice work.', resolved: 'No resolved tickets yet.' })[k] || 'No tickets here.';
     return `<div class="card swempty" id="swEmpty"><div><p class="emo" aria-hidden="true">${filtered ? '🔍' : '🎉'}</p><h3>${esc(folderName(k))}: all clear</h3><p class="muted">${msg}</p></div></div>`; };
+  // ---------- Trial history (a ticket's report: the PC's free-trial record, Riyeser online's record, the business's licence) ----------
+  const TRIAL_PROGS = { suite: 'Riyeser programs (shared trial)', estimate: 'Riyeser Estimate' };
+  const TRIAL_SRC = [['licence_json', 'licence.json'], ['marker', 'Hidden marker'], ['registry', 'Windows registry'], ['company_file', 'Company file'], ['online', 'Riyeser online']];
+  const sameDay = (a, b) => a && b && Math.abs(Date.parse(a) - Date.parse(b)) < 864e5;
+  const dayShort = (t) => (t ? new Date(t).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : '');
+  const dayAu = (t) => (t ? new Date(t).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '');
+  const times = (n) => (n === 1 ? 'once' : n === 2 ? 'twice' : `${n} times`);
+  /** A plain-English verdict for one program, e.g. "Consistent: trial started 3 Sep on this PC; reinstalled twice; dates agree." */
+  function trialVerdict(p, rep, online) {
+    const got = TRIAL_SRC.map(([k]) => p.sources && p.sources[k]).filter(Boolean);
+    const agree = got.every((d) => sameDay(d, p.start));
+    const bits = [`trial started ${dayShort(p.start)} on this PC`];
+    if (rep.installs != null) bits.push(rep.installs <= 1 ? 'installed once' : `reinstalled ${times(rep.installs - 1)}`);
+    const off = online && online.trial_start && !sameDay(online.trial_start, p.start);
+    bits.push(agree ? (got.length > 1 ? 'dates agree' : 'only one place has a date') : 'some places hold a different date (the earliest counts)');
+    if (rep.clock_back) bits.push(`the PC clock was seen going backwards${rep.clock_back_at ? ` on ${dayShort(rep.clock_back_at)}` : ''} (no days were gained)`);
+    if (off) bits.push(Date.parse(online.trial_start) < Date.parse(p.start) ? `Riyeser online has an earlier start (${dayShort(online.trial_start)}): the PC uses it next time it's online`
+      : `Riyeser online has ${dayShort(online.trial_start)} (the PC's earlier date replaces it next time it's online)`);
+    if (!online) bits.push('not seen online yet');
+    if ((online && online.extra_days) || p.extra_days) bits.push(`+${(online && online.extra_days) || p.extra_days} goodwill days`);
+    return `${agree && !rep.clock_back && !off ? 'Consistent' : 'Check'}: ${bits.join('; ')}.`;
+  }
+  function trialHistory(x, B) {
+    const rep = x.report || {}; const progs = rep.programs || [];
+    const onl = (prog) => (x.online || []).find((o) => o.program === prog) || null;
+    const rows = progs.map((p) => { const o = onl(p.program); const ends = o && o.extra_days ? new Date(Date.parse(p.start) + (90 + o.extra_days) * 864e5).toISOString() : p.ends;
+      const left = Math.max(0, Math.ceil((Date.parse(ends) - Date.now()) / 864e5));
+      return `<div class="trow" data-trial="${esc(p.program)}"><h4>${esc(TRIAL_PROGS[p.program] || p.program)}</h4>
+        <p class="tverdict ${/^Consistent/.test(trialVerdict(p, rep, o)) ? 'ok' : 'warn'}">${esc(trialVerdict(p, rep, o))}</p>
+        <dl class="kv dkv"><dt>Trial started</dt><dd><b>${esc(dayAu(p.start))}</b></dd>
+        <dt>${Date.parse(ends) < Date.now() ? 'Ended' : 'Ends'}</dt><dd><b>${esc(dayAu(ends))}</b></dd>
+        <dt>Days left</dt><dd><b>${num(left)}</b>${o && o.extra_days ? ` <span class="pill violet">+${num(o.extra_days)} goodwill</span>` : ''} <small class="muted">(${num(p.days_left)} when reported)</small></dd>
+        <dt>First seen online</dt><dd>${o ? esc(dayAu(o.first_seen)) : '<span class="muted">Not seen online yet</span>'}</dd>
+        <dt>Last seen</dt><dd>${o ? `${esc(dayAu(o.last_seen))} <span class="muted">(${ago(o.last_seen)})</span>` : '—'}</dd></dl>
+        <table class="tsrc"><thead><tr><th>Where</th><th>Date</th></tr></thead><tbody>${TRIAL_SRC.map(([k, label]) => { const v = p.sources && p.sources[k];
+          return `<tr><td>${label}</td><td>${v ? `${esc(dayAu(v))}${sameDay(v, p.start) ? '' : ' <span class="pill warn">differs</span>'}` : '<span class="muted">—</span>'}</td></tr>`; }).join('')}</tbody></table></div>`; }).join('');
+    const biz = x.business ? Object.entries(x.business).filter(([, v]) => v && (v.status === 'trial' || v.trial_ends)).map(([m, v]) =>
+      `<li>${esc(modName(m))}: ${v.status === 'trial' ? `trial until <b>${esc(dayAu(v.trial_ends))}</b> (${num(v.days_left)} days left)` : `trial ended ${esc(dayAu(v.trial_ends))}`}</li>`).join('') : '';
+    return `<p class="small muted">From the customer's report ${esc(x.diag_ref)} (${ago(x.reported_at)}). PC code <span class="code">${esc(String(rep.pc_id || 'none').slice(0, 8))}…</span>: a one-way code, it can't identify a person. Read-only.</p>
+      ${rows || '<p class="muted small">No trial on that PC.</p>'}
+      <p class="small">${rep.latest_seen ? `Latest time seen on the PC: ${esc(new Date(rep.latest_seen).toLocaleString('en-AU', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }))}. ` : ''}Clock seen going backwards: <b>${rep.clock_back ? `yes${rep.clock_back_at ? `, ${esc(dayAu(rep.clock_back_at))}` : ''}` : 'no'}</b>. Installs of Riyeser Central: <b>${rep.installs != null ? num(rep.installs) : 'not known'}</b>.</p>
+      ${x.business ? `<h4>Signed-in business (the server's licence decides)</h4>${biz ? `<ul class="small tbiz">${biz}</ul>` : '<p class="muted small">No programs on a trial.</p>'}
+        <p class="small muted">${B ? 'To extend the business\'s own programs, use the customer page → Programs → Extend.' : ''}</p>` : ''}
+      ${x.can_extend && progs.length ? `<form id="trx" class="trx"><b>Goodwill extension for this PC</b>
+        <div class="row"><select name="program" aria-label="Program">${progs.map((p) => `<option value="${esc(p.program)}">${esc(TRIAL_PROGS[p.program] || p.program)}</option>`).join('')}</select>
+        <select name="days" aria-label="Days">${[7, 14, 30].map((n) => `<option value="${n}"${n === 14 ? ' selected' : ''}>+${n} days</option>`).join('')}</select></div>
+        <label class="f"><span>Reason</span><input name="reason" maxlength="500" required placeholder="e.g. Goodwill: the trial ended while they were away"></label>
+        <div class="trxerr"></div><button class="btn sm">Extend</button></form>` : ''}`;
+  }
+  function wireTrial(body, x, id, reload) {
+    const f = body.querySelector('#trx'); if (!f) return;
+    f.onsubmit = async (e) => { e.preventDefault(); const v = new FormData(f);
+      try { const r = await api.trialExtend(id, String(v.get('program')), Number(v.get('days')), String(v.get('reason') || '').trim());
+        flash(`Extended: the trial on that PC now ends ${dayAu(r.trial_ends)} (when it's next online).`); await reload(); }
+      catch (err) { f.querySelector('.trxerr').innerHTML = `<div class="err">${esc(plain(err))}</div>`; } };
+  }
   // The Product diagnostics card (also used by the lookup).
   function diagCard(d, product, business) {
     if (!d) return '';
@@ -2403,6 +2495,8 @@
       ${sec('diagCard', '📈', 'Diagnostics', d ? `${esc(d.ref)} · ${esc(prodName(d.product || t.product))} ${esc(d.product_version || '')}` : r.diag_hidden ? 'Needs support.diagnostics' : 'No diagnostic report', !!d || !!r.diag_hidden,
         d ? diagCard(d, t.product) : r.diag_hidden ? '<p class="muted small">This ticket has a diagnostic report. Looking at it needs the <b>support.diagnostics</b> permission.</p>'
           : `<p class="muted small">No diagnostic report on this ticket. Ask the customer to use <b>Get help → Report an issue</b> in Riyeser Central, then look up the DG- reference they give you (🔎 DG-… above the list).</p>`)}
+      ${r.trial ? sec('trialCard', '⏳', 'Trial history', r.trial === 'yes' ? 'Open to see this PC\'s free-trial dates' : 'Needs trials.view', false,
+        r.trial === 'yes' ? '<div id="trialBody"><p class="muted small">Loading…</p></div>' : '<p class="muted small">This ticket\'s report has the PC\'s free-trial record. Seeing it needs the <b>trials.view</b> permission.</p>') : ''}
       ${sec('bugCard', '🐞', 'Linked bug', bugLine, !!(t.bug_ref || t.bug_url), `${t.bug_ref || t.bug_url ? `<p class="bugl">${t.bug_url ? `<a href="${esc(t.bug_url)}" target="_blank" rel="noopener noreferrer"><b>${esc(t.bug_ref || 'Open the bug')}</b> ↗</a>` : `<b>${esc(t.bug_ref)}</b>`}</p>` : '<p class="muted small">No bug linked.</p>'}
         <button class="btn sm" id="bugEdit">${t.bug_ref || t.bug_url ? 'Edit' : 'Link a bug'}</button>`)}
       ${notes ? sec('snCard', '📌', 'Support notes', notes.length ? `${notes.length} pinned for ${esc(B ? B.name : 'this business')}` : 'No support notes', notes.length > 0, `<p class="muted small">Pinned for ${esc(B ? B.name : 'this business')}: they show on every ticket.</p>
@@ -2416,6 +2510,14 @@
     const on = (sel, fn) => { const x = el.querySelector(sel); if (x) x.onclick = fn; };
     const run = async (d, fn, ok) => { try { await fn(); if (d) d.remove(); if (ok) flash(ok); await done(); } catch (err) { if (d) d.querySelector('.derr').innerHTML = `<div class="err">${esc(plain(err))}</div>`; else flash(plain(err)); } };
     on('#tco', () => openCompany(B.id));
+    // Trial history: read only when it's opened (each look is in the HQ history)
+    const tc = el.querySelector('#trialCard');
+    if (tc && r.trial === 'yes') {
+      const load = async () => { const body = tc.querySelector('#trialBody');
+        try { const x = await api.ticketTrial(id); body.innerHTML = trialHistory(x, B); wireTrial(body, x, id, load); }
+        catch (err) { body.innerHTML = `<div class="err">${esc(plain(err))}</div>`; } };
+      tc.addEventListener('toggle', () => { if (tc.open && !tc.dataset.loaded) { tc.dataset.loaded = '1'; load(); } });
+    }
     on('#nuEdit', () => dlg(`<h3>🗓️ Next update to the customer</h3><p class="muted small">When the customer will hear from us next, and who'll send it. If it's missed, it shows red in the inbox and on the Operations overview, and the owner gets a reminder. The customer isn't emailed about this.</p>
       <form id="nuf"><label class="f"><span>By</span><input type="datetime-local" name="due" required value="${esc(localInput(t.next_update_due || new Date(Date.now() + 4 * 3600e3)))}" min="${esc(localInput(new Date()))}"></label>
       <label class="f"><span>Who sends it</span><select name="owner">${staff.map((x) => `<option value="${esc(x.user_id)}"${x.user_id === (t.next_update_owner || t.assignee || S.me.id) || (!t.next_update_owner && !t.assignee && x.name === S.me.name) ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>
@@ -2588,7 +2690,14 @@
       <div class="card" id="endSoon"><h3>Ending soon <small>· next 14 days · follow up before they lapse</small></h3>${ends.length ? `<table class="tbl endtbl"><thead><tr><th>Company</th><th>Programs</th><th class="n">Days</th></tr></thead><tbody>
         ${ends.map((x, i) => `<tr class="click${i >= 12 ? ' more' : ''}" data-co="${x.id}"${i >= 12 ? ' hidden' : ''}><td><b>${esc(x.name)}</b><small class="code">${esc(x.company_code || '')}</small></td><td>${x.mods.length >= rows.length ? 'Every program' : esc(x.mods.map(modName).join(', '))} <small>${x.status === 'trial' ? 'free trial' : 'paid period'}</small></td><td class="n"><span class="pill ${x.days_left <= 3 ? 'bad' : 'warn'}">${x.days_left}</span></td></tr>`).join('')}</tbody></table>
         ${ends.length > 12 ? `<button type="button" class="btn sm" id="endAll">Show all ${num(ends.length)}</button>` : ''}`
-        : '<p class="muted small">Nothing ending in the next 14 days.</p>'}</div></div>`);
+        : '<p class="muted small">Nothing ending in the next 14 days.</p>'}</div></div>
+      <div class="card scroll" id="trialPcs"><h3>Free-trial PCs <small>· anonymous PC records (counts only), for PCs not signed in to a business</small></h3><p class="muted small">Loading…</p></div>`);
+    // counts only, never a PC code; an older database (team-chat.sql not re-run yet) just says so
+    (async () => { const box = m.querySelector('#trialPcs');
+      try { const c = await api.trialPcs(); box.querySelector('p').outerHTML = (c || []).length ? `<table class="tbl"><thead><tr><th>Trial</th><th class="n">PCs</th><th class="n">On trial now</th><th class="n">Seen in 30 days</th></tr></thead><tbody>
+          ${c.map((x) => `<tr><td><b>${esc(x.program === 'suite' ? 'Riyeser programs (shared trial)' : x.program === 'estimate' ? 'Riyeser Estimate' : x.program)}</b></td><td class="n">${num(x.pcs)}</td><td class="n">${num(x.on_trial)}</td><td class="n">${num(x.seen_30d)}</td></tr>`).join('')}</tbody></table>`
+          : '<p class="muted small">No PCs yet.</p>'; }
+      catch (e) { box.querySelector('p').textContent = missing(e) ? 'Run the latest team-chat.sql to switch this on.' : plain(e); } })();
     const ea = m.querySelector('#endAll'); if (ea) ea.onclick = () => { m.querySelectorAll('.endtbl tr.more').forEach((r) => { r.hidden = false; }); ea.remove(); };
     m.querySelectorAll('[data-co]').forEach((r) => r.onclick = () => openCompany(r.dataset.co));
     m.querySelectorAll('[data-lst]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); licenceList(b.dataset.lmod, b.dataset.lst); });

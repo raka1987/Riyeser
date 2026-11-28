@@ -225,3 +225,15 @@
   check, raw details), Move to another PC (a set-up code), removing the last relay (a warning first, then switched off),
   and a phone (one column, big buttons). `rules-test.sql` covers the database side (set-up codes, own keys, takeover,
   removal and the changed cluster secret, last relay, `relay_leave`, `relay_check`). Screenshots go to the folder given.
+- Trial guard (the free trial's anonymous PC record): `rules-test.sql` checks `pc_trial_seen` keeps the earliest date per
+  PC code and program (a reinstall's later date never moves it later, a restored company file's older date wins, a look-up
+  makes nothing, another PC gets nothing of this one's) and that `pc_trials` keeps only the PC code, program, dates and
+  version. `security-test.sql` checks signed-out visitors and signed-in people can't read or write `pc_trials`, the reviewed
+  anonymous function, dates before 2024 or in the future aren't believed, 20 calls an hour per PC code, the client address
+  for rate limits is CF-Connecting-IP or the last X-Forwarded-For entry (never the first: SEC-017), a report's trial record
+  keeps only the PC code, dates and counts (no MachineGuid, names or paths), the HQ ticket's Trial history needs
+  `trials.view` (Support, Finance, Owner; not Developer, Sales or Senior), a ticket with the customer's report, and is in
+  the HQ history; only Owner/Finance (`licences.manage`) extend it, with a reason; the counts never show a PC code.
+  HQ: `../../hq/test-hq-trial.js` (the panel at 1366 and 390, the verdict, read-only, the extension, roles, Licences counts).
+  Desktop: `desktop/test/trial-guard.test.js` (new PC, new Windows user, reinstall, deleted AppData, restored company
+  file, clock rolled back, paid programs, signed-in businesses, demo mode, Report an issue).

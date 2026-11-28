@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const signed = require('./signed-licence');
+const guard = require('./trial-guard');
 
 const TRIAL_DAYS = 90;
 const OFFLINE_GRACE_DAYS = 30;
@@ -31,15 +32,61 @@ function write(appData, data) {
 // Central's own data folder: one of the places the first-run date and the latest time seen are kept (signed-licence.js)
 const centralDir = (appData) => path.join(appData, 'Riyeser Central', 'data');
 
+// Demo mode (%APPDATA%\Riyeser\demo.json, central/demo.js) never starts, moves or records the trial.
+function demoOn(appData) { try { return JSON.parse(fs.readFileSync(path.join(appData, 'Riyeser', 'demo.json'), 'utf8')).on === true; } catch { return false; } }
+
 /**
- * The trial starts the first time any Riyeser program asks. It's kept in licence.json and in a marker in Central's
- * data folder; the earlier of the two counts, so deleting licence.json doesn't start a new trial.
+ * The shared trial: the earliest date in licence.json, the markers (signed-licence.js) and trial-guard.js's places (the
+ * registry, company files, Riyeser online's anonymous PC record), counted from the latest time seen. write: keep it
+ * everywhere (never in demo mode).
+ */
+function suiteTrial(appData, now = Date.now(), { write: doWrite = true } = {}) {
+  const w = doWrite && !demoOn(appData);
+  const t = signed.localTrial({ appData, ownDir: centralDir(appData), now, write: w, extra: guard.extraFor(appData, 'suite') });
+  if (w) guard.record(appData, 'suite', { start: t.start, latest: t.seen, now });
+  return t;
+}
+
+/**
+ * The trial starts the first time any Riyeser program asks. It's kept in licence.json, in a marker in Central's data
+ * folder and in trial-guard.js's places; the earliest counts, so deleting licence.json (or reinstalling) doesn't start a
+ * new trial. Demo mode doesn't start it.
  */
 function ensureTrial(appData, now = Date.now()) {
-  signed.localTrial({ appData, ownDir: centralDir(appData), now });
+  suiteTrial(appData, now);
   const d = read(appData);
+  if (demoOn(appData)) return d;
   if (!d.trialStart || Number.isNaN(Date.parse(d.trialStart))) { d.trialStart = new Date(now).toISOString(); write(appData, d); }
   return d;
+}
+
+/** "Report an issue": where the trial stands and which places agree (licence data only; trial-guard.js report). */
+function trialReport(appData, now = Date.now()) {
+  const t = suiteTrial(appData, now, { write: false });
+  const d = read(appData);
+  const markers = [centralDir(appData), path.join(appData, 'Riyeser')].map((x) => { try { return JSON.parse(fs.readFileSync(path.join(x, signed.MARKER), 'utf8')).firstRun; } catch { return null; } });
+  const trials = { suite: { start: t.start, ends: t.ends, daysLeft: t.daysLeft, sources: { licence_json: d.trialStart || null, marker: guard.earliest(markers) } } };
+  const est = guard.knownStart(appData, 'estimate');
+  if (est != null) {
+    const ex = guard.sources(appData, 'estimate');
+    const seen = Math.max(now, ex.latest || 0);
+    const ends = est + (TRIAL_DAYS + ex.extraDays) * DAY;
+    trials.estimate = { start: est, ends, daysLeft: Math.max(0, Math.ceil((ends - seen) / DAY)), sources: { marker: guard.firstUseMarker(appData, 'estimate').start } };
+  }
+  return guard.report(appData, trials, now);
+}
+
+/**
+ * Riyeser online's anonymous PC record (only when online; never blocks): sends this PC's one-way code and trial dates,
+ * and keeps the earliest date back. rpc: the anonymous call (online.js anonRpc).
+ */
+async function syncTrialOnline(appData, rpc, { now = Date.now(), appVersion = null } = {}) {
+  if (demoOn(appData)) return { sent: 0, results: {}, skipped: 'demo' };
+  const suite = suiteTrial(appData, now);
+  const starts = { suite: suite.start, estimate: guard.knownStart(appData, 'estimate') };
+  const r = await guard.syncOnline({ appData, rpc, starts, appVersion, now });
+  if (r.sent) suiteTrial(appData, now);   // adopt the server's (earlier) date everywhere
+  return r;
 }
 
 const days = (ms) => Math.max(0, Math.ceil(ms / DAY));
@@ -136,7 +183,7 @@ function status(appData, now = Date.now()) {
 
 function localStatus(appData, now = Date.now()) {
   const d = ensureTrial(appData, now);
-  const t = signed.localTrial({ appData, ownDir: centralDir(appData), now, write: false });
+  const t = suiteTrial(appData, now, { write: false });
   const trialEnds = t.ends;
   const base = { trialStart: new Date(t.start).toISOString(), trialEnds: new Date(trialEnds).toISOString(), buyUrl: BUY_URL };
   // A licence key (the older Lemon Squeezy keys) is only a local file, so once licences are signed it no longer unlocks
@@ -227,4 +274,4 @@ async function remove(appData, { fetchFn = globalThis.fetch, now = Date.now() } 
 }
 
 module.exports = { TRIAL_DAYS, OFFLINE_GRACE_DAYS, BUY_URL, HOME_URL, MODULE_NAMES, MODULE_PRICES, lockedText, licenceFile, read, ensureTrial, status, activate, recheck, remove,
-  saveOnline, onlinePlan, trustedOnline, centralDir, fmtDate };
+  saveOnline, onlinePlan, trustedOnline, centralDir, fmtDate, suiteTrial, trialReport, syncTrialOnline, demoOn };

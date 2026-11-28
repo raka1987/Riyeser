@@ -5032,5 +5032,31 @@ do $$ begin
   assert not exists (select 1 from jsonb_array_elements(public.link_relay_status(current_setting('test.ws_o')::uuid) -> 'manage') e where e ->> 'managed' = 'true'), 'own1 was registered by Riyeser: not managed';
 end $$;
 reset role;
+-- ---------------- the free trial's anonymous PC record (trial guard): earliest date per PC code and program, never later
+reset role;
+set role anon;
+select set_config('request.jwt.claim.sub', '', false), set_config('request.jwt.claims', '', false);
+do $$ declare p1 text := repeat('d4', 32); p2 text := repeat('e5', 32); r json; begin
+  begin perform count(*) from public.pc_trials; raise exception 'anon read pc_trials'; exception when insufficient_privilege then null; end;
+  r := public.pc_trial_seen(p1, 'suite', '2026-09-03T09:00:00Z', '1.9.0');
+  assert (r ->> 'trial_start')::timestamptz = '2026-09-03T09:00:00Z' and (r ->> 'extra_days')::int = 0, 'first seen: ' || r::text;
+  r := public.pc_trial_seen(p1, 'suite', '2026-10-15T00:00:00Z', '1.9.1');   -- a reinstall that lost its dates
+  assert (r ->> 'trial_start')::timestamptz = '2026-09-03T09:00:00Z', 'reinstall: same trial';
+  r := public.pc_trial_seen(p1, 'suite', '2026-07-01T00:00:00Z', null);      -- an older company file restored
+  assert (r ->> 'trial_start')::timestamptz = '2026-07-01T00:00:00Z', 'the older date wins';
+  r := public.pc_trial_seen(p1, 'estimate', '2026-10-01T00:00:00Z', null);   -- per program
+  assert (r ->> 'trial_start')::timestamptz = '2026-10-01T00:00:00Z' and r ->> 'program' = 'estimate', 'Estimate has its own';
+  r := public.pc_trial_seen(p2, 'suite', null, null);
+  assert r ->> 'trial_start' is null, 'another PC: nothing of p1''s';
+end $$;
+reset role;
+do $$ begin
+  assert (select count(*) from public.pc_trials where pc_id = repeat('d4', 32)) = 2, 'one row per program';
+  assert (select app_version from public.pc_trials where pc_id = repeat('d4', 32) and program = 'suite') = '1.9.1', 'the latest version seen';
+  assert not exists (select 1 from public.pc_trials where pc_id = repeat('e5', 32)), 'a look-up makes nothing';
+  assert (select array_agg(column_name::text order by column_name) from information_schema.columns where table_schema = 'public' and table_name = 'pc_trials')
+    = array['app_version', 'extra_days', 'first_seen', 'last_seen', 'pc_id', 'program', 'trial_start'], 'nothing else is kept (no names, emails or data)';
+end $$;
+
 select 'ALL CHAT DATABASE TESTS PASSED' as result;
 select tablename from pg_publication_tables where pubname = 'supabase_realtime';
