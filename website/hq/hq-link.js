@@ -2,8 +2,9 @@
    Data from hq_company_link(ws) (needs customers.view): the office PC, version, last seen, the address to type into
    phones, the desk phones and extensions. Never passwords: there are none online.
    While the customer has pressed "Let Riyeser help" on their Phones page (1 hour), staff with link.support can make the
-   same changes they can: give a phone to someone, take it off, Do not disturb, a new password, and Show a password
-   (encrypted by the office PC to a one-off key made in this tab). Every one is in the HQ history and the customer's.
+   same changes they can: give a phone to someone, take it off, Do not disturb, and Set a new password. Riyeser support
+   never sees, sets or receives a password (SEC-009): "Set a new password" asks the office PC to make one itself and set
+   the phones up again; it only says "done". Every change is in the HQ history and the customer's.
    Kept separate from hq.js: it fills any #cpLink that appears, finding the business from data-ws (on it or a parent),
    or call RiyeserHQLink.fill(element, ws) yourself. */
 (() => {
@@ -43,18 +44,11 @@
     if (fn === 'hq_company_link') { const d = demoData(); return a.ws === 'none' ? { ...d, offices: [], support: null } : d; }
     if (fn === 'link_command') {
       const id = 'c' + (++D.n); D.cmds[id] = { id, kind: a.kind, status: 'pending' };
-      setTimeout(async () => {
-        const c = D.cmds[id];
-        if (a.kind === 'reveal_password') {
-          const key = await crypto.subtle.importKey('jwk', { kty: 'RSA', n: a.data.key.n, e: a.data.key.e, alg: 'RSA-OAEP-256', ext: true }, { name: 'RSA-OAEP', hash: 'SHA-256' }, false, ['encrypt']);
-          c.sealed = btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, key, new TextEncoder().encode('Tq8nWz3kLp6vRm2x')))));
-        }
-        c.status = 'done';
-      }, 1000);
+      if (a.kind === 'reveal_password') throw new Error('Riyeser support can\'t see phone passwords. Use Set a new password: Riyeser Link Office makes a new one and sets the phones up again, and nobody at Riyeser sees it.');
+      setTimeout(() => { D.cmds[id].status = 'done'; }, 1000);
       return id;
     }
-    if (fn === 'link_command_state') { const c = D.cmds[a.command]; return { ...c, ready: !!c.sealed }; }
-    if (fn === 'link_reveal_take') { const c = D.cmds[a.command]; const s = c.sealed || null; c.sealed = null; return s; }
+    if (fn === 'link_command_state') { const c = D.cmds[a.command]; return { ...c, ready: false }; }
     return null;
   }
 
@@ -92,43 +86,30 @@
       <div class="scroll"><table class="tbl lnk"><tr><th>Ext.</th><th>Person or group</th><th>Devices connected</th><th>DND</th>${can ? '<th></th>' : ''}</tr>
       ${o.extensions.map((x) => `<tr><td><b>${esc(x.extension)}</b></td><td>${esc(x.name)}${x.type === 'group' ? ` <span class="muted">ring group · ${x.members || 0}</span>` : ''}</td>
         <td>${x.type === 'group' ? '—' : `${x.registered || 0}${x.app_users ? ` (${x.app_users} app)` : ''}`}</td><td>${x.type === 'group' ? '—' : x.dnd ? 'On' : 'Off'}</td>
-        ${can ? `<td>${x.type === 'group' ? '' : `<button class="btn sm" data-show="${esc(x.extension)}">Show password</button> <button class="btn sm" data-lk="new_password" data-ext="${esc(x.extension)}">New password</button>
+        ${can ? `<td>${x.type === 'group' ? '' : `<button class="btn sm" data-lk="new_password" data-ext="${esc(x.extension)}">Set a new password</button>
           <button class="btn sm" data-lk="set_dnd" data-ext="${esc(x.extension)}" data-on="${x.dnd ? '' : '1'}">DND ${x.dnd ? 'off' : 'on'}</button>`}</td>` : ''}</tr>`).join('')}</table></div>
       <div class="lnk-stat" role="status"></div>`;
     const stat = el.querySelector('.lnk-stat');
     const say = (h, c = '') => { stat.className = `lnk-stat ${c}`; stat.innerHTML = h; };
-    const send = async (kind, d, { reveal = false } = {}) => {
-      say(reveal ? 'Asking Riyeser Link Office for the password…' : 'Sending to Riyeser Link Office…');
+    const send = async (kind, d) => {
+      say('Sending to Riyeser Link Office…');
       let id; try { id = await rpc('link_command', { ws, office_id: o.office_id, kind, data: d }); } catch (e) { say(esc(e.message || e), 'bad'); return null; }
       const start = Date.now();
       while (Date.now() - start < 5 * 60000) {
         await new Promise((r) => setTimeout(r, 1500));
         let st; try { st = await rpc('link_command_state', { command: id }); } catch (e) { say(esc(e.message || e), 'bad'); return null; }
         if (st.status === 'failed') { say(esc(st.error || 'That didn\'t work.'), 'bad'); return null; }
-        if (st.status === 'done' && (!reveal || st.ready)) { if (!reveal) say('Done', 'ok'); return id; }
+        if (st.status === 'done') { say(kind === 'new_password' ? `Done: Riyeser Link Office made a new password for extension ${esc(d.extension)} and is setting its phones up again. Nobody at Riyeser sees it; the customer can see it on their Phones page.` : 'Done', 'ok'); return id; }
         if (Date.now() - start > 45000) say('Riyeser Link Office hasn\'t picked this up yet. It checks every 30 seconds while the office PC is on.', 'warn');
       }
       return null;
     };
     el.querySelectorAll('[data-lk]').forEach((b) => b.onclick = async () => {
       const k = b.dataset.lk; const d = k === 'unassign_phone' ? { mac: b.dataset.mac } : k === 'set_dnd' ? { extension: b.dataset.ext, on: !!b.dataset.on } : { extension: b.dataset.ext };
-      if (k !== 'set_dnd' && !confirm(k === 'unassign_phone' ? 'Remove this phone from its person?' : `Make a new password for extension ${b.dataset.ext}? Phones using the old one stop working until they get it.`)) return;
-      if (await send(k, d)) setTimeout(() => fill(el, ws), 800);
+      if (k !== 'set_dnd' && !confirm(k === 'unassign_phone' ? 'Remove this phone from its person?' : `Ask Riyeser Link Office to make a new password for extension ${b.dataset.ext} and set its phones up again? Nobody at Riyeser sees it. Phones using the old one stop working until they get the new one.`)) return;
+      if (await send(k, d) && k !== 'new_password') setTimeout(() => fill(el, ws), 800);   // a new password changes nothing shown here
     });
     el.querySelectorAll('[data-give]').forEach((s) => s.onchange = async () => { if (s.value && await send('assign_phone', { mac: s.dataset.give, extension: s.value })) setTimeout(() => fill(el, ws), 800); });
-    el.querySelectorAll('[data-show]').forEach((b) => b.onclick = async () => {
-      try {
-        const kp = await crypto.subtle.generateKey({ name: 'RSA-OAEP', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' }, false, ['encrypt', 'decrypt']);
-        const j = await crypto.subtle.exportKey('jwk', kp.publicKey);
-        const id = await send('reveal_password', { extension: b.dataset.show, key: { kty: 'RSA', n: j.n, e: j.e } }, { reveal: true });
-        if (!id) return;
-        const sealed = await rpc('link_reveal_take', { command: id });
-        if (!sealed) { say('That password was already shown, or 5 minutes have passed. Try again.', 'bad'); return; }
-        const pw = new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'RSA-OAEP' }, kp.privateKey, Uint8Array.from(atob(sealed), (c) => c.charCodeAt(0))));
-        say(`Extension ${esc(b.dataset.show)}: server <code>${esc((o.addresses || [])[0] || '')}</code> port <code>${esc(o.sip_port || 5060)}</code>, username <code>${esc(b.dataset.show)}</code>, password <code class="lnk-pw">${esc(pw)}</code>
-          <span class="muted">· Read it to the customer; it isn't kept. This was written to the HQ history and theirs.</span>`, 'ok');
-      } catch (e) { say(esc(e.message || e), 'bad'); }
-    });
   }
 
   async function fill(el, ws) {
@@ -157,7 +138,7 @@
     st.textContent = `.lnk-sum{margin:0 0 4px;font-weight:600}.lnk-help{margin:0 0 10px;font-size:13.5px;color:#64708a}.lnk-help.on{color:#15803d;font-weight:600}
       .lnk .mono,.lnk td.mono{font-family:ui-monospace,Consolas,monospace;font-size:12.5px}.lnk-dot{color:#94a3b8}.lnk-dot.on{color:#16a34a}
       table.lnk{margin-bottom:10px}.lnk-stat:empty{display:none}.lnk-stat{padding:8px 10px;border-radius:8px;background:#eef2ff;font-size:14px;overflow-wrap:anywhere}
-      .lnk-stat.ok{background:#dcfce7}.lnk-stat.bad{background:#fee2e2}.lnk-stat.warn{background:#fef3c7}.lnk-pw{font-size:16px;font-weight:700}`;
+      .lnk-stat.ok{background:#dcfce7}.lnk-stat.bad{background:#fee2e2}.lnk-stat.warn{background:#fef3c7}`;
     document.head.appendChild(st);
   }
   window.RiyeserHQLink = { fill, render, summary, helpLine };

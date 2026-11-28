@@ -1809,25 +1809,38 @@ do $$ declare c uuid; r uuid; begin
   assert (public.hq_company_link(current_setting('test.ws_l')::uuid) -> 'support' ->> 'until') is not null, 'HQ sees until when';
   c := public.link_command(current_setting('test.ws_l')::uuid, 'office-0001-abcd', 'set_dnd', '{"extension":"101","on":false}');
   assert (public.link_command_state(c) ->> 'status') = 'pending', 'support can follow its own change';
-  r := public.link_command(current_setting('test.ws_l')::uuid, 'office-0001-abcd', 'reveal_password', jsonb_build_object('extension', '101', 'key', jsonb_build_object('kty', 'RSA', 'n', repeat('D', 342), 'e', 'AQAB')));
+  -- SEC-009: support never sees a phone password: no Show; Set a new password asks Link Office to make one itself
+  begin perform public.link_command(current_setting('test.ws_l')::uuid, 'office-0001-abcd', 'reveal_password', jsonb_build_object('extension', '101', 'key', jsonb_build_object('kty', 'RSA', 'n', repeat('D', 342), 'e', 'AQAB')));
+    raise exception 'support asked to see a password';
+  exception when others then assert sqlerrm like 'Riyeser support can''t see phone passwords%', sqlerrm; end;
+  r := public.link_command(current_setting('test.ws_l')::uuid, 'office-0001-abcd', 'new_password', '{"extension":"101","password":"Chosen123"}');
   perform set_config('test.hqrev', r::text, false);
 end $$;
 reset role;
 do $$ begin
   assert (select count(*) from public.link_office_commands where by_riyeser) = 2, 'marked as Riyeser';
-  assert exists (select 1 from public.hq_audit where action = 'link.reveal_password' and workspace_id = current_setting('test.ws_l')::uuid), 'HQ Show in the HQ history';
+  assert not exists (select 1 from public.link_office_commands where by_riyeser and kind = 'reveal_password'), 'no Show by Riyeser';
+  assert (select data from public.link_office_commands where id = current_setting('test.hqrev')::uuid) = '{"extension": "101"}'::jsonb, 'only the extension goes to the office (nothing support typed)';
+  assert exists (select 1 from public.hq_audit where action = 'link.new_password' and workspace_id = current_setting('test.ws_l')::uuid and actor = 'c0c0c0c0-0000-4000-8000-000000000005'), 'the reset in the HQ history, with who asked';
   assert exists (select 1 from public.hq_audit where action = 'link.support_allowed' and workspace_id = current_setting('test.ws_l')::uuid), 'allowing it is in the HQ history';
-  assert exists (select 1 from public.audit_log where action = 'link.reveal_password' and actor is null and details ->> 'by' = 'Riyeser support'), 'customer sees "Riyeser support" showed it';
+  assert exists (select 1 from public.audit_log where action = 'link.new_password' and actor is null and details ->> 'by' = 'Riyeser support'), 'customer sees "Riyeser support" asked for a new password';
 end $$;
+-- the office makes the password itself and only says "done" (a sealed copy is ignored: nothing is kept for anyone)
 select pg_temp.as_user_password_only('c0c0c0c0-0000-4000-8000-000000000003'); set role authenticated;
 select public.link_office_done(current_setting('test.hqrev')::uuid, true, null, 'SFFTaG93bg==');
+reset role;
+do $$ begin
+  assert (select status from public.link_office_commands where id = current_setting('test.hqrev')::uuid) = 'done', 'done';
+  assert not exists (select 1 from public.link_office_reveals where command_id = current_setting('test.hqrev')::uuid), 'no password copy kept';
+end $$;
+set role authenticated;
 -- the customer ends it early: support can't take the password or send more
 select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000001');
 select public.link_support_end(:'ws_l');
 select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000005');
 do $$ begin
-  begin perform public.link_reveal_take(current_setting('test.hqrev')::uuid); raise exception 'took a password after access ended';
-  exception when others then assert sqlerrm like 'You can''t see this business''s phone passwords any more%', sqlerrm; end;
+  begin perform public.link_reveal_take(current_setting('test.hqrev')::uuid); raise exception 'support took a password';
+  exception when others then assert sqlerrm like 'There''s no password waiting for you%', sqlerrm; end;
   begin perform public.link_command(current_setting('test.ws_l')::uuid, 'office-0001-abcd', 'set_dnd', '{"extension":"101","on":true}'); raise exception 'support sent a change after it ended';
   exception when others then assert sqlerrm like 'Ask the customer%', sqlerrm; end;
 end $$;
@@ -2926,9 +2939,42 @@ set role authenticated;
 select pg_temp.as_user('b1b1b1b1-0000-4000-8000-000000000005');
 select public.hq_set_billing_entity('{"name": "Riyeser Pty Ltd", "address": "1 George St, Sydney NSW", "tax_label": "", "tax_number": "12 345 678 901",
   "email": "accounts@riyeser.test", "bank": {"account_name": "Riyeser Pty Ltd", "bank_name": "Westpac", "bsb": "032-000", "account_number": "123456", "junk": "x"}}');
+-- SEC-011: it's only proposed: a different HQ person must approve it (two-person rule)
 do $$ declare h json := public.hq_billing(); begin
-  assert (h ->> 'bank_ready')::boolean and h -> 'entity' ->> 'tax_label' = 'ABN' and h -> 'entity' -> 'bank' ->> 'junk' is null, 'bank ready, ABN label by default, only known fields';
+  assert not (h ->> 'bank_ready')::boolean and h -> 'entity' ->> 'name' = 'Riyeser', 'not in force yet';
+  assert h -> 'entity_pending' -> 'details' -> 'bank' ->> 'bsb' = '032-000' and (h -> 'entity_pending' ->> 'mine')::boolean
+     and h -> 'entity_pending' ->> 'proposed_by' = 'Fina', 'shown waiting, proposed by Fina';
+  perform set_config('pay.chg', h -> 'entity_pending' ->> 'id', false);
+  begin perform public.hq_billing_entity_decide((h -> 'entity_pending' ->> 'id')::bigint, true); raise exception 'approved own change';
+  exception when others then assert sqlerrm like 'Someone else in Riyeser HQ has to approve%', sqlerrm; end;
 end $$;
+-- the same again changes nothing (one waiting change)
+select public.hq_set_billing_entity('{"name": "Riyeser Pty Ltd", "address": "1 George St, Sydney NSW", "tax_label": "", "tax_number": "12 345 678 901",
+  "email": "accounts@riyeser.test", "bank": {"account_name": "Riyeser Pty Ltd", "bank_name": "Westpac", "bsb": "032-000", "account_number": "123456"}}');
+select pg_temp.as_user('b1b1b1b1-0000-4000-8000-000000000006');
+do $$ begin
+  begin perform public.hq_billing_entity_decide(current_setting('pay.chg')::bigint, true); raise exception 'sales approved';
+  exception when others then assert sqlerrm like 'Your HQ role can''t%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999');
+do $$ declare h json; begin
+  assert ((public.hq_billing() -> 'entity_pending' ->> 'id')::bigint) = current_setting('pay.chg')::bigint and not (public.hq_billing() -> 'entity_pending' ->> 'mine')::boolean, 'one waiting change, the same one';
+  perform public.hq_billing_entity_decide(current_setting('pay.chg')::bigint, true);
+  perform public.hq_billing_entity_decide(current_setting('pay.chg')::bigint, true);   -- safe to repeat
+  h := public.hq_billing();
+  assert (h ->> 'bank_ready')::boolean and h -> 'entity' ->> 'tax_label' = 'ABN' and h -> 'entity' -> 'bank' ->> 'junk' is null, 'bank ready, ABN label by default, only known fields';
+  assert h -> 'entity_pending' is null or json_typeof(h -> 'entity_pending') = 'null', 'nothing waiting';
+  begin perform public.hq_billing_entity_decide(current_setting('pay.chg')::bigint, false); raise exception 'undid an approved change';
+  exception when others then assert sqlerrm like 'That change was already dealt with%', sqlerrm; end;
+end $$;
+reset role;
+do $$ begin
+  assert (select count(*) from public.billing_entities where details ->> 'name' = 'Riyeser Pty Ltd') = 1, 'one new version';
+  assert exists (select 1 from public.hq_audit where action = 'billing.entity_proposed' and actor = 'b1b1b1b1-0000-4000-8000-000000000005')
+     and exists (select 1 from public.hq_audit where action = 'billing.entity_changed' and actor = '99999999-9999-9999-9999-999999999999'), 'proposed and approved, each in the HQ history with who';
+  begin delete from public.billing_entity_changes; raise exception 'deleted a change'; exception when others then assert sqlerrm not like 'deleted a change', sqlerrm; end;
+end $$;
+set role authenticated;
 select pg_temp.as_user_password_only('b1b1b1b1-0000-4000-8000-000000000001');
 do $$ declare a uuid := current_setting('pay.a')::uuid; b json; o json; begin
   b := public.my_billing(a);
@@ -3097,17 +3143,25 @@ do $$ declare b json := public.my_billing(current_setting('pay.a')::uuid); begin
   begin perform public.hq_payments_received(7); raise exception 'customer saw payments';
   exception when others then assert sqlerrm like 'Riyeser HQ is for%', sqlerrm; end;
 end $$;
--- HQ sales (licences.view, not customers.edit) can send it again, but not change the business's email
+-- SEC-010: HQ sales (licences.view) can look at it but not email it anywhere; Finance (licences.manage) sends it again
 select pg_temp.as_user('b1b1b1b1-0000-4000-8000-000000000006');
+do $$ begin
+  begin perform public.hq_billing_resend(current_setting('pay.inv1'), null, false); raise exception 'sales resent an invoice';
+  exception when others then assert sqlerrm like 'Your HQ role can''t%', sqlerrm; end;
+  begin perform public.hq_billing_resend(current_setting('pay.inv1'), 'x@elsewhere.test', false); raise exception 'sales sent an invoice to another address';
+  exception when others then assert sqlerrm like 'Your HQ role can''t%', sqlerrm; end;
+  assert not (public.hq_billing() ->> 'can_send_docs')::boolean, 'sales: no send buttons';
+  assert json_array_length(public.hq_company_billing(current_setting('pay.a')::uuid) -> 'orders') >= 1, 'sales can still look';
+end $$;
+select pg_temp.as_user('b1b1b1b1-0000-4000-8000-000000000005');
 do $$ declare a uuid := current_setting('pay.a')::uuid; r json; p json; begin
+  assert (public.hq_billing() ->> 'can_send_docs')::boolean, 'finance: send buttons';
   r := public.hq_billing_resend(current_setting('pay.inv1'), null, false);
   assert json_array_length(r -> 'to') = 2, 'resent to the owner and the business email';
   r := public.hq_billing_resend(lower(current_setting('pay.inv1')), ' Right@PayCo.test ', false);
   assert r -> 'to' ->> 0 = 'right@payco.test' and not (r ->> 'contact_updated')::boolean, 'resent to another address';
   begin perform public.hq_billing_resend(current_setting('pay.inv1'), 'not-an-email', false); raise exception 'bad email';
   exception when others then assert sqlerrm like 'Check the email address%', sqlerrm; end;
-  begin perform public.hq_billing_resend(current_setting('pay.inv1'), 'x@payco.test', true); raise exception 'sales changed the email';
-  exception when others then assert sqlerrm like 'Your HQ role can''t%', sqlerrm; end;
   begin perform public.hq_billing_resend('RR-0', null, false); raise exception 'no such doc';
   exception when others then assert sqlerrm like 'There''s no invoice or receipt%', sqlerrm; end;
   p := public.hq_payments_received(7);
@@ -3124,7 +3178,7 @@ do $$ declare a uuid := current_setting('pay.a')::uuid; begin
   assert (select count(*) from public.email_outbox where workspace_id = a and template = 'billing_resend') = 4, 'each resend queued';
   assert exists (select 1 from public.email_outbox where workspace_id = a and template = 'billing_resend' and to_address = 'right@payco.test'
      and subject = 'Your Riyeser invoice ' || current_setting('pay.inv1') and body_text like '%?invoice=' || current_setting('pay.inv1') || '%'), 'the invoice email';
-  assert exists (select 1 from public.hq_audit where action = 'billing.doc_resent' and workspace_id = a and actor = 'b1b1b1b1-0000-4000-8000-000000000006'
+  assert exists (select 1 from public.hq_audit where action = 'billing.doc_resent' and workspace_id = a and actor = 'b1b1b1b1-0000-4000-8000-000000000005'
      and details -> 'to' ->> 0 = 'ri…@payco.test' and (details ->> 'other_address')::boolean), 'in the HQ history: who, where (shortened)';
   assert exists (select 1 from public.hq_audit where action = 'billing.doc_resent' and (details ->> 'contact_updated')::boolean
      and actor = 'b1b1b1b1-0000-4000-8000-000000000005'), 'the email change is in the history too';

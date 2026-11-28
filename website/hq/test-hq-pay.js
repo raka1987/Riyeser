@@ -45,9 +45,19 @@ const BASE = (process.env.HQ_URL || 'http://127.0.0.1:8090').replace(/\/$/, '');
   // the Billing entity
   for (const [k, v] of [['name', 'Riyeser Pty Ltd'], ['address', '1 George St, Sydney NSW 2000'], ['tax_number', '12 345 678 901'], ['bank.account_name', 'Riyeser Pty Ltd'], ['bank.bank_name', 'Westpac'], ['bank.bsb', '032-000'], ['bank.account_number', '123456']]) await pg.fill(`#entf [name="${k}"]`, v);
   await pg.click('#entf .btn.p'); await pg.waitForTimeout(400);
-  check(!(await pg.$('#addbank')) && (await flash()).includes('Billing entity saved'), 'bank details saved: the reminder goes');
+  // SEC-011: two people. It's only proposed; Riki can withdraw it but not approve it; Finance Fi approves it
+  check((await flash()).includes('Change proposed') && await pg.isVisible('#entPending') && await pg.isVisible('#addbank'), 'bank details proposed: waiting, the reminder stays until approved');
+  const pend = await text('#entPending');
+  check(pend.includes('Waiting for a second person') && pend.includes('Riki proposed') && pend.includes('032-000') && pend.includes('123456') && !(await pg.$('#entYes')) && !!(await pg.$('#entNo')),
+    `the waiting change: who, what changes, no Approve for the proposer (${pend.slice(0, 120)})`);
+  await shot(pg, 'hq-entity-pending.png', '#entity');
+  await pg.selectOption('#demoAs', 's3'); await pg.waitForTimeout(400); await pg.goto(`${BASE}/hq/?demo#/payments`); await pg.waitForSelector('#entPending');
+  check(!!(await pg.$('#entYes')) && (await text('#entPending')).includes('Riki proposed'), 'Finance sees Approve');
+  await pg.click('#entYes'); await pg.waitForTimeout(500);
+  check(!(await pg.$('#entPending')) && !(await pg.$('#addbank')) && (await flash()).includes('Approved'), 'approved by a second person: in force, the reminder goes');
+  await pg.selectOption('#demoAs', 's1'); await pg.waitForTimeout(400);
   await pg.goto(`${BASE}/hq/?demo#/history`); await pg.waitForTimeout(500);
-  const hist = await text('#main'); check(hist.includes('marked a bank transfer paid') && hist.includes('changed the billing entity'), 'both are in the HQ history');
+  const hist = await text('#main'); check(hist.includes('marked a bank transfer paid') && hist.includes('proposed a billing entity change') && hist.includes('approved a billing entity change'), 'all in the HQ history');
   // the customer page: Money tab
   await pg.goto(`${BASE}/hq/?demo#/company/w2/money`); await pg.waitForSelector('#coBilling');
   check((await text('#coBilling')).includes('RI-10002') && (await text('#coBilling')).includes('…7Q2X9K') && (await text('#coPays')).includes('…4T7Y2A'), 'Money tab: invoices and payments, ids masked');
@@ -76,6 +86,12 @@ const BASE = (process.env.HQ_URL || 'http://127.0.0.1:8090').replace(/\/$/, '');
   check(inv.includes('5 people') && /US\$46 \(early bird\)\s*then US\$92 a month/.test(inv), `invoice row: people, early bird wording (${inv.slice(0, 160)})`);
   await pg.click('#coOrders [data-doc="RI-10003"]'); await pg.waitForSelector('#printdoc');
   check((await text('#printdoc')).includes('Invoice') && (await text('#printdoc')).includes('Early bird'), 'the invoice copy opens too'); await pg.click('.modal [data-close]');
+  // SEC-010: Support (no licences.manage) can look at a receipt but not email it
+  await pg.selectOption('#demoAs', 's2'); await pg.waitForTimeout(400); await pg.goto(`${BASE}/hq/?demo#/company/w2/money`); await pg.waitForSelector('#coBilling');
+  await pg.click('#coPayTbl [data-doc="RR-10002"]'); await pg.waitForSelector('#printdoc');
+  check(!(await pg.$('#docResend')) && !(await pg.$('#docOther')) && (await text('#docNoSend')).includes('Only Finance and the Owner') && await pg.isVisible('#docPrint'), 'Support: Print only, no Resend');
+  await pg.click('.modal [data-close]');
+  await pg.selectOption('#demoAs', (await pg.$$eval('#demoAs option', (o) => o[0].value))); await pg.waitForTimeout(400);
   // Programs as Support (no licences.manage): the list, no Manage buttons
   await pg.selectOption('#demoAs', 's2'); await pg.waitForTimeout(400); await pg.goto(`${BASE}/hq/?demo#/company/w2/programs`); await pg.waitForSelector('#licCard');
   check((await pg.$$('#licCard tr[data-mod]')).length > 0 && !(await pg.$('#licCard [data-manage]')), 'Support: sees the programs, no Manage buttons');

@@ -240,6 +240,9 @@ select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000003'); select pg_temp.c
 select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000004'); select pg_temp.call_all('finance', '^hq_', false);
 select pg_temp.as_user_aal1('c0c0c0c0-0000-4000-8000-000000000005'); select pg_temp.call_all('owner without 2FA', '^hq_', false);
 select pg_temp.as_user('22222222-2222-2222-2222-222222222222'); select pg_temp.call_all('customer', '^hq_', false);
+-- the HQ owner (every permission) on everything that only looks, with A's ids: for the password/secret check below
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000005');
+select pg_temp.call_all('HQ owner', '^hq_(company|companies|companies_page|business_list|ticket|tickets|support_inbox|emails|licences|billing|company_billing|company_link|company_page|company_licence|diagnostic|overview|history|audit_search|staff_list|team|handover|work_queue|attention|reports|signups|refunds|approvals|me|my_follow_ups|saved_replies|get_settings|payments_received|inactive_accounts|dup_check|dup_search|downloads|real_downloads|traffic|licence_businesses)$', false);
 reset role;
 reset statement_timeout;
 create function pg_temp.refused(who text, fns text[]) returns text language sql as $$
@@ -255,10 +258,10 @@ do $$ declare bad text; begin
   -- support: no money (refund decisions/payments, plans, marking paid, billing details), staff, settings, history or removals
   bad := pg_temp.refused('support', array['hq_refund_decide', 'hq_refund_paid', 'hq_refund_second', 'hq_set_plan', 'hq_set_module',
     'hq_billing_mark_paid', 'hq_set_billing_entity', 'hq_set_staff', 'hq_set_staff_perms', 'hq_add_staff', 'hq_set_setting', 'hq_audit_search',
-    'hq_history', 'hq_remove_accounts', 'hq_change_owner', 'hq_close_duplicate', 'hq_grant_storage']);
+    'hq_history', 'hq_remove_accounts', 'hq_change_owner', 'hq_close_duplicate', 'hq_grant_storage', 'hq_billing_resend', 'hq_billing_entity_decide']);
   assert bad is null, 'support not refused: ' || bad;
   -- sales: no diagnostics, help-request replies, refunds, emails, 2FA resets, edits or history
-  bad := pg_temp.refused('sales', array['hq_diagnostic', 'hq_ticket_reply', 'hq_message_customer', 'hq_refunds', 'hq_emails', 'hq_reset_2fa',
+  bad := pg_temp.refused('sales', array['hq_billing_resend', 'hq_billing_entity_decide', 'hq_diagnostic', 'hq_ticket_reply', 'hq_message_customer', 'hq_refunds', 'hq_emails', 'hq_reset_2fa',
     'hq_edit_business', 'hq_change_owner', 'hq_audit_search', 'hq_set_module', 'hq_set_staff']);
   assert bad is null, 'sales not refused: ' || bad;
   -- finance: no diagnostics, account fix-ups or staff
@@ -270,6 +273,22 @@ do $$ declare bad text; begin
   assert bad is null, 'HQ worked without two-step sign-in or for a customer: ' || bad;
   -- and no HQ answer, for any role, carries A's private chat or log of its own
   assert not exists (select 1 from pg_temp.out where result like '%PRIVATE-DM%' or result like '%Morning team%'), 'HQ answers never include chat';
+end $$;
+-- The owner's rule: support can trigger a reset but never sees, sets or receives any password or secret. No HQ answer (for
+-- any role, including the HQ owner looking at A's business, PCs, phones, billing, tickets and emails), and no HQ function's
+-- columns, carries a password, secret, key, token, digest or sealed copy; nor A's real API key or webhook secret.
+do $$ declare bad text; begin
+  select string_agg(distinct who || ' ' || fn, ', ') into bad from pg_temp.out where outcome = 'ran'
+    and result ~* '"[a-z_]*(password|passwd|pwd|secret|sealed|ha1|key_hash|sync_key|api_key|token|private_key)[a-z_]*"\s*:'
+    and result !~* '"(can_[a-z_]*|[a-z_]*_set|bank_ready)"';
+  assert bad is null, 'HQ answers with a password or secret field: ' || bad;
+  assert not exists (select 1 from pg_temp.out where strpos(coalesce(result, ''), current_setting('test.raw_key')) > 0
+                     or strpos(coalesce(result, ''), current_setting('test.hook')::json ->> 'secret') > 0), 'no HQ answer has A''s API key or webhook secret';
+  select string_agg(p.proname || '.' || a, ', ') into bad from pg_proc p, unnest(coalesce(p.proargnames, '{}')) a
+   where p.pronamespace = 'public'::regnamespace and p.proname ~ '^hq_' and a ~* '(password|passwd|secret|sealed|ha1|key_hash|sync_key|token)'
+     and p.proname not in ('hq_record_downloads', 'hq_set_ingest_token');   -- the download counter's own sign-in token (GitHub job), hashed at once
+  assert bad is null, 'HQ functions with a password/secret column or argument: ' || bad;
+  assert (select count(*) from pg_temp.out where who = 'HQ owner' and outcome = 'ran') >= 20, 'the HQ owner''s look-only calls ran';
 end $$;
 -- every HQ look at a customer is in the locked HQ history
 do $$ begin
@@ -362,5 +381,44 @@ do $$ begin
   assert json_array_length(public.link_office_pending(current_setting('test.ws_a')::uuid, 'office-front-0001')) = 1, 'the reporter left: the new person''s PC takes over';
 end $$;
 reset role;
+
+-- ===== SEC-009: Riyeser support (with the customer's "Let Riyeser help") can ask for a new phone password, never see one
+set role authenticated;
+select pg_temp.as_user('11111111-1111-1111-1111-111111111111');
+select public.link_support_allow(:'ws_a');
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000001');
+do $$ declare c uuid; begin
+  begin perform public.link_command(current_setting('test.ws_a')::uuid, 'office-front-0001', 'reveal_password',
+      jsonb_build_object('extension', '101', 'key', jsonb_build_object('kty', 'RSA', 'n', repeat('D', 342), 'e', 'AQAB')));
+    raise exception 'support asked to see a phone password';
+  exception when others then assert sqlerrm like 'Riyeser support can''t see phone passwords%', sqlerrm; end;
+  c := public.link_command(current_setting('test.ws_a')::uuid, 'office-front-0001', 'new_password', '{"extension":"101","password":"Typed-By-Support-1"}');
+  perform set_config('test.hq_newpw', c::text, false);
+  assert public.link_command_state(c)::text !~* '(password|sealed)"\s*:', 'support follows it: no password field';
+end $$;
+-- the office (the owner's Link Office) makes the password itself and says only "done"
+select pg_temp.as_user('11111111-1111-1111-1111-111111111111');
+select public.link_office_done(current_setting('test.hq_newpw')::uuid, true, null, 'U2VhbGVkLWNvcHk=');
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000001');
+do $$ begin
+  assert public.link_command_state(current_setting('test.hq_newpw')::uuid) ->> 'status' = 'done', 'done';
+  begin perform public.link_reveal_take(current_setting('test.hq_newpw')::uuid); raise exception 'support took a password';
+  exception when others then assert sqlerrm like 'There''s no password waiting for you%', sqlerrm; end;
+end $$;
+reset role;
+do $$ begin
+  assert (select data from public.link_office_commands where id = current_setting('test.hq_newpw')::uuid) = '{"extension": "101"}'::jsonb, 'nothing support typed reaches the office';
+  assert not exists (select 1 from public.link_office_reveals where command_id = current_setting('test.hq_newpw')::uuid), 'no password copy kept';
+  assert exists (select 1 from public.hq_audit where action = 'link.new_password' and actor = 'c0c0c0c0-0000-4000-8000-000000000001'
+                 and workspace_id = current_setting('test.ws_a')::uuid), '"password reset requested by" Sup, in the HQ history';
+  assert exists (select 1 from public.audit_log where action = 'link.new_password' and details ->> 'by' = 'Riyeser support'), 'and in the customer''s';
+  -- no history, HQ history or email holds a password, secret or key (names of fields, or A's real values)
+  assert not exists (select 1 from public.hq_audit where details::text ~* '"[a-z_]*(password|secret|sealed|ha1|key_hash|token)[a-z_]*"\s*:'
+                     or details::text like '%Typed-By-Support-1%'), 'HQ history: no password or secret';
+  assert not exists (select 1 from public.audit_log where details::text ~* '"[a-z_]*(password|secret|sealed|ha1|key_hash|token)[a-z_]*"\s*:'
+                     or details::text like '%Typed-By-Support-1%' or strpos(details::text, current_setting('test.raw_key')) > 0), 'customer history: no password or secret';
+  assert not exists (select 1 from public.email_outbox where strpos(coalesce(body_text, '') || coalesce(subject, ''), current_setting('test.raw_key')) > 0
+                     or strpos(coalesce(body_text, ''), current_setting('test.hook')::json ->> 'secret') > 0 or body_text like '%Typed-By-Support-1%'), 'no email holds a key, secret or password';
+end $$;
 
 select 'ALL SECURITY TESTS PASSED' as result;

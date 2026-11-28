@@ -3696,6 +3696,11 @@ begin
   elsif hq_role() is not null then
     if not hq_can('link.support') then raise exception 'Your HQ role can''t do that.'; end if;
     if not link_support_active(ws) then raise exception 'Ask the customer to press ''Let Riyeser help'' on their Phones page first.'; end if;
+    -- SEC-009: Riyeser support never sees, sets or receives a password. It can only ask Link Office to make a new one
+    -- (new_password): the office PC makes it, sets the phones up again, and says "done" without sending it anywhere.
+    if kind = 'reveal_password' then
+      raise exception 'Riyeser support can''t see phone passwords. Use Set a new password: Riyeser Link Office makes a new one and sets the phones up again, and nobody at Riyeser sees it.';
+    end if;
     by_hq := true;
   else raise exception 'Only the business''s owner or an admin, signed in with two-step sign-in, can change the phones.';
   end if;
@@ -3801,7 +3806,7 @@ begin
   perform link_sweep();
   select * into r from link_office_reveals where command_id = command for update;
   if r.command_id is null or r.requested_by <> auth.uid() then raise exception 'There''s no password waiting for you.'; end if;
-  if not (public.is_admin(r.workspace_id) or (hq_can('link.support') and link_support_active(r.workspace_id))) then
+  if not public.is_admin(r.workspace_id) then   -- SEC-009: never Riyeser support
     raise exception 'You can''t see this business''s phone passwords any more.';
   end if;
   if r.sealed is null or r.read_at is not null or r.expires_at <= now() then return null; end if;
@@ -3983,7 +3988,7 @@ begin
   perform link_sweep();
   select * into r from link_office_reveals where command_id = command for update;
   if r.command_id is null or r.requested_by <> auth.uid() then raise exception 'There''s no password waiting for you.'; end if;
-  if not (public.is_admin(r.workspace_id) or (hq_can('link.support') and link_support_active(r.workspace_id))
+  if not (public.is_admin(r.workspace_id)   -- SEC-009: never Riyeser support
           or coalesce(r.extension = link_my_ext(r.workspace_id), false)) then   -- null-safe: no extension, no access
     raise exception 'You can''t see this business''s phone passwords any more.';
   end if;
@@ -6076,7 +6081,8 @@ begin
     'entity', (billing_entity_now()).details,
     'bank_ready', coalesce(nullif(trim((billing_entity_now()).details #>> '{bank,account_number}'), ''), '') <> '',
     'grace_days', hq_setting_num('billing.grace_days', 7),
-    'can_mark_paid', hq_can('licences.manage'), 'can_edit_entity', hq_can('settings.manage') or hq_can('licences.manage'));
+    'can_mark_paid', hq_can('licences.manage'), 'can_edit_entity', hq_can('settings.manage') or hq_can('licences.manage'),
+    'entity_pending', hq_billing_entity_pending(), 'can_send_docs', hq_can('licences.manage'));
 end $$;
 -- This business's invoices and payments (the customer page, Money tab).
 create or replace function public.hq_company_billing(ws uuid) returns json
@@ -6113,10 +6119,27 @@ begin
   return json_build_object('receipt', rcpt, 'paid_until', upto);
 end $$;
 -- The Billing entity: who sells Riyeser (on every invoice and receipt). Each change is a new version.
+-- SEC-011: a change (above all the bank details customers pay into) is only PROPOSED here. It takes effect when a
+-- different HQ person (settings.manage or licences.manage: the Owner, Finance) approves it (hq_billing_entity_decide).
+-- One proposal waits at a time: proposing the same again changes nothing; proposing something else replaces it.
+create table if not exists public.billing_entity_changes (
+  id bigint generated always as identity primary key,
+  details jsonb not null,
+  proposed_by uuid references auth.users(id) on delete set null,
+  proposed_at timestamptz not null default now(),
+  status text not null default 'pending' check (status in ('pending', 'approved', 'rejected', 'replaced')),
+  decided_by uuid references auth.users(id) on delete set null,
+  decided_at timestamptz
+);
+create unique index if not exists billing_entity_changes_one_pending on public.billing_entity_changes ((true)) where status = 'pending';
+alter table public.billing_entity_changes enable row level security;
+revoke all on public.billing_entity_changes from anon, authenticated;
+drop trigger if exists billing_entity_changes_keep on public.billing_entity_changes;
+create trigger billing_entity_changes_keep before delete on public.billing_entity_changes for each row execute function public.no_delete();
 create or replace function public.hq_set_billing_entity(details jsonb) returns void
   language plpgsql security definer set search_path = public as $$
 declare d jsonb; b jsonb := coalesce(details -> 'bank', '{}'::jsonb); k text; cur jsonb := (billing_entity_now()).details;
-  t text := '';
+  t text := ''; p billing_entity_changes;
 begin
   if not (hq_can('settings.manage') or hq_can('licences.manage')) then perform hq_need(array['settings.manage']); end if;
   if length(trim(coalesce(details ->> 'name', ''))) < 2 then raise exception 'Type the business name that sells Riyeser.'; end if;
@@ -6127,19 +6150,63 @@ begin
   end loop;
   d := d || jsonb_build_object('bank', (select jsonb_object_agg(x, left(trim(coalesce(b ->> x, '')), case when x = 'note' then 300 else 80 end))
          from unnest(array['account_name', 'bank_name', 'bsb', 'account_number', 'swift', 'note']) x));
-  if d = cur then return; end if;
-  insert into billing_entities (details, created_by) values (d, auth.uid());
-  perform hq_log('billing.entity_changed', jsonb_build_object('name', d ->> 'name', 'bank_set', coalesce(d #>> '{bank,account_number}', '') <> ''));
+  select * into p from billing_entity_changes where status = 'pending' for update;
+  if p.id is not null and p.details = d then return; end if;          -- the same proposal again: nothing to do
+  if p.id is null and d = cur then return; end if;                    -- no change
+  if p.id is not null then
+    update billing_entity_changes set status = 'replaced', decided_by = auth.uid(), decided_at = now() where id = p.id;
+    perform hq_log('billing.entity_replaced', jsonb_build_object('change', p.id));
+  end if;
+  if d = cur then return; end if;                                     -- back to what's in force: the old proposal is simply gone
+  insert into billing_entity_changes (details, proposed_by) values (d, auth.uid()) returning * into p;
+  perform hq_log('billing.entity_proposed', jsonb_build_object('change', p.id, 'name', d ->> 'name',
+    'bank_changed', (d -> 'bank') is distinct from (cur -> 'bank'), 'bank_set', coalesce(d #>> '{bank,account_number}', '') <> ''));
 end $$;
+-- Approve (it takes effect: a new version of the entity) or turn down the waiting change. Approving needs someone other
+-- than whoever proposed it; the proposer may withdraw their own (approve = false). Safe to repeat: a decided change stays decided.
+create or replace function public.hq_billing_entity_decide(change bigint, approve boolean) returns void
+  language plpgsql security definer set search_path = public as $$
+declare p billing_entity_changes;
+begin
+  if not (hq_can('settings.manage') or hq_can('licences.manage')) then perform hq_need(array['settings.manage']); end if;
+  select * into p from billing_entity_changes where id = change for update;
+  if p.id is null then raise exception 'That change isn''t there.'; end if;
+  if p.status <> 'pending' then
+    if (p.status = 'approved') = coalesce(approve, false) and p.decided_by = auth.uid() then return; end if;
+    raise exception 'That change was already dealt with.';
+  end if;
+  if coalesce(approve, false) then
+    if p.proposed_by = auth.uid() then raise exception 'Someone else in Riyeser HQ has to approve a change you made (two-person rule).'; end if;
+    if p.details is distinct from (billing_entity_now()).details then
+      insert into billing_entities (details, created_by) values (p.details, p.proposed_by);
+    end if;
+    update billing_entity_changes set status = 'approved', decided_by = auth.uid(), decided_at = now() where id = p.id;
+    perform hq_log('billing.entity_changed', jsonb_build_object('change', p.id, 'name', p.details ->> 'name', 'proposed_by', p.proposed_by,
+      'bank_set', coalesce(p.details #>> '{bank,account_number}', '') <> ''));
+  else
+    update billing_entity_changes set status = 'rejected', decided_by = auth.uid(), decided_at = now() where id = p.id;
+    perform hq_log('billing.entity_rejected', jsonb_build_object('change', p.id, 'proposed_by', p.proposed_by, 'withdrawn', p.proposed_by = auth.uid()));
+  end if;
+end $$;
+-- The waiting change for the Billing entity card (or null).
+create or replace function public.hq_billing_entity_pending() returns json
+  language sql stable security definer set search_path = public as $$
+  select json_build_object('id', p.id, 'details', p.details, 'proposed_at', p.proposed_at,
+    'proposed_by', (select display_name from hq_staff s where s.user_id = p.proposed_by), 'mine', p.proposed_by = auth.uid())
+  from billing_entity_changes p where p.status = 'pending'
+$$;
+revoke all on function public.hq_billing_entity_decide(bigint, boolean), public.hq_billing_entity_pending() from public, anon, authenticated;
+grant execute on function public.hq_billing_entity_decide(bigint, boolean) to authenticated;
 
--- HQ: send an invoice or receipt again, to the business's billing emails (licences.view), or to another address
+-- HQ: send an invoice or receipt again, to the business's billing emails (licences.manage: Finance and the Owner only,
+-- SEC-010; Sales and Support can look but not send), or to another address
 -- (a wrong email); update_contact also makes that the business's email (customers.edit or licences.manage). In the HQ history: who,
 -- which document, when, and where to (the address shortened; the full one is on the email itself, in Emails).
 create or replace function public.hq_billing_resend(doc_ref text, to_email text, update_contact boolean) returns json
   language plpgsql security definer set search_path = public as $$
 declare d billing_documents; addr text := lower(trim(coalesce(to_email, ''))); sent text[]; a text; m text[];
 begin
-  perform hq_need(array['licences.view']);
+  perform hq_need(array['licences.manage']);
   select * into d from billing_documents where ref = upper(trim(coalesce(doc_ref, '')));
   if d.id is null then raise exception 'There''s no invoice or receipt with that number.'; end if;
   if addr <> '' then
