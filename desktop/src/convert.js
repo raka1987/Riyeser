@@ -8,6 +8,7 @@ const path = require('path');
 const { execFile } = require('child_process');
 
 const IMAGE = /\.(jpe?g|png|webp|bmp|gif)$/i;
+const HEIC = /\.(heic|heif)$/i;
 const WORD = /\.(docx?|rtf|odt)$/i;
 const EXCEL = /\.(xlsx?|xlsm|ods|csv)$/i;
 const POWERPOINT = /\.(pptx?|odp)$/i;
@@ -32,9 +33,9 @@ async function helperWindow() {
   return helper;
 }
 /** Render PDF pages to images (data URLs). */
-async function renderPdfPages(file, { maxPages = 500, dpi = 150, format = 'png', quality = 0.85 } = {}) {
+async function renderPdfPages(file, { maxPages = 500, dpi = 150, format = 'png', quality = 0.85, startPage = 1 } = {}) {
   const w = await helperWindow();
-  return w.webContents.executeJavaScript(`window.renderPdf(${JSON.stringify(file)}, ${maxPages}, ${JSON.stringify({ dpi, format, quality })})`);
+  return w.webContents.executeJavaScript(`window.renderPdf(${JSON.stringify(file)}, ${maxPages}, ${JSON.stringify({ dpi, format, quality, startPage })})`);
 }
 
 // ---------- Microsoft Office (Windows, when installed) ----------
@@ -127,25 +128,19 @@ async function htmlToPdf(html, output) {
   } finally { w.destroy(); }
 }
 
-/** Pictures -> PDF pages (each page the size of the picture, at 150 dpi). */
+/** Pictures -> PDF pages (each page the size of the picture, at 150 dpi), photos turned the right way up (0.26.0). */
 async function addImagesToPdf(doc, files) {
+  const C = require('./pdf/converters');
+  const { degrees } = require('pdf-lib');
   for (const f of files) {
-    let bytes = fs.readFileSync(f);
-    let isPng = /\.png$/i.test(f);
-    if (!/\.(jpe?g|png)$/i.test(f)) {
-      // decode other formats (WebP, BMP, GIF) by drawing them in the helper window
-      const w = await helperWindow();
-      const dataUrl = `data:image/${path.extname(f).slice(1).toLowerCase()};base64,${bytes.toString('base64')}`;
-      const png = await w.webContents.executeJavaScript(`window.imageToPng(${JSON.stringify(dataUrl)})`);
-      bytes = Buffer.from(png.split(',')[1], 'base64'); isPng = true;
-    }
-    const img = isPng ? await doc.embedPng(bytes) : await doc.embedJpg(bytes);
-    const scale = 72 / 150;
-    let w = img.width * scale; let h = img.height * scale;
-    const maxSide = 842 * 1.5; // keep huge photos to a sensible page size
-    if (Math.max(w, h) > maxSide) { const k = maxSide / Math.max(w, h); w *= k; h *= k; }
-    const page = doc.addPage([w, h]);
-    page.drawImage(img, { x: 0, y: 0, width: w, height: h });
+    let bytes = new Uint8Array(fs.readFileSync(f)); // a copy (see converters.js)
+    const jpeg = /\.jpe?g$/i.test(f);
+    const rot = jpeg ? await C.orientationOf(bytes) : 0;
+    if (!/\.(jpe?g|png)$/i.test(f)) bytes = new Uint8Array(await decodeToPng(f));
+    const img = jpeg ? await doc.embedJpg(bytes) : await doc.embedPng(bytes);
+    const { page, box } = C.layoutImage(img.width, img.height, rot);
+    const s = C.drawSpec(box, rot);
+    doc.addPage(page).drawImage(img, { x: s.x, y: s.y, width: s.width, height: s.height, rotate: degrees(s.rotate) });
   }
 }
 
@@ -155,6 +150,7 @@ async function addImagesToPdf(doc, files) {
  */
 async function convertToPdf(files, { combine = false, outDir = null } = {}) {
   const { PDFDocument } = require('pdf-lib');
+  if (files.some((f) => HEIC.test(f))) throw new Error(require('./pdf/converters').HEIC_MESSAGE);
   const bad = files.filter((f) => !CONVERTIBLE.test(f));
   if (bad.length) throw new Error(`Can't convert: ${bad.map((b) => path.basename(b)).join(', ')}`);
   const outputs = [];
@@ -186,70 +182,37 @@ async function convertToPdf(files, { combine = false, outDir = null } = {}) {
   return { outputs, usedOffice };
 }
 
-/** PDF -> editable Word document. Uses Word if installed, else rebuilds the text (with OCR for scanned pages). */
+/**
+ * PDF -> editable Word document. Uses Word if installed, else rebuilds the text and paragraphs (basic: the layout may
+ * change), reading scanned pages with text recognition (src/pdf/converters.js).
+ */
 async function pdfToWord(pdfFile, { ocr = null } = {}) {
   const dest = uniquePath(path.join(path.dirname(pdfFile), `${path.parse(pdfFile).name}.docx`));
   if (await wordFromPdf(pdfFile, dest)) return { output: dest, usedOffice: true };
-  const { Document, Packer, Paragraph, TextRun, HeadingLevel, PageBreak } = require('docx');
-  const { getDocumentProxy } = await import('unpdf');
-  const pdf = await getDocumentProxy(new Uint8Array(fs.readFileSync(pdfFile)));
-  const children = [];
-  let scannedPages = 0;
-  for (let p = 1; p <= pdf.numPages; p++) {
-    const page = await pdf.getPage(p);
-    const tc = await page.getTextContent();
-    let lines = [];
-    const items = tc.items.filter((it) => it.str && it.str.trim());
-    if (items.length) {
-      // group text pieces into lines (same height on the page), left to right
-      const rows = [];
-      for (const it of items) {
-        const y = it.transform[5]; const size = Math.hypot(it.transform[2], it.transform[3]) || 10;
-        let row = rows.find((r) => Math.abs(r.y - y) < size * 0.4);
-        if (!row) { row = { y, size, parts: [] }; rows.push(row); }
-        row.parts.push({ x: it.transform[4], str: it.str, w: it.width }); row.size = Math.max(row.size, size);
-      }
-      rows.sort((a, b) => b.y - a.y);
-      lines = rows.map((r) => {
-        r.parts.sort((a, b) => a.x - b.x);
-        let t = ''; let end = null;
-        for (const part of r.parts) { if (end !== null && part.x - end > r.size * 0.25 && !t.endsWith(' ')) t += ' '; t += part.str; end = part.x + part.w; }
-        return { text: t.trim(), y: r.y, size: r.size };
-      });
-    } else if (ocr) {
-      scannedPages++;
-      const [img] = await renderPdfPages(pdfFile, { maxPages: 1, dpi: 200, startPage: p });
-      const r = await ocr(Buffer.from(img.split(',')[1], 'base64'));
-      lines = r.lines.map((l) => ({ text: l.text, y: -l.y0, size: (l.y1 - l.y0) * 0.36 }));
-    }
-    // lines -> paragraphs: a bigger gap starts a new paragraph; noticeably bigger text becomes a heading
-    const sizes = lines.map((l) => l.size).sort((a, b) => a - b);
-    const body = sizes[Math.floor(sizes.length / 2)] || 11;
-    let para = null;
-    const flush = () => { if (para) children.push(para.heading ? new Paragraph({ text: para.text, heading: HeadingLevel.HEADING_2 }) : new Paragraph({ children: [new TextRun(para.text)], spacing: { after: 120 } })); para = null; };
-    let prev = null;
-    for (const l of lines) {
-      const heading = l.size >= body * 1.3;
-      const gap = prev ? prev.y - l.y : 0;
-      if (!para || heading || para.heading || gap > Math.max(prev.size, l.size) * 1.8) { flush(); para = { text: l.text, heading }; }
-      else para.text += (para.text.endsWith('-') ? '' : ' ') + l.text;
-      prev = l;
-    }
-    flush();
-    if (p < pdf.numPages) children.push(new Paragraph({ children: [new PageBreak()] }));
-  }
-  const doc = new Document({ sections: [{ children: children.length ? children : [new Paragraph('')] }] });
-  fs.writeFileSync(dest, await Packer.toBuffer(doc));
-  return { output: dest, usedOffice: false, scannedPages };
+  const ocrLines = ocr ? async (p) => {
+    const [img] = await renderPdfPages(pdfFile, { maxPages: 1, dpi: 200, startPage: p });
+    const r = await ocr(Buffer.from(img.split(',')[1], 'base64'));
+    return r.lines.map((l) => ({ text: l.text, y: -l.y0, size: (l.y1 - l.y0) * 0.36 }));
+  } : null;
+  const r = await require('./pdf/converters').pdfToDocx(pdfFile, { outFile: dest, ocrLines });
+  return { output: r.output, usedOffice: false, scannedPages: r.scannedPages };
+}
+
+/** Decode a picture the PDF library can't read (WebP, BMP, GIF) into PNG bytes, drawn by the helper window. */
+async function decodeToPng(f) {
+  const w = await helperWindow();
+  const dataUrl = `data:image/${path.extname(f).slice(1).toLowerCase()};base64,${fs.readFileSync(f).toString('base64')}`;
+  const png = await w.webContents.executeJavaScript(`window.imageToPng(${JSON.stringify(dataUrl)})`);
+  return Buffer.from(png.split(',')[1], 'base64');
 }
 
 /** Save each page of a PDF as a picture in a folder next to it. */
-async function pdfToImages(pdfFile, { dpi = 150, format = 'png' } = {}) {
+async function pdfToImages(pdfFile, { dpi = 150, format = 'png', quality = 0.88 } = {}) {
   const dir = uniquePath(path.join(path.dirname(pdfFile), `${path.parse(pdfFile).name} (pages)`));
   fs.mkdirSync(dir, { recursive: true });
-  const pages = await renderPdfPages(pdfFile, { dpi, format: format === 'jpg' ? 'jpeg' : 'png' });
+  const pages = await renderPdfPages(pdfFile, { dpi: Math.max(36, Math.min(600, +dpi || 150)), format: format === 'jpg' ? 'jpeg' : 'png', quality });
   pages.forEach((d, i) => fs.writeFileSync(path.join(dir, `Page ${String(i + 1).padStart(2, '0')}.${format === 'jpg' ? 'jpg' : 'png'}`), Buffer.from(d.split(',')[1], 'base64')));
   return { folder: dir, count: pages.length };
 }
 
-module.exports = { convertToPdf, pdfToWord, pdfToImages, renderPdfPages, CONVERTIBLE, uniquePath };
+module.exports = { convertToPdf, pdfToWord, pdfToImages, renderPdfPages, decodeToPng, CONVERTIBLE, uniquePath };

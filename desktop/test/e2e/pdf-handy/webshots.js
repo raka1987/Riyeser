@@ -1,0 +1,33 @@
+// website/assets/shots pdf-markup and pdf-tools (1280x800), with the 0.26.0 window: a site plan marked up, then Tools open
+const { _electron } = require(process.env.PLAYWRIGHT || 'playwright');
+const fs = require('fs'); const path = require('path');
+const [DESK, OUT] = process.argv.slice(2);
+const HOME = fs.mkdtempSync('/dev/shm/qa-pdfweb-');
+const data = path.join(HOME, '.config', 'Desk PDF', 'data'); fs.mkdirSync(data, { recursive: true });
+fs.writeFileSync(path.join(data, 'theme.json'), JSON.stringify('light'));
+const plan = path.join(HOME, 'Site plan Level 2 - A-201.pdf'); fs.copyFileSync((process.env.PDF_FILES || '/dev/shm/pdfh-files') + '/Site plan Level 2 - A-201.pdf', plan);
+(async () => {
+  const app = await _electron.launch({ executablePath: require(require('path').join(__dirname, '..', '..', '..', 'node_modules', 'electron')), args: ['--no-sandbox', path.join(DESK, 'src', 'pdf-main.js')], env: { ...process.env, HOME, TMPDIR: '/dev/shm' }, colorScheme: 'no-override' });
+  const w = await app.firstWindow(); await w.waitForFunction(() => window.__editor, null, { timeout: 30000 });
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1280, 800));
+  await w.evaluate((f) => window.__editor.openTab(f), plan); await w.waitForTimeout(3000);
+  const box = await (await w.$('.page')).boundingBox();
+  const at = (fx, fy) => [box.x + box.width * fx, box.y + box.height * fy];
+  const drag = async ([x1, y1], [x2, y2]) => { await w.mouse.move(x1, y1); await w.mouse.down(); await w.mouse.move((x1 + x2) / 2, (y1 + y2) / 2, { steps: 5 }); await w.mouse.move(x2, y2, { steps: 5 }); await w.mouse.up(); await w.waitForTimeout(250); };
+  await w.evaluate(() => { const c = document.querySelector('#color'); c.value = '#dc2626'; c.dispatchEvent(new Event('change', { bubbles: true })); });
+  await w.evaluate(() => window.__editor.setTool('ellipse')); await drag(at(0.27, 0.53), at(0.41, 0.62));
+  await w.evaluate(() => window.__editor.setTool('arrow')); await drag([772, 598], [652, 530]);
+  await w.evaluate(() => window.__editor.setTool('text')); await w.mouse.click(700, 640); await w.waitForTimeout(200);
+  await w.keyboard.type('Move the tap 300 mm left - Jamie'); await w.waitForTimeout(200);
+  await w.evaluate(() => window.__editor.setTool('check')); await w.mouse.click(952, 300); await w.waitForTimeout(200);
+  await w.evaluate(() => window.__editor.setTool('select')); await w.mouse.click(1240, 760); await w.waitForTimeout(400);
+  await w.evaluate(() => document.querySelector('#toast').classList.remove('show'));
+  await w.screenshot({ path: path.join(OUT, 'pdf-markup.png') });
+  await w.click('#toolsbtn'); await w.waitForTimeout(400);
+  await w.screenshot({ path: path.join(OUT, 'pdf-tools.png') });
+  const menu = await w.evaluate(() => [...document.querySelectorAll('#toolsmenu button')].map((b) => b.textContent.trim()));
+  console.log(menu.some((t) => /Compress PDF/.test(t)) ? 'PASS Tools menu shows Compress PDF' : 'FAIL');
+  const pos = await w.evaluate(() => Object.fromEntries(['#signbtn', '[data-tool="edittext"]', '#toolsmenu', '#toolsbtn'].map((s) => { const r = document.querySelector(s).getBoundingClientRect(); return [s, [Math.round((r.left + r.width / 2) / 12.8), Math.round((r.top + Math.min(r.height, 300) / 2) / 8)]]; })));
+  console.log('positions (% of 1280x800):', JSON.stringify(pos));
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().forEach((x) => x.destroy())).catch(() => {}); await app.close().catch(() => {}); fs.rmSync(HOME, { recursive: true, force: true });
+})().catch((e) => { console.error(e); process.exit(1); });

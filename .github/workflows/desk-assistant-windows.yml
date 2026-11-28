@@ -163,6 +163,26 @@ jobs:
           $perr = $null; [System.Management.Automation.Language.Parser]::ParseFile($dr.scannerScriptPath, [ref]$null, [ref]$perr) | Out-Null
           if ($perr.Count) { throw "The scanner script doesn't parse: $($perr | Out-String)" }
           Write-Host "Riyeser Documents" $dr.version "files a document into" $dr.suggestion "and its scanner script parses"
+          # Riyeser PDF 0.26: its installer adds the "Riyeser PDF" right-click menu for PDFs and pictures, for this Windows
+          # user (HKCU, no administrator). Each entry must start the installed program with its task and the file.
+          $pdfExe = (Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter "Riyeser PDF.exe" | Select-Object -First 1).FullName
+          $menuKeys = @(".pdf\shell\RiyeserPDF\shell\1open|open", ".pdf\shell\RiyeserPDF\shell\2sign|sign", ".pdf\shell\RiyeserPDF\shell\3compress|compress", ".pdf\shell\RiyeserPDF\shell\4combine|combine", ".pdf\shell\RiyeserPDF\shell\5toimages|toimages",
+            ".jpg\shell\RiyeserPDF\shell\6topdf|topdf", ".jpeg\shell\RiyeserPDF\shell\4combine|combine", ".png\shell\RiyeserPDF\shell\6topdf|topdf")
+          foreach ($mk in $menuKeys) {
+            $k, $task = $mk.Split("|")
+            $cmd = Get-ItemPropertyValue -Path "HKCU:\Software\Classes\SystemFileAssociations\$k\command" -Name "(default)" -ErrorAction SilentlyContinue
+            if ($cmd -ne ('"' + $pdfExe + '" --task=' + $task + ' "%1"')) { throw "Riyeser PDF's right-click entry $k is missing or wrong: $cmd" }
+          }
+          if ((Get-ItemPropertyValue -Path "HKCU:\Software\Classes\SystemFileAssociations\.pdf\shell\RiyeserPDF" -Name "MUIVerb") -ne "Riyeser PDF") { throw "The right-click menu isn't called Riyeser PDF" }
+          Write-Host "Riyeser PDF's right-click menu is there for this Windows user:" $menuKeys.Count "entries checked"
+          # Riyeser PDF's own check: converters, a sealed signature, the right-click commands read back, start screen and Settings
+          $pdir = "$env:RUNNER_TEMP\pdf-selftest"; New-Item -ItemType Directory -Force -Path $pdir | Out-Null
+          Start-Process -FilePath $pdfExe -ArgumentList "--self-test=$pdir\pdf.json" -Wait
+          $pr = Get-Content "$pdir\pdf.json" -Raw | ConvertFrom-Json
+          $pdfVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $pr.checks | Format-List | Out-String | Write-Host
+          if (-not ($pr.ok -and $pr.version -eq $pdfVersion -and $pr.signatureProtected -and $pr.ui.defaultButton)) { throw "Riyeser PDF's self-test failed: $($pr | ConvertTo-Json -Compress -Depth 5)" }
+          Write-Host "Riyeser PDF" $pr.version "converts files, keeps signatures sealed, its right-click commands start it with the right task, and its start screen and Settings draw"
           # Riyeser Link Office installs for the whole PC (Program Files, HKLM) and adds its Windows Firewall rule
           $lsetup = Get-ChildItem "dist-linkoffice\RiyeserLinkOffice-Setup-*.exe" | Select-Object -First 1
           Start-Process -FilePath $lsetup.FullName -ArgumentList "/S" -Wait
@@ -221,6 +241,16 @@ jobs:
           for ($i = 0; $i -lt 60 -and -not $gone; $i++) { Start-Sleep -Seconds 2; cmd /c 'netsh advfirewall firewall show rule name="Riyeser Link Office"' | Out-Null; $gone = ($LASTEXITCODE -ne 0) }
           if (-not $gone) { throw "Riyeser Link Office's firewall rule is still there after uninstalling" }
           Write-Host "Uninstalling Riyeser Link Office removed its firewall rule"
+          # Uninstalling Riyeser PDF removes its right-click menu (and nothing is left under this user's classes)
+          $pun = Get-ChildItem (Split-Path $pdfExe) -Filter "Uninstall*.exe" | Select-Object -First 1
+          Start-Process -FilePath $pun.FullName -ArgumentList "/S" -Wait
+          $gone = $false
+          for ($i = 0; $i -lt 60 -and -not $gone; $i++) {
+            Start-Sleep -Seconds 2
+            $gone = -not (@(".pdf", ".jpg", ".jpeg", ".png") | Where-Object { Test-Path "HKCU:\Software\Classes\SystemFileAssociations\$_\shell\RiyeserPDF" })
+          }
+          if (-not $gone) { throw "Riyeser PDF's right-click menu is still there after uninstalling" }
+          Write-Host "Uninstalling Riyeser PDF removed its right-click menu"
           $global:LASTEXITCODE = 0
           $leftover = Get-ChildItem "$env:LOCALAPPDATA\Programs\desk-assistant\resources" -Directory | Where-Object Name -in @("python", "accounting")
           if ($leftover) { throw "Accounting files are still bundled" }
@@ -242,6 +272,12 @@ jobs:
         with:
           name: central-home-screen
           path: desktop/dist-central/central-ui.png
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pdf-self-test
+          path: ${{ runner.temp }}/pdf-selftest/
           if-no-files-found: ignore
 
   # Riyeser Central's Install button, on a real Windows PC: every program from the latest release, installed with the

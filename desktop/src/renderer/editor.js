@@ -2,6 +2,8 @@
 // Everything you add is kept as an editable object (text, boxes, signatures...) until you save.
 import * as pdfjsLib from './vendor/pdf.min.mjs';
 import * as T from './pdf-tools.mjs';
+import * as Hy from './pdf-handy.mjs';
+import { initHome } from './pdf-home.js';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = './vendor/pdf.worker.min.mjs';
 const { PDFDocument, StandardFonts, rgb, degrees, BlendMode, LineCapStyle, pushGraphicsState, popGraphicsState, beginText, endText, setFontAndSize, setTextMatrix, showText, setTextRenderingMode, TextRenderingMode } = window.PDFLib;
@@ -10,7 +12,7 @@ let appTitle = 'PDF Editor';
 bridge.call('app:version').then(async (v) => {
   const info = await bridge.call('app:info').catch(() => null);
   appTitle = `${info?.standalone ? 'Riyeser PDF' : 'PDF Editor'} ${v}`;
-  if (!st.file) document.title = appTitle; else document.title = `${st.file.split(/[\\/]/).pop()} — ${appTitle}`;
+  updateTitle();
 }).catch(() => {});
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -25,7 +27,8 @@ const pdfjsOpts = (bytes) => ({ data: bytes.slice(), cMapUrl: './vendor/cmaps/',
   ...(st.password != null ? { password: st.password } : {}) });
 
 // ---------------- state ----------------
-const st = {
+// 0.26.0: one of these per open PDF (a tab). `st` is the PDF in the tab you're looking at.
+const newState = () => ({
   file: null,          // path on disk
   bytes: null,         // the PDF as last opened/saved (Uint8Array)
   doc: null,           // pdf.js document used for drawing
@@ -48,7 +51,12 @@ const st = {
   password: null,      // the password this PDF was opened with (S41)
   protect: null,       // { password } to protect the file with when it's next saved (S41)
   pageNumbers: null,   // { format, position } when page numbers are switched on
-};
+  banner: null,        // the message shown above the pages (scanned pages, redacted pages), or null
+  scrollTop: 0,        // where you were in this PDF when you switched to another tab
+});
+let st = newState();
+const fileName = (f) => String(f || '').split(/[\\/]/).pop();
+function updateTitle() { document.title = tabs.view === 'doc' && st.file ? `${fileName(st.file)} — ${appTitle}` : appTitle; }
 let renderToken = 0;
 let uid = 1;
 const newId = () => `a${Date.now().toString(36)}${uid++}`;
@@ -58,7 +66,7 @@ function toast(msg) {
   t.textContent = msg; t.classList.add('show');
   clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 3200);
 }
-function setDirty(v = true) { st.dirty = v; $('#dirty').hidden = !v; }
+function setDirty(v = true) { st.dirty = v; renderTabs(); }
 
 // ---------------- undo ----------------
 function snapshot() { return JSON.stringify({ order: st.order, anns: st.anns }); }
@@ -85,11 +93,10 @@ async function loadBytes(bytes, { keepState = false } = {}) {
     st.order = st.baseRot.map((_, i) => ({ src: i, rot: 0 }));
     st.anns = {}; st.text = {}; st.undo = []; st.redo = []; st.selected = null; st.current = 0; st.selPages = new Set();
   }
-  $('#empty').hidden = true;
   // Work out "fit to width" before the first drawing, so a big page isn't drawn twice.
   if (!keepState && fitMode && st.pages[0]) {
     const w = st.pages[0].getViewport({ scale: PX_PER_PT, rotation: st.baseRot[0] % 360 }).width;
-    st.zoom = Math.min(4, Math.max(0.25, Math.min(2, ($('#viewer').clientWidth - 60) / w)));
+    st.zoom = Math.min(4, Math.max(0.25, Math.min(2, ($('#viewer').clientWidth - 76) / w)));
     $('#zoomlabel').textContent = `${Math.round(st.zoom * 100)}%`;
   }
   buildPages();
@@ -100,9 +107,7 @@ async function openFile(file) {
     const bytes = await bridge.call('pdf:read', file);
     st.file = file;
     st.bytes = bytes;
-    document.title = `${file.split(/[\\/]/).pop()} — ${appTitle}`;
-    $('#docname').textContent = file.split(/[\\/]/).pop();
-    $('#docname').title = file;
+    updateTitle(); renderTabs();
     // A PDF the engine gets stuck on must not leave a grey window: give up after a while and use the backup viewer.
     const limit = (p, ms, what) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(`${what} took too long`)), ms))]);
     st.firstShown = false; st.form = []; st.formValues = {}; st.encrypted = false; st.password = null; st.protect = null; renderForm();
@@ -111,7 +116,7 @@ async function openFile(file) {
       try { await limit(loadBytes(bytes), 20000, 'Opening the pages'); break; } catch (e) {
         if (T.openErrorMessage(e) !== 'password') throw e;
         const pw = await askPassword(file.split(/[\\/]/).pop(), wrong && st.password != null);
-        if (pw == null) { st.password = null; $('#empty').hidden = false; toast('This PDF needs its password to open.'); return; }
+        if (pw == null) { st.password = null; toast('This PDF needs its password to open.'); return; }
         st.password = pw; st.encrypted = true;
       }
     }
@@ -212,6 +217,7 @@ const pageObserver = new IntersectionObserver((entries) => {
 
 async function drawPage(el) {
   el.dataset.drawn = '1';
+  const mine = st;
   const src = +el.dataset.src;
   const entry = st.order.find((o) => o.src === src);
   const page = st.pages?.[src] || await st.doc.getPage(src + 1);
@@ -229,12 +235,14 @@ async function drawPage(el) {
     if (/cancel/i.test(e?.name || e?.message || '')) return; // the view changed; a fresh drawing takes over
     if (src === 0 && st.firstPageCheck) st.firstPageCheck.failed = true;
   } finally { liveRenders.delete(task); }
+  if (mine !== st) return; // you switched to another tab meanwhile
   el.querySelector('.drawing')?.remove();
   copyToThumb(src, canvas);
   if (!st.firstShown) { st.firstShown = true; afterFirstPage(); }
   if (!st.text[src]) {
     await new Promise((r) => setTimeout(r, 30)); // let the page appear before reading its words for search
     const tc = await page.getTextContent();
+    if (mine !== st) return;
     st.text[src] = tc.items.filter((it) => it.str && it.str.trim()).map((it) => {
       const [a, b, c, d, e, f] = it.transform;
       const h = Math.hypot(c, d) || Math.abs(d) || 10;
@@ -264,7 +272,10 @@ function drawOverlay(src) {
   const vp = st.vps[src];
   if (!pageEl || !vp) return;
   const ov = pageEl.querySelector('.overlay');
-  ov.querySelectorAll('.ann, .txtbox').forEach((n) => n.remove());
+  // text being typed is finished first (its blur saves it and redraws), so it isn't pulled out from under the typing
+  const typing = document.activeElement;
+  if (typing && typing.isContentEditable && ov.contains(typing)) typing.blur();
+  ov.querySelectorAll('.ann, .txtbox, .fillhl, .pnum, .wm').forEach((n) => n.remove());
   const svg = ov.querySelector('svg');
   svg.setAttribute('width', vp.width); svg.setAttribute('height', vp.height);
   svg.innerHTML = '';
@@ -291,6 +302,18 @@ function drawOverlay(src) {
     pn.textContent = st.pageNumbers.format.replace('{n}', idx + 1).replace('{total}', st.order.length);
     Object.assign(pn.style, { fontSize: `${10 * vp.scale}px`, [st.pageNumbers.position === 'top' ? 'top' : 'bottom']: `${18 * vp.scale}px` });
     ov.appendChild(pn);
+  }
+  // Fill my details: the boxes it filled in, highlighted until you change them or save
+  for (const f of st.form) {
+    if (!f.autofilled) continue;
+    for (const r of f.rects || []) {
+      if (r.page !== src) continue;
+      const p1 = toView(src, r.x, r.y); const p2 = toView(src, r.x + r.w, r.y + r.h);
+      const hl = document.createElement('div');
+      hl.className = 'fillhl';
+      Object.assign(hl.style, { left: `${Math.min(p1[0], p2[0])}px`, top: `${Math.min(p1[1], p2[1])}px`, width: `${Math.abs(p2[0] - p1[0])}px`, height: `${Math.abs(p2[1] - p1[1])}px` });
+      ov.appendChild(hl);
+    }
   }
   for (const a of st.anns[src] || []) {
     if (a.type === 'ocr') continue; // invisible text layer
@@ -432,7 +455,7 @@ async function fitWidth() {
   const page = await st.doc.getPage(entry.src + 1);
   const w = page.getViewport({ scale: PX_PER_PT, rotation: (st.baseRot[entry.src] + entry.rot) % 360 }).width;
   fitMode = true;
-  setZoom(Math.min(2, ($('#viewer').clientWidth - 60) / w), { fromFit: true });
+  setZoom(Math.min(2, ($('#viewer').clientWidth - 76) / w), { fromFit: true });
 }
 let resizeTimer;
 window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (fitMode && st.doc) fitWidth(); }, 250); });
@@ -704,12 +727,18 @@ $('#pages').addEventListener('dblclick', (e) => {
 function setTool(t) {
   st.tool = t;
   document.body.className = `tool-${t}`;
-  $$('[data-tool]').forEach((b) => b.classList.toggle('active', b.dataset.tool === t));
+  $$('[data-tool]').forEach((b) => { b.classList.toggle('active', b.dataset.tool === t); if (b.closest('#tools') && !b.closest('.menu')) b.setAttribute('aria-pressed', String(b.dataset.tool === t)); });
+  // a shape picked from the Shapes menu lights up the Shapes button, showing which one
+  const shape = $(`#shapesmenu [data-tool="${t}"]`);
+  $('#shapesbtn').classList.toggle('active', !!shape);
+  $('#shapesbtn .ic').textContent = shape ? shape.querySelector('.ic').textContent : '◇';
+  closeMenus();
   if (t !== 'select') select(null);
   Object.keys(st.vps).forEach((s) => drawOverlay(+s));
   if (t === 'edittext') toast('Click any text to change it. When you save, the old words are taken out of the file too. To hide private information, use Redact.');
 }
 $('#tools').addEventListener('click', (e) => { const b = e.target.closest('[data-tool]'); if (b) setTool(b.dataset.tool); });
+if (!document.body.dataset.view) document.body.dataset.view = 'home';
 
 function applyStyleToSelected(patch) {
   const f = st.selected && findAnn(st.selected);
@@ -771,33 +800,100 @@ async function insertPdf() {
 
 // ---------------- forms ----------------
 async function readForm() {
-  st.form = []; st.formValues = {}; st.encrypted = false;
+  st.form = []; st.formValues = {}; st.encrypted = false; st.fillUndo = null;
+  const mine = st;
   try {
     const doc = await loadLib(st.bytes);
+    if (mine !== st) return;
     st.encrypted = doc.isEncrypted;
+    const L = window.PDFLib;
+    const pages = doc.getPages();
+    // where each field's boxes are (for Fill my details: the words beside them, and the highlight)
+    const rectsOf = (f) => {
+      const out = [];
+      try {
+        for (const w of f.acroField.getWidgets()) {
+          const r = w.getRectangle(); const pref = w.P();
+          let page = pref ? pages.findIndex((p) => p.ref === pref) : -1;
+          if (page < 0) { const ref = doc.context.getObjectRef(w.dict); page = pages.findIndex((p) => { const an = p.node.Annots(); return an && an.asArray().some((x) => x === ref); }); }
+          if (page >= 0) out.push({ page, x: r.x, y: r.y, w: r.width, h: r.height });
+        }
+      } catch { /* no boxes */ }
+      return out;
+    };
+    const tooltip = (f) => { try { const t = f.acroField.dict.lookup(L.PDFName.of('TU')); return t && t.decodeText ? t.decodeText().trim() : ''; } catch { return ''; } };
     for (const f of doc.getForm().getFields()) {
       const name = f.getName();
-      const L = window.PDFLib;
-      if (f instanceof L.PDFTextField) st.form.push({ name, kind: 'text', value: f.getText() || '' });
-      else if (f instanceof L.PDFCheckBox) st.form.push({ name, kind: 'check', value: f.isChecked() });
-      else if (f instanceof L.PDFDropdown) st.form.push({ name, kind: 'select', value: f.getSelected()[0] || '', options: f.getOptions() });
-      else if (f instanceof L.PDFRadioGroup) st.form.push({ name, kind: 'radio', value: f.getSelected() || '', options: f.getOptions() });
-      else if (f instanceof L.PDFOptionList) st.form.push({ name, kind: 'select', value: f.getSelected()[0] || '', options: f.getOptions() });
+      const base = { name, label: tooltip(f), rects: rectsOf(f) };
+      if (f instanceof L.PDFTextField) st.form.push({ ...base, kind: 'text', value: f.getText() || '' });
+      else if (f instanceof L.PDFCheckBox) st.form.push({ ...base, kind: 'check', value: f.isChecked() });
+      else if (f instanceof L.PDFDropdown) st.form.push({ ...base, kind: 'select', value: f.getSelected()[0] || '', options: f.getOptions() });
+      else if (f instanceof L.PDFRadioGroup) st.form.push({ ...base, kind: 'radio', value: f.getSelected() || '', options: f.getOptions() });
+      else if (f instanceof L.PDFOptionList) st.form.push({ ...base, kind: 'select', value: f.getSelected()[0] || '', options: f.getOptions() });
+    }
+    // the words printed beside each box ("Contact name") name it better than its internal name ("Text1")
+    for (const f of st.form) {
+      if (f.label || !f.rects.length || !st.doc) continue;
+      const r = f.rects[0];
+      try { if (!st.text[r.page]) st.text[r.page] = await readPageText(r.page); f.nearLabel = Hy.nearbyLabel(r, st.text[r.page]).replace(/[:*\s]+$/, ''); } catch { f.nearLabel = ''; }
+      if (mine !== st) return;
     }
   } catch { /* not a form, or unreadable */ }
-  renderForm();
+  if (mine === st) renderForm();
 }
 function renderForm() {
   $('#formcount').textContent = st.form.length ? `(${st.form.length})` : '';
   const box = $('#formfields');
   if (!st.form.length) { box.innerHTML = '<p class="muted">This PDF has no fillable fields. Use <b>Add text</b> and <b>Tick</b> to fill it in instead.</p>'; return; }
-  box.innerHTML = `<p class="muted">Fill in the fields below — they update on the page.</p>${st.form.map((f, i) => {
-    const label = `<label for="ff${i}">${esc(f.name)}</label>`;
-    if (f.kind === 'text') return `${label}<input type="text" id="ff${i}" data-ff="${i}" value="${esc(f.value)}">`;
-    if (f.kind === 'check') return `<label><input type="checkbox" data-ff="${i}" ${f.value ? 'checked' : ''}> ${esc(f.name)}</label>`;
+  const hasText = st.form.some((f) => f.kind === 'text');
+  const filled = st.form.filter((f) => f.autofilled).length;
+  const intro = filled
+    ? `<p class="fillnote">Filled ${filled} field${filled === 1 ? '' : 's'} with your details (highlighted). Check them before you save.</p>`
+    : '<p class="muted">Fill in the fields below — they update on the page.</p>';
+  box.innerHTML = `${hasText ? `<div class="fillbar"><button class="primary" data-cmd="filldetails">Fill my details</button>${st.fillUndo ? '<button data-cmd="fillundo">Undo</button>' : ''}</div>` : ''}${intro}${st.form.map((f, i) => {
+    const title = f.label || f.nearLabel || f.name;
+    const label = `<label for="ff${i}" title="${esc(f.name)}">${esc(title)}</label>`;
+    const auto = f.autofilled ? ' class="autofilled"' : '';
+    if (f.kind === 'text') return `${label}<input type="text" id="ff${i}" data-ff="${i}" value="${esc(f.value)}"${auto}>`;
+    if (f.kind === 'check') return `<label class="ffcheck"><input type="checkbox" data-ff="${i}" ${f.value ? 'checked' : ''}> ${esc(title)}</label>`;
     return `${label}<select id="ff${i}" data-ff="${i}"><option value=""></option>${f.options.map((o) => `<option ${o === f.value ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
-  }).join('')}<label style="margin-top:14px"><input type="checkbox" id="flatten"> Lock the answers when saving (no longer editable)</label>`;
+  }).join('')}<label class="ffcheck" style="margin-top:14px"><input type="checkbox" id="flatten"${st.flatten ? ' checked' : ''}> Lock the answers when saving (no longer editable)</label>`;
   $('#flatten').addEventListener('change', (e) => { st.flatten = e.target.checked; });
+}
+async function refreshFormPreview() { const keep = st.current; await loadBytes(await formFilled(st.bytes), { keepState: true }); scrollToPage(keep); }
+/** Fill my details: your saved details (Settings › My details) into the form's empty fields that ask for them. */
+async function fillMyDetails() {
+  if (!st.form.length) { toast('This PDF has no fillable fields.'); return; }
+  const { profile } = await bridge.call('profile:get');
+  if (!['name', 'business', 'email', 'phone', 'address', 'taxNumber'].some((k) => profile[k])) {
+    const r = await dialog(`<h2>Your details aren't saved yet</h2><p class="muted">Save your name, business, tax number, address, phone and email once, and <b>Fill my details</b> puts them into forms for you.</p>
+      <div class="dlgbtns"><button data-dlg="cancel">Not now</button><button class="primary" data-dlg="ok">Add my details</button></div>`);
+    if (r === 'ok') home.openPage('settings', { section: 'details' });
+    return;
+  }
+  for (const f of st.form) {
+    if (f.label || f.nearLabel != null || !f.rects.length) continue;
+    const r = f.rects[0];
+    try { if (!st.text[r.page]) st.text[r.page] = await readPageText(r.page); f.nearLabel = Hy.nearbyLabel(r, st.text[r.page]); } catch { f.nearLabel = ''; }
+  }
+  const matches = Hy.matchFields(st.form.map((f) => ({ name: f.name, label: f.label || f.nearLabel || '', kind: f.kind, value: f.value })), profile);
+  if (!matches.length) { toast('None of the empty fields asked for your details (name, business, tax number, address, phone or email).'); return; }
+  st.fillUndo = [];
+  for (const m of matches) {
+    const f = st.form.find((x) => x.name === m.name);
+    st.fillUndo.push({ name: f.name, value: f.value });
+    f.value = m.value; f.autofilled = true; st.formValues[f.name] = f;
+  }
+  setDirty(); renderForm(); showSidePanel('forms');
+  await refreshFormPreview();
+  toast(`Filled ${matches.length} field${matches.length === 1 ? '' : 's'} with your details. They're highlighted: check them, then save.`);
+}
+async function undoFill() {
+  if (!st.fillUndo) return;
+  for (const u of st.fillUndo) { const f = st.form.find((x) => x.name === u.name); if (f) { f.value = u.value; f.autofilled = false; st.formValues[f.name] = f; } }
+  st.fillUndo = null;
+  renderForm(); await refreshFormPreview();
+  toast('Your details were taken out again.');
 }
 let formTimer;
 $('#formfields').addEventListener('input', (e) => {
@@ -805,6 +901,7 @@ $('#formfields').addEventListener('input', (e) => {
   if (i === undefined) return;
   const f = st.form[+i];
   f.value = f.kind === 'check' ? e.target.checked : e.target.value;
+  if (f.autofilled) { f.autofilled = false; e.target.classList.toggle('autofilled', false); Object.keys(st.vps).forEach((x) => drawOverlay(+x)); }
   st.formValues[f.name] = f;
   setDirty();
   clearTimeout(formTimer);
@@ -866,16 +963,23 @@ async function runFind() {
 }
 
 // ---------------- side panel tabs ----------------
+function showSidePanel(name) {
+  st.panel = name;
+  $$('.side .tabs button').forEach((x) => { x.classList.toggle('active', x.dataset.panel === name); x.setAttribute('aria-selected', String(x.dataset.panel === name)); });
+  $$('.panel').forEach((p) => { p.hidden = p.id !== `panel-${name}`; });
+}
 $$('.side .tabs button').forEach((b) => b.addEventListener('click', () => {
-  $$('.side .tabs button').forEach((x) => x.classList.toggle('active', x === b));
-  $$('.panel').forEach((p) => { p.hidden = p.id !== `panel-${b.dataset.panel}`; });
+  showSidePanel(b.dataset.panel);
   if (b.dataset.panel === 'find') $('#findq').focus();
 }));
 
 // ---------------- signature ----------------
+// 0.26.0: your signature and your initials are saved once (sealed on this PC: src/pdf/signatures.js) and placed with
+// one click from the Sign menu. Each placed one can be dragged into place and resized with its blue corner.
 const pad = $('#sigpad');
 const pctx = pad.getContext('2d');
-let sigTab = 'draw'; let sigUpload = null; let padDrawn = false;
+let sigTab = 'draw'; let sigUpload = null; let padDrawn = false; let sigKind = 'signature';
+const SIG_WIDTH = { signature: 160, initials: 64 };
 function resetPad() { pctx.clearRect(0, 0, pad.width, pad.height); padDrawn = false; }
 pad.addEventListener('pointerdown', (e) => {
   const r = pad.getBoundingClientRect(); const k = pad.width / r.width;
@@ -932,22 +1036,41 @@ function knockOutWhite(dataUrl) {
     img.src = dataUrl;
   });
 }
-async function openSignature() {
-  if (!st.doc) return toast('Open a PDF first.');
-  resetPad(); sigUpload = null; $('#sigimg').removeAttribute('src');
-  const saved = await bridge.call('sig:list');
-  $('#sigsaved').innerHTML = saved.length ? `<span class="small muted" style="width:100%">Your saved signatures — click to use:</span>${saved.map((s) => `<div class="s" data-sig="${s.id}"><img src="${s.data}" alt=""><button class="x" data-sigdel="${s.id}" title="Forget">✕</button></div>`).join('')}` : '';
+async function renderSavedSigs() {
+  const saved = await bridge.call('sig:list', sigKind);
+  const what = sigKind === 'initials' ? 'initials' : 'signatures';
+  $('#sigsaved').innerHTML = saved.length
+    ? `<p class="small muted sighead">Your saved ${what}: click one to place it. ★ is the one <b>${sigKind === 'initials' ? 'My initials' : 'My signature'}</b> places.</p>${saved.map((s) => `<div class="s${s.isDefault ? ' def' : ''}"><button class="pick" data-sig="${s.id}" aria-label="Place this ${sigKind === 'initials' ? 'set of initials' : 'signature'}"><img src="${s.data}" alt=""></button><button class="star" data-sigdef="${s.id}" title="${s.isDefault ? 'Placed by one click' : 'Use this one for one-click placing'}" aria-label="Use this one for one-click placing" aria-pressed="${s.isDefault}">${s.isDefault ? '★' : '☆'}</button><button class="x" data-sigdel="${s.id}" title="Forget it" aria-label="Forget it">✕</button></div>`).join('')}`
+    : `<p class="small muted sighead">No ${what} saved yet. Make one below: it's kept on this PC for next time.</p>`;
   $('#sigsaved').onclick = async (e) => {
     const del = e.target.closest('[data-sigdel]');
-    if (del) { e.stopPropagation(); await bridge.call('sig:delete', del.dataset.sigdel); return openSignature(); }
+    if (del) { await bridge.call('sig:delete', del.dataset.sigdel); return renderSavedSigs(); }
+    const def = e.target.closest('[data-sigdef]');
+    if (def) { await bridge.call('sig:setDefault', def.dataset.sigdef); return renderSavedSigs(); }
     const s = e.target.closest('[data-sig]');
-    if (s) { $('#sigmodal').hidden = true; placeImage(saved.find((x) => x.id === s.dataset.sig).data); }
+    if (s) { closeSigModal(); placeImage(saved.find((x) => x.id === s.dataset.sig).data, SIG_WIDTH[sigKind]); }
+    return null;
   };
-  $('#sigmodal').hidden = false;
 }
+async function openSignature(kind = 'signature') {
+  if (!st.doc) return toast('Open a PDF first.');
+  sigKind = kind === 'initials' ? 'initials' : 'signature';
+  resetPad(); sigUpload = null; $('#sigimg').removeAttribute('src');
+  $$('[data-sigkind]').forEach((b) => { b.classList.toggle('active', b.dataset.sigkind === sigKind); b.setAttribute('aria-pressed', String(b.dataset.sigkind === sigKind)); });
+  $('#sigtitle').textContent = sigKind === 'initials' ? 'Your initials' : 'Your signature';
+  $('#sigtext').placeholder = sigKind === 'initials' ? 'Type your initials' : 'Type your name';
+  const status = await bridge.call('sig:status').catch(() => ({ protected: false }));
+  $('#sigprivacy').textContent = status.protected ? 'Kept on this PC only, locked to your Windows sign-in.' : 'Kept on this PC only.';
+  await renderSavedSigs();
+  $('#sigmodal').hidden = false;
+  ($('#sigsaved .pick') || $('[data-sigtab].active')).focus();
+  return null;
+}
+function closeSigModal() { $('#sigmodal').hidden = true; const b = $('#signbtn'); if (b) b.focus(); }
+$$('[data-sigkind]').forEach((b) => b.addEventListener('click', () => openSignature(b.dataset.sigkind)));
 $$('[data-sigtab]').forEach((b) => b.addEventListener('click', () => {
   sigTab = b.dataset.sigtab;
-  $$('[data-sigtab]').forEach((x) => x.classList.toggle('active', x === b));
+  $$('[data-sigtab]').forEach((x) => { x.classList.toggle('active', x === b); x.setAttribute('aria-selected', String(x === b)); });
   $$('[data-sigpane]').forEach((p) => { p.hidden = p.dataset.sigpane !== sigTab; });
   if (sigTab === 'type') { $('#sigtext').focus(); drawTyped(); }
 }));
@@ -956,10 +1079,19 @@ async function placeSignature() {
   if (sigTab === 'draw') data = padDrawn ? trimmed(pad) : null;
   if (sigTab === 'type') { drawTyped(); data = $('#sigtext').value.trim() ? trimmed($('#sigtyped')) : null; }
   if (sigTab === 'upload') data = sigUpload;
-  if (!data) return toast(sigTab === 'draw' ? 'Draw your signature first.' : sigTab === 'type' ? 'Type your name first.' : 'Choose an image first.');
-  if ($('#sigremember').checked) await bridge.call('sig:save', { data });
-  $('#sigmodal').hidden = true;
-  placeImage(data, 160);
+  if (!data) return toast(sigTab === 'draw' ? 'Draw it first.' : sigTab === 'type' ? 'Type it first.' : 'Choose a picture first.');
+  if ($('#sigremember').checked) await bridge.call('sig:save', { kind: sigKind, data, makeDefault: true });
+  closeSigModal();
+  placeImage(data, SIG_WIDTH[sigKind]);
+  return null;
+}
+/** One click: My signature / My initials. The first time, it asks you to make one. */
+async function placeMine(kind) {
+  if (!st.doc) return toast('Open a PDF first.');
+  const d = await bridge.call('sig:default', kind);
+  if (!d) return openSignature(kind);
+  placeImage(d.data, SIG_WIDTH[kind]);
+  return null;
 }
 
 // ---------------- building the saved PDF ----------------
@@ -1222,8 +1354,7 @@ async function save(saveAs = false) {
     if (!target) return;
     st.file = target;
     st.bytes = out;
-    $('#docname').textContent = target.split(/[\\/]/).pop();
-    document.title = `${target.split(/[\\/]/).pop()} — ${appTitle}`;
+    updateTitle(); renderTabs();
     await readForm();
     await loadBytes(out);
     setDirty(false);
@@ -1231,8 +1362,7 @@ async function save(saveAs = false) {
     toast(st.lastRedacted ? `Saved to ${target}. The previous version, before redacting, was kept in Tools › Copies kept when saving over a file: delete it there if it mustn't be kept.` : `Saved to ${target}. (The previous version was backed up.)`);
     // M15: pages made into pictures (Redact) can't be searched any more: offer Recognise text for them
     if ((st.lastFlattened || []).length) {
-      $('#scanbanner').innerHTML = `📷 ${st.lastFlattened.length === 1 ? 'The page you redacted is' : `The ${st.lastFlattened.length} pages you redacted are`} now a picture, so its words can't be searched or copied. <button class="primary" data-cmd="ocr">Recognise text</button>`;
-      $('#scanbanner').hidden = false;
+      setBanner(`📷 ${st.lastFlattened.length === 1 ? 'The page you redacted is' : `The ${st.lastFlattened.length} pages you redacted are`} now a picture, so its words can't be searched or copied. <button class="primary" data-cmd="ocr">Recognise text</button>`);
     }
   } catch (e) {
     console.error(e);
@@ -1261,8 +1391,8 @@ async function recognisePages() {
   const todo = st.order.map((o, i) => ({ ...o, i })).filter((o) => !(st.text[o.src] || []).length || (st.anns[o.src] || []).some((a) => a.type === 'ocr'));
   if (!todo.length) { toast('This PDF already contains text — nothing to recognise.'); return; }
   ocrBusy = true;
-  $('#scanbanner').hidden = true;
-  const btn = $('[data-cmd="ocr"]'); btn.disabled = true;
+  setBanner(null);
+  const btn = $('#tools [data-cmd="ocr"]'); btn.disabled = true;
   pushUndo();
   let lines = 0;
   try {
@@ -1294,11 +1424,12 @@ async function recognisePages() {
   } catch (e) {
     toast(`Text recognition failed: ${e.message}`);
   } finally {
-    ocrBusy = false; btn.disabled = false; btn.textContent = '🔍 Recognise text';
+    ocrBusy = false; btn.disabled = false; btn.innerHTML = '<span class="ic" aria-hidden="true">🔍</span><span class="lbl">Recognise text</span>';
   }
 }
 
 async function checkIfScanned() {
+  const doc = st.doc;
   let empty = 0;
   const n = Math.min(st.doc.numPages, 3);
   for (let i = 1; i <= n; i++) {
@@ -1306,24 +1437,49 @@ async function checkIfScanned() {
     const has = known ? known.length > 0 : (await (await st.doc.getPage(i)).getTextContent()).items.some((it) => it.str && it.str.trim());
     if (!has) empty++;
   }
-  $('#scanbanner').hidden = empty === 0;
+  if (doc !== st.doc) return;
+  setBanner(empty === 0 ? null : SCANNED_BANNER);
 }
+const SCANNED_BANNER = '📷 This looks like a scanned document — the words are a picture, so you can\'t search or edit them yet. <button class="primary" data-cmd="ocr">Recognise text</button>';
+function setBanner(html) { st.banner = html; renderBanner(); }
+function renderBanner() { const b = $('#scanbanner'); b.hidden = !st.banner; if (st.banner) b.innerHTML = st.banner; }
 
 // ---------------- dialogs ----------------
+/** A small window inside the page. Buttons with data-dlg close it with that value ("cancel": null). Esc cancels. */
 function dialog(html, onOpen) {
   return new Promise((resolve) => {
+    const back = document.activeElement;
     $('#dlgbox').innerHTML = html;
     $('#dlg').hidden = false;
-    const done = (v) => { $('#dlg').hidden = true; resolve(v); };
-    $('#dlgbox').onclick = (e) => { const b = e.target.closest('[data-dlg]'); if (b) done(b.dataset.dlg === 'cancel' ? null : b.dataset.dlg); };
+    const done = (v) => { $('#dlg').hidden = true; $('#dlg').onkeydown = null; resolve(v); if (back && back.focus && document.contains(back)) back.focus(); };
+    $('#dlgbox').onclick = (e) => { const b = e.target.closest('[data-dlg]'); if (b) { e.preventDefault(); done(b.dataset.dlg === 'cancel' ? null : b.dataset.dlg); } };
+    $('#dlg').onkeydown = (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); done(null); }
+      if (e.key === 'Tab') { // keep the keyboard inside the dialog
+        const f = $$('button, input, select, textarea, [tabindex]', $('#dlgbox')).filter((x) => !x.disabled && x.offsetParent);
+        if (!f.length) return;
+        if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f[f.length - 1].focus(); }
+        else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
+      }
+    };
     if (onOpen) onOpen(done);
+    if (!$('#dlgbox').contains(document.activeElement)) ($('#dlgbox input, #dlgbox select, #dlgbox .primary, #dlgbox button')).focus();
   });
 }
-const today = () => new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+// The date on stamps, in the business's format (Settings › Dates on stamps), or Windows' own.
+const prefs = { dateFormat: 'system', locale: undefined, stamps: [], stampDate: true };
+const stampDate = () => Hy.formatStampDate(new Date(), prefs.dateFormat, prefs.locale);
+async function loadPrefs() {
+  const first = !prefs.platform;
+  try { const s = await bridge.call('pdfset:get'); Object.assign(prefs, { dateFormat: s.dateFormatUsed, locale: s.locale || undefined, stamps: s.stamps || [], stampDate: s.stampDate !== false, platform: s.platform }); } catch { /* defaults */ }
+  renderStampMenu();
+  if (first && tabs.view === 'home') home.renderHome();
+}
 async function needSaved(what) {
   if (!st.file) { toast(`Save the PDF first, then ${what}.`); return false; }
   if (st.dirty) {
-    if (!(await bridge.call('confirm', 'Save your changes first?', `To ${what}, the PDF needs to be saved.`))) return false;
+    const r = await dialog(`<h2>Save your changes first?</h2><p class="muted">To ${esc(what)}, the PDF needs to be saved.</p><div class="dlgbtns"><button data-dlg="cancel">Cancel</button><button class="primary" data-dlg="ok">Save</button></div>`);
+    if (r !== 'ok') return false;
     await save(false);
     if (st.dirty) return false;
   }
@@ -1337,31 +1493,128 @@ function placeBox(ann, wPt, hPt) {
   return a;
 }
 
+// ---------------- stamps ----------------
+const MORE_STAMPS = [{ text: 'CHECKED', color: '#1d4ed8' }, { text: 'REJECTED', color: '#b91c1c' }, { text: 'VOID', color: '#6b7280' }];
+function renderStampMenu() {
+  const item = (s, i, custom) => `<button role="menuitem" data-stamp="${custom ? `c${i}` : `p${i}`}"><span class="swatch" style="border-color:${esc(s.color)};color:${esc(s.color)}">${esc(s.text.slice(0, 1))}</span>${esc(s.text)}</button>`;
+  $('#stampmenu').innerHTML = `<div class="mh">Stamps</div>${[...Hy.STAMP_PRESETS, ...MORE_STAMPS].map((s, i) => item(s, i, false)).join('')}
+    ${prefs.stamps.length ? `<div class="mh">Your stamps</div>${prefs.stamps.map((s, i) => item(s, i, true)).join('')}` : ''}
+    <div class="msep"></div>
+    <button role="menuitemcheckbox" aria-checked="${prefs.stampDate}" data-cmd="stampdatetoggle"><span class="ic" aria-hidden="true">${prefs.stampDate ? '☑' : '☐'}</span>Add today's date (${esc(stampDate())})</button>
+    <button role="menuitem" data-cmd="newstamp"><span class="ic" aria-hidden="true">＋</span>New stamp…</button>`;
+}
+function placeStamp(s) {
+  if (!st.doc) return toast('Open a PDF first.');
+  const withDate = s.date !== false && prefs.stampDate;
+  const text = String(s.text).toUpperCase();
+  placeBox({ type: 'stamp', text, color: s.color, sub: withDate ? stampDate() : '' }, Math.max(120, text.length * 13), withDate ? 54 : 44);
+  toast('Drag the stamp into place. Use the blue corner to resize.');
+  return null;
+}
+async function newStamp() {
+  const r = await dialog(`<h2>New stamp</h2><p class="muted">It's added to the Stamp menu on this PC.</p>
+    <div class="dlgrow"><label for="nstxt">Words</label><input id="nstxt" maxlength="40" placeholder="e.g. ENTERED IN ACCOUNTS" style="flex:1"></div>
+    <div class="dlgrow"><label for="nscol">Colour</label><input type="color" id="nscol" value="#1d4ed8"><span id="nsprev" class="stampprev">STAMP</span></div>
+    <div class="dlgrow"><label></label><label class="ffcheck"><input type="checkbox" id="nsdate" checked> Show the date (${esc(stampDate())})</label></div>
+    <div class="dlgbtns"><button data-dlg="cancel">Cancel</button><button data-dlg="place">Add and place it</button><button class="primary" data-dlg="ok">Add</button></div>`, () => {
+    const prev = () => { const p = $('#nsprev'); p.textContent = ($('#nstxt').value.trim() || 'STAMP').toUpperCase(); p.style.color = $('#nscol').value; p.style.borderColor = $('#nscol').value; };
+    $('#nstxt').addEventListener('input', prev); $('#nscol').addEventListener('input', prev); prev();
+    $('#nstxt').focus();
+  });
+  if (!r) return;
+  const s = { text: $('#nstxt').value.trim().toUpperCase(), color: $('#nscol').value, date: $('#nsdate').checked };
+  if (!s.text) { toast('Type the words for the stamp.'); return; }
+  const saved = await bridge.call('pdfset:set', { stamps: [...prefs.stamps, s] });
+  prefs.stamps = saved.stamps; renderStampMenu();
+  if (r === 'place') placeStamp(s); else toast(`“${s.text}” is in the Stamp menu now.`);
+}
+$('#stampmenu').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-stamp]'); if (!b) return;
+  const k = b.dataset.stamp; const all = [...Hy.STAMP_PRESETS, ...MORE_STAMPS];
+  closeMenus();
+  placeStamp(k[0] === 'c' ? prefs.stamps[+k.slice(1)] : all[+k.slice(1)]);
+});
+
+// ---------------- menus (Shapes, Sign, Stamp, Tools) ----------------
+function closeMenus(except = null) {
+  $$('.menu').forEach((m) => { if (m !== except && !m.hidden) { m.hidden = true; const b = m.parentElement.querySelector('[aria-haspopup]'); if (b) b.setAttribute('aria-expanded', 'false'); } });
+}
+// opened with the keyboard (Enter, Space, or Down on its button): the first entry gets the focus
+let keyboardUsed = false;
+window.addEventListener('keydown', () => { keyboardUsed = true; }, true);
+window.addEventListener('pointerdown', () => { keyboardUsed = false; }, true);
+function toggleMenu(id, { focusFirst = keyboardUsed } = {}) {
+  const m = document.getElementById(id); if (!m) return;
+  const open = m.hidden;
+  closeMenus(m);
+  m.hidden = !open;
+  const b = m.parentElement.querySelector('[aria-haspopup]'); if (b) b.setAttribute('aria-expanded', String(open));
+  if (open) {
+    // keep it on screen: open to the left if it would go past the right edge
+    m.classList.remove('left'); const r = m.getBoundingClientRect(); if (r.right > innerWidth - 8) m.classList.add('left');
+    if (focusFirst) { const f = m.querySelector('button:not([hidden])'); if (f) f.focus(); }
+  }
+}
+document.addEventListener('keydown', (e) => {
+  const opener = e.target.closest && e.target.closest('[aria-haspopup]');
+  if (opener && e.key === 'ArrowDown') { e.preventDefault(); const m2 = opener.parentElement.querySelector('.menu'); if (m2 && m2.hidden) toggleMenu(m2.id, { focusFirst: true }); else m2?.querySelector('button:not([hidden])')?.focus(); return; }
+  const m = e.target.closest && e.target.closest('.menu');
+  if (!m) return;
+  const items = $$('button:not([hidden])', m);
+  const i = items.indexOf(document.activeElement);
+  if (e.key === 'ArrowDown') { e.preventDefault(); items[(i + 1) % items.length].focus(); }
+  if (e.key === 'ArrowUp') { e.preventDefault(); items[(i - 1 + items.length) % items.length].focus(); }
+  if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); const b = m.parentElement.querySelector('[aria-haspopup]'); closeMenus(); if (b) b.focus(); }
+}, true);
+
+// ---------------- the "Ask someone to sign…" hook ----------------
+// HOOK (sign-request): "Ask someone to sign…" (online) is built separately (feat/pdf-sign-request). When its module
+// src/renderer/sign-request.js is installed next to this file, the Sign menu shows the entry and calls it:
+//   export async function askToSign(ctx)  with ctx = { file, dirty, save(), buildPdf(), toast(msg), dialog(html), bridge }
+//   export function isAvailable()         optional: return false to keep the entry hidden (e.g. not signed in)
+// Without the module the entry stays hidden and nothing else changes.
+let signRequest = null;
+async function loadSignRequest() {
+  try {
+    if (!(await bridge.call('pdf:hasModule', 'sign-request.js'))) return;
+    const mod = await import('./sign-request.js');
+    if (typeof mod.askToSign !== 'function') return;
+    if (typeof mod.isAvailable === 'function' && !(await mod.isAvailable())) return;
+    signRequest = mod;
+    $('#signrequestsep').hidden = false; $('[data-cmd="signrequest"]').hidden = false;
+  } catch (e) { console.warn('sign-request', e.message); }
+}
+async function askSomeoneToSign() {
+  if (!signRequest) return;
+  if (!st.doc) { toast('Open a PDF first.'); return; }
+  await signRequest.askToSign({ file: st.file, dirty: st.dirty, save: () => save(false), buildPdf: () => buildPdf(), toast, dialog, bridge });
+}
+
+// ---------------- tools ----------------
+const kb = (n) => (n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`);
+/** Pages as pictures at a lower quality (Compress). quality: 'balanced' | 'small' | 'high' */
+const COMPRESS = { balanced: [150, 0.72], small: [110, 0.6], high: [200, 0.82] };
+async function compressBytes(bytes, quality = 'balanced') {
+  const [dpi, q] = COMPRESS[quality] || COMPRESS.balanced;
+  const d = await pdfjsLib.getDocument({ data: bytes.slice(), isEvalSupported: false, cMapUrl: './vendor/cmaps/', cMapPacked: true, standardFontDataUrl: './vendor/standard_fonts/' }).promise;
+  const n = d.numPages; d.destroy();
+  const saved = st; const tmp = newState(); st = tmp; // flattenPages reads the password from the current state
+  try { return await flattenPages(bytes, Array.from({ length: n }, (_, i) => i), { dpi, quality: q }); } finally { st = saved; }
+}
 const tools = {
   help: () => bridge.call('pdf:help'),
   basicview: async () => { if (!st.file) throw new Error('Open a PDF first.'); await bridge.call('pdf:basicView', st.file); },
-  async stamp() {
-    if (!st.doc) return;
-    const presets = [['Approved', '#15803d'], ['Paid', '#15803d'], ['Received', '#1d4ed8'], ['Checked', '#1d4ed8'], ['Draft', '#b91c1c'], ['Rejected', '#b91c1c'], ['Confidential', '#b91c1c'], ['Copy', '#6b7280'], ['Void', '#6b7280']];
-    const pick = await dialog(`<div class="row"><h2 style="margin:0">Add a stamp</h2><span class="spacer"></span><button data-dlg="cancel">✕</button></div>
-      <div class="stampgrid">${presets.map(([t, c]) => `<button data-dlg="${t}|${c}" style="color:${c};border-color:${c}">${t.toUpperCase()}</button>`).join('')}</div>
-      <div class="dlgrow"><label>Custom</label><input id="stxt" placeholder="e.g. Entered in accounts" style="flex:1"><button data-dlg="custom">Add</button></div>
-      <label class="small"><input type="checkbox" id="sdate" checked> Show today's date (${today()})</label>`, () => {});
-    if (!pick) return;
-    const withDate = $('#sdate')?.checked !== false;
-    let [text, color] = pick === 'custom' ? [$('#stxt').value.trim(), $('#color').value] : pick.split('|');
-    if (!text) return;
-    placeBox({ type: 'stamp', text, color, sub: withDate ? today() : '' }, Math.max(120, text.length * 13), withDate ? 54 : 44);
-    toast('Drag the stamp into place. Use the blue corner to resize.');
-  },
+  stamp: () => toggleMenu('stampmenu'),
+  newstamp: newStamp,
+  async stampdatetoggle() { prefs.stampDate = !prefs.stampDate; await bridge.call('pdfset:set', { stampDate: prefs.stampDate }); renderStampMenu(); toggleMenu('stampmenu'); },
   async watermark() {
     if (!st.doc) return;
     const existing = Object.values(st.anns).flat().find((a) => a.type === 'watermark');
-    const r = await dialog(`<h2 style="margin-top:0">Watermark</h2>
-      <div class="dlgrow"><label>Text</label><input id="wtxt" value="${esc(existing?.text || 'CONFIDENTIAL')}" style="flex:1"></div>
-      <div class="dlgrow"><label>Colour</label><input type="color" id="wcol" value="${existing?.color || '#9ca3af'}"><label style="min-width:auto">Strength</label><input type="range" id="wop" min="0.08" max="0.6" step="0.02" value="${existing?.opacity || 0.22}"></div>
-      <div class="dlgrow"><label>Pages</label><select id="wpages"><option value="all">All pages</option><option value="this">This page only</option></select></div>
-      <div class="row" style="margin-top:14px">${existing ? '<button data-dlg="remove">Remove watermark</button>' : ''}<span class="spacer"></span><button data-dlg="cancel">Cancel</button><button class="primary" data-dlg="ok">Apply</button></div>`);
+    const r = await dialog(`<h2>Watermark</h2>
+      <div class="dlgrow"><label for="wtxt">Text</label><input id="wtxt" value="${esc(existing?.text || 'CONFIDENTIAL')}" style="flex:1"></div>
+      <div class="dlgrow"><label for="wcol">Colour</label><input type="color" id="wcol" value="${existing?.color || '#9ca3af'}"><label for="wop" style="min-width:auto">Strength</label><input type="range" id="wop" min="0.08" max="0.6" step="0.02" value="${existing?.opacity || 0.22}"></div>
+      <div class="dlgrow"><label for="wpages">Pages</label><select id="wpages"><option value="all">All pages</option><option value="this">This page only</option></select></div>
+      <div class="dlgbtns">${existing ? '<button data-dlg="remove" class="leftbtn">Remove watermark</button>' : ''}<button data-dlg="cancel">Cancel</button><button class="primary" data-dlg="ok">Apply</button></div>`);
     if (!r) return;
     pushUndo();
     for (const k of Object.keys(st.anns)) st.anns[k] = st.anns[k].filter((a) => a.type !== 'watermark');
@@ -1374,10 +1627,10 @@ const tools = {
   },
   async pagenumbers() {
     if (!st.doc) return;
-    const r = await dialog(`<h2 style="margin-top:0">Page numbers</h2>
-      <div class="dlgrow"><label>Style</label><select id="pfmt"><option value="Page {n} of {total}">Page 1 of 5</option><option value="{n}">1</option><option value="{n} / {total}">1 / 5</option><option value="- {n} -">- 1 -</option></select></div>
-      <div class="dlgrow"><label>Position</label><select id="ppos"><option value="bottom">Bottom centre</option><option value="top">Top centre</option></select></div>
-      <div class="row" style="margin-top:14px">${st.pageNumbers ? '<button data-dlg="remove">Remove page numbers</button>' : ''}<span class="spacer"></span><button data-dlg="cancel">Cancel</button><button class="primary" data-dlg="ok">Apply</button></div>`);
+    const r = await dialog(`<h2>Page numbers</h2>
+      <div class="dlgrow"><label for="pfmt">Style</label><select id="pfmt"><option value="Page {n} of {total}">Page 1 of 5</option><option value="{n}">1</option><option value="{n} / {total}">1 / 5</option><option value="- {n} -">- 1 -</option></select></div>
+      <div class="dlgrow"><label for="ppos">Position</label><select id="ppos"><option value="bottom">Bottom centre</option><option value="top">Top centre</option></select></div>
+      <div class="dlgbtns">${st.pageNumbers ? '<button data-dlg="remove" class="leftbtn">Remove page numbers</button>' : ''}<button data-dlg="cancel">Cancel</button><button class="primary" data-dlg="ok">Apply</button></div>`);
     if (!r) return;
     st.pageNumbers = r === 'ok' ? { format: $('#pfmt').value, position: $('#ppos').value } : null;
     setDirty();
@@ -1399,64 +1652,223 @@ const tools = {
     scrollToPage(at);
     toast('Blank page added.');
   },
+  /** Split: every page, every few pages, or the page ranges you type. */
   async split() {
     if (!st.doc) return;
-    const base = st.file ? st.file.split(/[\\/]/).pop().replace(/\.pdf$/i, '') : 'document';
-    toast('Preparing pages…');
+    const n = st.order.length;
+    const r = await dialog(`<h2>Split into separate files</h2><p class="muted">This PDF has ${n} page${n === 1 ? '' : 's'}. The original stays as it is.</p>
+      <div class="radios" role="radiogroup" aria-label="How to split">
+        <label><input type="radio" name="sp" value="each" checked> Every page as its own PDF</label>
+        <label><input type="radio" name="sp" value="every"> Every <input id="spn" type="number" min="1" max="${n}" value="2" class="num"> pages</label>
+        <label><input type="radio" name="sp" value="ranges"> These pages: <input id="spr" placeholder="e.g. 1-3, 4-6, 7-" class="grow"></label>
+      </div>
+      <div class="dlgbtns"><button data-dlg="cancel">Cancel</button><button class="primary" data-dlg="ok">Split…</button></div>`, () => {
+      $('#spn').addEventListener('focus', () => { $('input[name=sp][value=every]').checked = true; });
+      $('#spr').addEventListener('focus', () => { $('input[name=sp][value=ranges]').checked = true; });
+    });
+    if (r !== 'ok') return;
+    const how = $('input[name=sp]:checked').value;
+    const ranges = how === 'each' ? Hy.everyN(1, n) : how === 'every' ? Hy.everyN(Math.max(1, +$('#spn').value || 1), n) : Hy.parseRanges($('#spr').value, n);
+    const base = st.file ? fileName(st.file).replace(/\.pdf$/i, '') : 'document';
+    toast('Preparing the files…');
     const items = [];
-    for (let i = 0; i < st.order.length; i++) items.push({ name: `${base} - page ${i + 1}.pdf`, bytes: await buildPdf([st.order[i]]) });
+    for (const [a, b] of ranges) items.push({ name: `${base} - ${a === b ? `page ${a}` : `pages ${a}-${b}`}.pdf`, bytes: await buildPdf(st.order.slice(a - 1, b)) });
     const folder = st.file ? st.file.replace(/[\\/][^\\/]+$/, '') : undefined;
-    const r = await bridge.call('pdf:saveMany', folder, items);
-    if (r) { toast(`Saved ${r.saved.length} separate PDF(s).`); bridge.call('file:showPath', r.saved[0]); }
+    const res = await bridge.call('pdf:saveMany', folder, items);
+    if (res) { toast(`Saved ${res.saved.length} separate PDF${res.saved.length === 1 ? '' : 's'}.`); bridge.call('file:showPath', res.saved[0]); }
   },
   async compress() {
     if (!st.doc) return;
-    const r = await dialog(`<h2 style="margin-top:0">Compress PDF</h2>
-      <p class="small muted">Pages are turned into pictures at a lower quality. Great for emailing scans and photos. The text won't be selectable afterwards (you can run <b>Recognise text</b> again).</p>
-      <div class="dlgrow"><label>Quality</label><select id="cq"><option value="150|0.72">Balanced (recommended)</option><option value="110|0.6">Smallest (for email)</option><option value="200|0.82">High quality</option></select></div>
-      <div class="row" style="margin-top:14px"><span class="spacer"></span><button data-dlg="cancel">Cancel</button><button class="primary" data-dlg="ok">Compress PDF</button></div>`);
+    const r = await dialog(`<h2>Compress PDF</h2>
+      <p class="small muted">Pages are turned into pictures at a lower quality. Great for emailing scans and photos. The text won't be selectable afterwards (you can run <b>Recognise text</b> again). A smaller copy is saved; the original stays as it is.</p>
+      <div class="dlgrow"><label for="cq">Quality</label><select id="cq"><option value="balanced">Balanced (recommended)</option><option value="small">Smallest (for email)</option><option value="high">High quality</option></select></div>
+      <div class="dlgbtns"><button data-dlg="cancel">Cancel</button><button class="primary" data-dlg="ok">Compress PDF</button></div>`);
     if (r !== 'ok') return;
-    const [dpi, q] = $('#cq').value.split('|').map(Number);
+    const q = $('#cq').value;
+    const [dpi, quality] = COMPRESS[q];
     toast('Compressing the PDF…');
     const full = await buildPdf();
-    const small = await flattenPages(full, st.order.map((_, i) => i), { dpi, quality: q });
-    const kb = (b) => (b.length > 1e6 ? `${(b.length / 1e6).toFixed(1)} MB` : `${Math.round(b.length / 1e3)} KB`);
-    if (small.length >= full.length * 0.95) { toast(`Couldn't make this one smaller (${kb(full)}) — it's already well compressed.`); return; }
+    const small = await flattenPages(full, st.order.map((_, i) => i), { dpi, quality });
+    if (small.length >= full.length * 0.95) { toast(`Couldn't make this one smaller (${kb(full.length)}) — it's already well compressed.`); return; }
     const name = st.file ? st.file.replace(/\.pdf$/i, ' (smaller).pdf') : 'document (smaller).pdf';
     const target = await bridge.call('pdf:save', name, small, true);
-    if (target) toast(`Saved a smaller copy: ${kb(full)} → ${kb(small)}.`);
+    if (target) toast(`Saved a smaller copy: ${kb(full.length)} → ${kb(small.length)}.`);
   },
   async exportimages() {
     if (!(await needSaved('save pages as pictures'))) return;
+    const r = await dialog(`<h2>Save pages as pictures</h2><p class="muted">A picture of each page goes into a new folder next to the PDF.</p>
+      <div class="dlgrow"><label for="eif">Type</label><select id="eif"><option value="png">PNG (sharp text)</option><option value="jpg">JPG (smaller, for photos)</option></select></div>
+      <div class="dlgrow"><label for="eid">Resolution</label><select id="eid"><option value="96">Screen (96 dpi)</option><option value="150" selected>Standard (150 dpi)</option><option value="300">Print (300 dpi)</option></select></div>
+      <div class="dlgbtns"><button data-dlg="cancel">Cancel</button><button class="primary" data-dlg="ok">Save pictures</button></div>`);
+    if (r !== 'ok') return;
     toast('Saving pages as pictures…');
-    const r = await bridge.call('convert:pdfToImages', st.file, { dpi: 150, format: 'png' });
-    toast(`Saved ${r.count} picture(s).`); bridge.call('file:openPath', r.folder);
+    const res = await bridge.call('convert:pdfToImages', st.file, { dpi: +$('#eid').value, format: $('#eif').value });
+    toast(`Saved ${res.count} picture${res.count === 1 ? '' : 's'}.`); bridge.call('file:openPath', res.folder);
   },
   async toword() {
     if (!(await needSaved('convert it to Word'))) return;
     toast('Converting to Word… (scanned pages are read with text recognition, which takes a little longer)');
     const r = await bridge.call('convert:pdfToWord', st.file);
-    toast(`Created ${r.output.split(/[\\/]/).pop()}${r.usedOffice ? ' using Microsoft Word' : ''}. Opening it…`);
+    toast(`Created ${fileName(r.output)}${r.usedOffice ? ' using Microsoft Word' : ' (basic: the layout may change)'}. Opening it…`);
     bridge.call('file:openPath', r.output);
   },
   async createpdf() {
     const files = await bridge.call('files:pick', 'convert');
     if (!files || !files.length) return;
     let combine = false;
-    if (files.length > 1) combine = await bridge.call('confirm', `Combine the ${files.length} files into ONE PDF?`, 'Choose Cancel to make a separate PDF for each file.');
+    if (files.length > 1) combine = (await dialog(`<h2>${files.length} files</h2><p class="muted">Make one PDF with all of them, or a separate PDF for each?</p><div class="dlgbtns"><button data-dlg="cancel">Cancel</button><button data-dlg="sep">Separate PDFs</button><button class="primary" data-dlg="one">One PDF</button></div>`)) === 'one';
     toast('Converting…');
     const r = await bridge.call('convert:toPdf', files, { combine });
-    toast(`Created ${r.outputs.length} PDF(s)${r.usedOffice ? ' using Microsoft Office' : ''}.`);
-    if (st.dirty && !(await bridge.call('confirm', 'Open the new PDF?', 'Your unsaved changes to this PDF would be lost.'))) return;
-    openFile(r.outputs[0]);
+    toast(`Created ${r.outputs.length} PDF${r.outputs.length === 1 ? '' : 's'}${r.usedOffice ? ' using Microsoft Office' : ''}.`);
+    await openFiles(r.outputs.slice(0, 5));
+  },
+  convertpage: () => home.openPage('convert', { files: st.file ? [st.file] : [] }),
+  compare: () => home.openPage('compare', { files: st.file ? [st.file] : [] }),
+  async senddocs() {
+    if (!st.doc) return;
+    if (!(await needSaved('send it to Riyeser Documents'))) return;
+    await home.sendToDocuments([st.file]);
   },
 };
 
+// ---------------- tabs: several PDFs open at once ----------------
+// tabs.list: [{ id, st }]; tabs.view: 'home' (start screen) | 'doc' (a PDF) | 'task' (Convert, Batch, Compare...)
+const tabs = { list: [], active: null, view: 'home', seq: 1 };
+function setView(v) {
+  tabs.view = v;
+  document.body.dataset.view = v;
+  if (v !== 'doc') closeMenus();
+  renderTabs(); updateTitle();
+}
+function renderTabs() {
+  const bar = $('#tabstrip'); if (!bar) return;
+  bar.innerHTML = tabs.list.map((t) => {
+    const name = t.st.file ? fileName(t.st.file) : 'New PDF';
+    const on = tabs.view === 'doc' && t === tabs.active;
+    return `<div class="tab${on ? ' active' : ''}${t.st.dirty ? ' dirty' : ''}" data-tabid="${t.id}" title="${esc(t.st.file || name)}">
+      <button class="tabname" role="tab" aria-selected="${on}" data-tabgo="${t.id}"><span class="tabtext">${esc(name)}</span></button>
+      ${t.st.dirty ? '<span class="dot" role="img" aria-label="unsaved changes" title="Unsaved changes">●</span>' : ''}
+      <button class="tabx" data-tabclose="${t.id}" aria-label="Close ${esc(name)}" title="Close (Ctrl+W)">✕</button></div>`;
+  }).join('');
+  $('#hometab').classList.toggle('active', tabs.view === 'home');
+  $('#hometab').setAttribute('aria-selected', String(tabs.view === 'home'));
+}
+function activate(tab) {
+  if (tabs.active && tabs.active !== tab) tabs.active.st.scrollTop = $('#viewer').scrollTop;
+  for (const t of liveRenders) { try { t.cancel(); } catch { /* finished */ } }
+  tabs.active = tab; st = tab.st;
+  closeMenus(); setView('doc');
+  $('#zoomlabel').textContent = `${Math.round(st.zoom * 100)}%`;
+  $('#findres').innerHTML = ''; $('#findq').value = '';
+  renderForm(); renderBanner(); showSidePanel(st.panel || 'pages');
+  $$('[data-tool]').forEach((b) => b.classList.toggle('active', b.dataset.tool === st.tool));
+  document.body.className = `tool-${st.tool}`;
+  if (st.doc) buildPages().then(() => { $('#viewer').scrollTop = st.scrollTop || 0; });
+  else { $('#pages').innerHTML = ''; $('#thumbs').innerHTML = ''; updatePageInfo(); }
+}
+function showHome() {
+  if (tabs.active && tabs.view === 'doc') tabs.active.st.scrollTop = $('#viewer').scrollTop;
+  setView('home'); home.renderHome();
+}
+/** Open a PDF in a tab (the tab it's already in, if it's open). Returns the tab, or null if it couldn't open. */
+async function openTab(file) {
+  const have = tabs.list.find((t) => t.st.file === file || t.opening === file);
+  if (have) { activate(have); return have; }
+  const tab = { id: `t${tabs.seq++}`, st: newState(), opening: file };
+  tabs.list.push(tab);
+  activate(tab);
+  await openFile(file);
+  tab.opening = null;
+  if (!tab.st.doc) { dropTab(tab); return null; }
+  return tab;
+}
+async function openFiles(files) {
+  let last = null;
+  for (const f of files) { const t = await openTab(f); if (t) last = t; }
+  return last;
+}
+function dropTab(tab) {
+  const i = tabs.list.indexOf(tab);
+  if (i < 0) return;
+  tabs.list.splice(i, 1);
+  try { tab.st.doc && tab.st.doc.destroy(); } catch { /* gone */ }
+  if (tabs.active === tab) {
+    tabs.active = null; st = newState();
+    const next = tabs.list[i] || tabs.list[i - 1];
+    if (next) activate(next); else showHome();
+  } else renderTabs();
+}
+/** Close a tab; asks only if it has unsaved changes. */
+async function closeTab(tab) {
+  if (!tab) return;
+  if (tab.st.dirty) {
+    if (tabs.active !== tab) activate(tab);
+    const r = await dialog(`<h2>Save the changes to ${esc(fileName(tab.st.file) || 'this PDF')}?</h2><p class="muted">If you don't, the changes are lost.</p>
+      <div class="dlgbtns"><button data-dlg="cancel">Cancel</button><button data-dlg="discard">Don't save</button><button class="primary" data-dlg="save">Save</button></div>`);
+    if (!r) return;
+    if (r === 'save') { await save(false); if (st.dirty) return; }
+  }
+  dropTab(tab);
+}
+$('#tabbar').addEventListener('click', (e) => {
+  const go = e.target.closest('[data-tabgo]'); const x = e.target.closest('[data-tabclose]');
+  if (x) { closeTab(tabs.list.find((t) => t.id === x.dataset.tabclose)); return; }
+  if (go) activate(tabs.list.find((t) => t.id === go.dataset.tabgo));
+});
+$('#tabbar').addEventListener('auxclick', (e) => { const t = e.target.closest('[data-tabid]'); if (t && e.button === 1) closeTab(tabs.list.find((x) => x.id === t.dataset.tabid)); });
+
+// ---------------- jobs (start screen tiles, the right-click menu) ----------------
+/** Run a job. job: 'edit'|'form'|'combine'|'split'|'compress'|'convert'|'protect'|'scan'|'batch'|'compare' (tiles) or a
+ *  right-click task ('open'|'sign'|'toimages'|'topdf'). files: already chosen (dropped, or from File Explorer), else it asks. */
+async function runJob(job, files = null) {
+  const pick = async (kind = 'pdf', multi = false, title) => files && files.length ? files : (await bridge.call('pdf:pickFiles', kind, multi, title)) || [];
+  const pdfs = (list) => list.filter((f) => /\.pdf$/i.test(f));
+  const openOne = async (title) => { const f = pdfs(await pick('pdf', false, title))[0]; return f ? openTab(f) : null; };
+  switch (job) {
+    case 'open': { const list = pdfs(await pick('pdf', true)); if (list.length) await openFiles(list); return; }
+    case 'edit': { const t = await openOne('Choose the PDF to edit or sign'); if (t) { setTool('select'); $('#signbtn').focus(); toast('Add text, ticks and your signature with the tools at the top. Save when you\'re done.'); } return; }
+    case 'sign': { const t = await openOne('Choose the PDF to sign'); if (t) { setTimeout(() => placeMine('signature'), 400); } return; }
+    case 'form': { const t = await openOne('Choose the form to fill in'); if (t) { showSidePanel('forms'); setTimeout(() => { if (!st.form.length) toast('This PDF has no fillable boxes. Use Add text and Tick to fill it in.'); }, 1500); } return; }
+    case 'split': { const t = await openOne('Choose the PDF to split'); if (t) await tools.split(); return; }
+    case 'protect': { const t = await openOne('Choose the PDF to protect'); if (t) await commands.protect(); return; }
+    case 'compress': {
+      const list = pdfs(await pick('pdf', true, 'Choose the PDF(s) to compress'));
+      if (list.length > 1) { home.openPage('batch', { files: list, actions: ['compress'] }); return; }
+      if (list.length && await openTab(list[0])) await tools.compress();
+      return;
+    }
+    case 'combine': home.openPage('combine', { files: files || [] }); return;
+    case 'convert': home.openPage('convert', { files: files || [] }); return;
+    case 'toimages': home.openPage('convert', { files: files || [], mode: 'images' }); return;
+    case 'topdf': home.openPage('convert', { files: files || [], mode: 'pictures' }); return;
+    case 'scan': home.openPage('scan', { files: files || [] }); return;
+    case 'batch': home.openPage('batch', { files: files || [] }); return;
+    case 'compare': home.openPage('compare', { files: files || [] }); return;
+    default: toast('That isn\'t something Riyeser PDF can do yet.');
+  }
+}
+/** A task handed over by Windows (right-click menu, "Open with") or the Print to PDF inbox. */
+async function runTask(task) {
+  if (!task || !task.files || !task.files.length) return;
+  if (task.from === 'inbox') toast(`Opened ${fileName(task.files[0])} from your Riyeser PDF inbox.`);
+  if (task.task === 'compress' && task.files.length === 1) { if (await openTab(task.files[0])) await tools.compress(); return; }
+  if (task.task === 'toimages') { await home.pdfsToImages(task.files.filter((f) => /\.pdf$/i.test(f))); return; }
+  // several files selected in File Explorer: Windows hands them over in no fixed order, so they're put in name order
+  if (task.files.length > 1) task.files.sort((a, b) => fileName(a).localeCompare(fileName(b), undefined, { numeric: true }));
+  await runJob(task.task, task.files);
+}
+
 // ---------------- commands ----------------
 const commands = {
-  toolsmenu: () => { $('#toolsmenu').hidden = !$('#toolsmenu').hidden; },
-  ...Object.fromEntries(Object.entries(tools).map(([k, fn]) => [k, async () => { $('#toolsmenu').hidden = true; try { await fn(); } catch (e) { toast(e.message); } }])),
-  open: async () => { if (st.dirty && !(await bridge.call('confirm', 'Discard unsaved changes?'))) return; const f = await bridge.call('pdf:openDialog', false); if (f) openFile(f); },
+  shapesmenu: () => toggleMenu('shapesmenu'),
+  signmenu: () => toggleMenu('signmenu'),
+  stampmenu: () => toggleMenu('stampmenu'),
+  toolsmenu: () => toggleMenu('toolsmenu'),
+  ...Object.fromEntries(Object.entries(tools).filter(([k]) => !['stamp'].includes(k)).map(([k, fn]) => [k, async () => { closeMenus(); try { await fn(); } catch (e) { toast(e.message); } }])),
+  stamp: () => toggleMenu('stampmenu'),
+  open: () => runJob('open'),
+  home: showHome,
+  settings: () => home.openPage('settings'),
   save: () => save(false),
   saveas: () => save(true),
   undo, redo,
@@ -1473,18 +1885,24 @@ const commands = {
   date: () => {
     if (!st.doc) return;
     const s = textStyle();
-    const text = new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
+    const text = stampDate();
     const { src, vx, vy } = centerOfCurrentPage(text.length * s.size * 0.5, s.size * 1.2);
     pushUndo();
     const a = addAnn(src, { id: newId(), type: 'text', text, ...s, ...boxFromView(src, vx, vy, 0, 0) });
     setTool('select'); select(a.id);
     toast('Drag the date into place.');
   },
-  signature: openSignature,
-  sigclose: () => { $('#sigmodal').hidden = true; },
+  signature: () => { closeMenus(); return openSignature('signature'); },
+  initialsnew: () => { closeMenus(); return openSignature('initials'); },
+  mysignature: () => { closeMenus(); return placeMine('signature'); },
+  myinitials: () => { closeMenus(); return placeMine('initials'); },
+  signrequest: () => { closeMenus(); return askSomeoneToSign(); },
+  sigclose: closeSigModal,
   sigclear: resetPad,
   sigplace: placeSignature,
   sigupload: async () => { const d = await bridge.call('image:openDialog'); if (d) { sigUpload = await knockOutWhite(d); $('#sigimg').src = sigUpload; } },
+  filldetails: fillMyDetails,
+  fillundo: undoFill,
   ocr: recognisePages,
   // OWNER-BACKUP: the program's own backups (Riyeser PDF: signatures and recent files; in Desk Assistant, Desk Assistant's)
   backupnow: async () => { const f = await bridge.call('backup:now'); toast(`Backed up: ${String(f).split(/[\\/]/).pop()}`); },
@@ -1494,11 +1912,11 @@ const commands = {
   // S41: "Protect with a password" (payslips, invoices): the file needs the password to open once it's saved
   async protect() {
     if (!st.doc) return;
-    const r = await dialog(`<h2 style="margin-top:0">🔒 Protect with a password</h2>
+    const r = await dialog(`<h2>🔒 Protect with a password</h2>
       <p class="muted">Anyone opening the saved PDF will need this password. Keep it safe: it can't be recovered.</p>
-      <div class="dlgrow"><label>Password</label><input id="pw1" type="password" style="flex:1" autocomplete="new-password"></div>
-      <div class="dlgrow"><label>Again</label><input id="pw2" type="password" style="flex:1" autocomplete="new-password"></div>
-      <div class="row" style="margin-top:14px"><span class="spacer"></span><button data-dlg="cancel">Cancel</button><button class="primary" data-dlg="ok">Protect when I save</button></div>`, () => $('#pw1').focus());
+      <div class="dlgrow"><label for="pw1">Password</label><input id="pw1" type="password" style="flex:1" autocomplete="new-password"></div>
+      <div class="dlgrow"><label for="pw2">Again</label><input id="pw2" type="password" style="flex:1" autocomplete="new-password"></div>
+      <div class="dlgbtns"><button data-dlg="cancel">Cancel</button><button class="primary" data-dlg="ok">Protect when I save</button></div>`, () => $('#pw1').focus());
     if (r !== 'ok') return;
     const a = $('#pw1').value; const b = $('#pw2').value;
     if (!a) throw new Error('Type a password.');
@@ -1510,42 +1928,77 @@ const commands = {
     const name = await bridge.call('pdf:makeDefault');
     toast(`Windows Settings is opening: choose “${name}” for .pdf and you're done.`);
   },
-  image: async () => { if (!st.doc) return toast('Open a PDF first.'); const d = await bridge.call('image:openDialog'); if (d) placeImage(d, 220); },
+  image: async () => { if (!st.doc) return toast('Open a PDF first.'); const d = await bridge.call('image:openDialog'); if (d) placeImage(d, 220); return null; },
 };
 document.addEventListener('click', (e) => {
   const b = e.target.closest('[data-cmd]');
-  if (b) { e.preventDefault(); Promise.resolve(commands[b.dataset.cmd]()).catch((err) => toast(err.message)); }
+  if (b && commands[b.dataset.cmd]) { e.preventDefault(); Promise.resolve(commands[b.dataset.cmd]()).catch((err) => toast(err.message)); }
 });
 
-document.addEventListener('pointerdown', (e) => { if (!e.target.closest('.menuwrap')) $('#toolsmenu').hidden = true; });
+document.addEventListener('pointerdown', (e) => { if (!e.target.closest('.menuwrap')) closeMenus(); });
 document.addEventListener('keydown', (e) => {
   const typing = e.target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName);
   const mod = e.ctrlKey || e.metaKey;
-  if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); save(e.shiftKey); return; }
+  if (!$('#dlg').hidden || !$('#sigmodal').hidden) { if (e.key === 'Escape' && !$('#sigmodal').hidden) closeSigModal(); return; }
   if (mod && e.key.toLowerCase() === 'o') { e.preventDefault(); commands.open(); return; }
+  if (mod && e.key === 'Tab') { e.preventDefault(); const i = tabs.list.indexOf(tabs.active); const n = tabs.list[(i + (e.shiftKey ? -1 : 1) + tabs.list.length) % tabs.list.length]; if (n) activate(n); return; }
+  if (tabs.view !== 'doc') return;
+  if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); save(e.shiftKey); return; }
+  if (mod && e.key.toLowerCase() === 'w') { e.preventDefault(); closeTab(tabs.active); return; }
   if (typing) { if (e.key === 'Escape') e.target.blur(); return; }
   if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
   if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
   if (mod && (e.key === '=' || e.key === '+')) { e.preventDefault(); setZoom(st.zoom * 1.2); return; }
   if (mod && e.key === '-') { e.preventDefault(); setZoom(st.zoom / 1.2); return; }
+  if (e.target.closest && e.target.closest('button, a, .menu')) return; // keys on a button belong to the button
   if (e.key === 'Delete' || e.key === 'Backspace') { deleteSelected(); return; }
   if (e.key === 'Escape') { setTool('select'); select(null); return; }
   const keys = { v: 'select', t: 'text', e: 'edittext', h: 'highlight', p: 'draw' };
   if (!mod && keys[e.key.toLowerCase()]) setTool(keys[e.key.toLowerCase()]);
 });
 
-// Ask before closing with unsaved work.
+// Ask before closing with unsaved work (in any tab).
 let closing = false;
 window.addEventListener('beforeunload', (e) => {
-  if (!st.dirty || closing) return;
+  const dirty = tabs.list.filter((t) => t.st.dirty);
+  if (!dirty.length || closing) return;
   e.returnValue = false;
-  bridge.call('confirm', 'Close without saving?', 'Your changes to this PDF will be lost.').then((ok) => { if (ok) { closing = true; window.close(); } });
+  const names = dirty.map((t) => fileName(t.st.file) || 'a new PDF');
+  bridge.call('confirm', 'Close without saving?', `Your changes to ${names.slice(0, 3).join(', ')}${names.length > 3 ? ` and ${names.length - 3} more` : ''} will be lost.`).then((ok) => { if (ok) { closing = true; window.close(); } });
+});
+
+// ---------------- drag and drop: anywhere in the window ----------------
+const droppedPaths = (e) => [...(e.dataTransfer?.files || [])].map((f) => bridge.pathForFile(f)).filter(Boolean);
+window.addEventListener('dragover', (e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); document.body.classList.add('dropping'); } });
+window.addEventListener('dragleave', (e) => { if (!e.relatedTarget) document.body.classList.remove('dropping'); });
+window.addEventListener('drop', async (e) => {
+  document.body.classList.remove('dropping');
+  if (e.defaultPrevented) return; // a tile or a task page took it
+  const files = droppedPaths(e); if (!files.length) return;
+  e.preventDefault();
+  const pdfs = files.filter((f) => /\.pdf$/i.test(f)); const pics = files.filter((f) => /\.(jpe?g|png|webp|bmp|gif|heic|heif)$/i.test(f));
+  if (pdfs.length) await openFiles(pdfs);
+  else if (pics.length) home.openPage('convert', { files: pics, mode: 'pictures' });
+  else toast('Drop PDFs or pictures here.');
 });
 
 // ---------------- start ----------------
-window.__editor = { st, buildPdf, openFile, setTool, commands }; // used by automated tests
-bridge.call('theme:get').then((t) => { $('#theme').value = t || 'system'; }).catch(() => {});
-$('#theme').addEventListener('change', (e) => bridge.call('theme:set', e.target.value));
+const editorApi = {
+  bridge, toast, dialog, esc, Hy, pdfjsLib, runJob, openFiles, openTab, setView, showHome, fileName, compressBytes, kb,
+  get st() { return st; }, get tabs() { return tabs; }, get platform() { return prefs.platform; },
+  reloadPrefs: loadPrefs,
+  ocrFile: async (f) => { if (await openTab(f)) await recognisePages(); },
+};
+const home = initHome(editorApi);
+window.__editor = { get st() { return st; }, buildPdf, openFile, openTab, openFiles, setTool, commands, runJob, runTask, tabs, home, closeTab, fillMyDetails }; // used by automated tests
 bridge.call('app:platform').then((p) => { if (p === 'win32') $$('.windows-only').forEach((el) => { el.hidden = false; }); });
-const file = new URLSearchParams(location.search).get('file');
-if (file) openFile(file);
+bridge.on('pdf:task', (task) => runTask(task));
+loadPrefs();
+loadSignRequest();
+showHome();
+(async () => {
+  const file = new URLSearchParams(location.search).get('file');
+  if (file) await openTab(file);
+  const waiting = await bridge.call('pdf:pendingTask').catch(() => []);
+  for (const t of waiting || []) await runTask(t);
+})();
