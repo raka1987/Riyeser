@@ -2041,7 +2041,7 @@
   function tabIcon(team) {
     Theme.scope(team ? 'link' : 'acct');
     const l = document.getElementById('favicon'); if (!l) return;
-    l.type = team ? 'image/svg+xml' : 'image/png'; l.href = team ? 'icon.svg' : '/assets/logo-r.png';
+    l.type = 'image/svg+xml'; l.href = team ? 'icon.svg' : '/assets/favicon.svg';
   }
   // ================================================================== the Riyeser Link workspace (phase 1)
   // Concept A: a slim top bar (business, search, Calls, People, your status, you) · one list (channels and people together)

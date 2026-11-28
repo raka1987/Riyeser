@@ -373,7 +373,12 @@ const SEO_TITLE = {
 const metaDesc = (t) => { t = String(t).replace(/\s+/g, ' ').trim(); if (t.length <= 158) return t;
   const s = t.slice(0, 158); const dot = s.lastIndexOf('. '); return dot > 90 ? s.slice(0, dot + 1) : s.slice(0, s.lastIndexOf(' ')).replace(/[,:;]$/, '') + '…'; };
 // Structured data (JSON-LD). Offers come from PRICE; no ratings or reviews (we have none to show).
-const ORG = { '@type': 'Organization', '@id': 'https://riyeser.com/#org', name: 'Riyeser', url: 'https://riyeser.com/', logo: 'https://riyeser.com/assets/logo.png', email: 'info@riyeser.com' };
+// The site icon ("R." with the swoosh, from the wordmark): an SVG that turns white in dark browsers, PNG/ICO copies on a
+// white rounded square (so they show on dark tabs too), sizes in multiples of 48 for Google, and a square one for iPhones.
+const iconLinks = (up) => `<link rel="icon" href="${up}assets/favicon.ico" sizes="16x16 32x32 48x48"><link rel="icon" href="${up}assets/favicon.svg" type="image/svg+xml">` +
+  [48, 96, 144, 192].map((n) => `<link rel="icon" href="${up}assets/favicon-${n}.png" type="image/png" sizes="${n}x${n}">`).join('') +
+  `<link rel="apple-touch-icon" href="${up}assets/apple-touch-icon.png">`;
+const ORG = { '@type': 'Organization', '@id': 'https://riyeser.com/#org', name: 'Riyeser', url: 'https://riyeser.com/', logo: 'https://riyeser.com/assets/icon-512.png', email: 'info@riyeser.com' };
 const crumbs = (list) => ({ '@type': 'BreadcrumbList', itemListElement: list.map(([name, path], i) => ({ '@type': 'ListItem', position: i + 1, name, item: `https://riyeser.com/${path}` })) });
 const appLd = (p) => { const m = MOD[p.id]; const f = FACTS[p.id] || {};
   const offer = p.comesWith ? null : { '@type': 'Offer', price: m ? String(PRICE[m]) : '0', priceCurrency: 'USD', url: `https://riyeser.com/${m ? 'pricing.html' : `programs/${p.id}.html`}`,
@@ -972,7 +977,7 @@ function page({ path, title, description, active, body, noindex = false, jsonld 
 <meta property="og:image" content="${SITE}/${ogImage}"><meta property="og:url" content="${url}">
 <meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${esc(title)}"><meta name="twitter:description" content="${esc(metaDesc(description))}"><meta name="twitter:image" content="${SITE}/${ogImage}">
 <link rel="canonical" href="${url}">
-<link rel="icon" href="${up}assets/favicon.png" type="image/png"><link rel="apple-touch-icon" href="${up}assets/logo-r.png">${path === 'index.html' && VERIFY.google ? `\n<meta name="google-site-verification" content="${esc(VERIFY.google)}">` : ''}${path === 'index.html' && VERIFY.bing ? `\n<meta name="msvalidate.01" content="${esc(VERIFY.bing)}">` : ''}${ld.length && !noindex ? `\n<script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', '@graph': ld }).replace(/</g, '\\u003c')}</script>` : ''}
+${iconLinks(up)}${path === 'index.html' && VERIFY.google ? `\n<meta name="google-site-verification" content="${esc(VERIFY.google)}">` : ''}${path === 'index.html' && VERIFY.bing ? `\n<meta name="msvalidate.01" content="${esc(VERIFY.bing)}">` : ''}${ld.length && !noindex ? `\n<script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', '@graph': ld }).replace(/</g, '\\u003c')}</script>` : ''}
 <link rel="stylesheet" href="${up}assets/site.css">
 ${path === 'index.html' && SERVICES_MOVED && ASBUILT ? `<script>/* As Built now lives at ${SERVICES_APP}/ - forward its old links: demo and sign-in links,
    project and QR links (#/p/...), sign-in emails (#access_token, ?code=) and the installed app (start screen icon). */
@@ -1776,7 +1781,7 @@ const bookShell = (title) => withCsp(`<!doctype html>
 <meta name="description" content="Book online with a Riyeser business: choose a service and an available appointment time.">
 <meta property="og:title" content="Book online">
 <meta property="og:description" content="Choose a service and an available appointment time. No account needed.">
-<link rel="icon" href="${BASE}assets/favicon.png" type="image/png">
+${iconLinks(BASE)}
 <link rel="stylesheet" href="${BASE}book/book.css?v=${stamp8(bookCss)}">
 </head>
 <body data-base="${BASE}">
@@ -1809,7 +1814,7 @@ writeFileSync(join(OUT, 'sign', 'index.html'), withCsp(`<!doctype html>
 <meta name="robots" content="noindex, nofollow">
 <title>Sign a document · Riyeser</title>
 <meta name="description" content="Read and sign a document someone sent you with Riyeser PDF: an electronic signature with an audit trail.">
-<link rel="icon" href="${BASE}assets/favicon.png" type="image/png">
+${iconLinks(BASE)}
 <link rel="stylesheet" href="${BASE}sign/sign.css?v=${stamp8(signCss)}">
 </head>
 <body>
@@ -1839,6 +1844,8 @@ redirectKeep('help/desk-assistant.html', '../help/documents.html', 'Riyeser Docu
 // ---------- extras ----------
 cpSync(join(ROOT, 'assets'), join(OUT, 'assets'), { recursive: true });
 const SUBFOLDER = BASE !== '/';
+// Browsers and Google also ask for /favicon.ico at the top of the site.
+if (!SUBFOLDER) cpSync(join(ROOT, 'assets', 'favicon.ico'), join(OUT, 'favicon.ico'));
 if (!SUBFOLDER) writeFileSync(join(OUT, 'CNAME'), 'riyeser.com\n');
 // Riyeser HQ (staff only), the old /team/ copy of Riyeser Link and the signing page (/sign/) stay out of search engines. The Link app (/link/), the
 // download hand-off pages and the booking page shell carry a noindex tag instead, so crawlers can still read it.

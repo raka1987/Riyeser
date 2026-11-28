@@ -18,4 +18,16 @@ for (const f of ['website/build.mjs']) check(!/logo-r\.png" alt="">/.test(read(f
 check(/Powered by <a href="\$\{BASE\}">Riyeser<\/a>/.test(read('website/build.mjs')) && /logo-wordmark\.svg" alt="Riyeser"/.test(read('website/build.mjs')), 'the signing page: the wordmark, and "Powered by Riyeser"');
 check(fs.existsSync(path.join(root, 'website/assets/logo-wordmark.png')), 'the email logo (assets/logo-wordmark.png) is there');
 check(/logo-wordmark\.png" width="115" height="36" alt="Riyeser"/.test(read('website/team/team-chat.sql')), 'emails (email_html) show the wordmark, "Riyeser" if pictures are off');
+// The site icon (favicon): "R." with the swoosh from the wordmark, in every head (website, booking, signing, Link, HQ).
+{
+  const svg = read('website/assets/favicon.svg'); const [, R, Rin] = word.match(/^(M[^M]*)(M[^M]*)/) || [];
+  check(svg.includes(sw) && svg.includes(R + Rin) && svg.includes(word.slice(word.lastIndexOf('M'))), 'favicon.svg: the R, full stop and swoosh are the wordmark\'s own paths');
+  check(/prefers-color-scheme:\s*dark/.test(svg), 'favicon.svg turns light in a dark browser');
+  for (const f of ['favicon.ico', 'favicon-48.png', 'favicon-96.png', 'favicon-144.png', 'favicon-192.png', 'apple-touch-icon.png', 'icon-512.png']) check(fs.existsSync(path.join(root, 'website/assets', f)), `assets/${f} is there`);
+  const b = read('website/build.mjs');
+  check((b.match(/\$\{iconLinks\((up|BASE)\)\}/g) || []).length === 3 && /favicon\.svg/.test(b) && !/rel="(icon|apple-touch-icon)" href="[^"]*(favicon\.png|logo-r\.png)/.test(b), 'website, booking and signing pages use the new site icon');
+  check(/assets\/icon-512\.png/.test(b.match(/const ORG = .*/)[0]), 'Google\'s logo (Organization) is the square icon on white');
+  for (const f of ['website/team/index.html', 'website/hq/index.html']) check(/rel="icon"[^>]*favicon\.svg/.test(read(f)) && !/rel="icon"[^>]*logo-r\.png/.test(read(f)), `${f}: the new site icon`);
+  check(!/logo-r\.png/.test(read('website/team/team.js')) && /'icon\.svg' : '\/assets\/favicon\.svg'/.test(read('website/team/team.js')), 'Riyeser Link: the site icon on account screens, Link\'s own icon in chat');
+}
 process.exit(failed ? 1 : 0);
