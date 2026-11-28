@@ -165,6 +165,8 @@ input[type=checkbox]{width:auto}
 .bars .lab{font-size:11px;color:var(--muted)}
 .legend{display:flex;gap:14px;font-size:12px;color:var(--muted)}.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px}
 .login{max-width:400px;margin:10vh auto;background:#fff;border:1px solid var(--line);border-radius:18px;padding:34px;box-shadow:0 20px 50px rgba(15,23,42,.10)}
+/* the Riyeser wordmark (static/logo-wordmark.svg) above the program's own icon and name on sign-in pages */
+.login-wm{display:block;height:32px;width:auto;margin:0 0 18px}
 .cat{columns:3 260px;gap:18px}.cat .card{break-inside:avoid}
 .cat a{display:block;padding:4px 0}
 @media (max-width:900px){.side{position:fixed;left:0;top:0;z-index:40;transform:translateX(-100%);transition:transform .2s,visibility .2s;visibility:hidden}body.side-open .side{transform:none;visibility:visible;box-shadow:0 0 40px rgba(15,23,42,.2)}body.side-open .scrim{display:block;position:fixed;inset:0;background:rgba(15,23,42,.35);z-index:35}.menu-btn{display:block}.tsearch{display:none}.top{padding:10px 14px}.g3,.g4,.g2{grid-template-columns:1fr}.content{padding:16px}}

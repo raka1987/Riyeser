@@ -2,6 +2,7 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sign in · {{ product.app }}</title><link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}"></head>
 <body class="{{ product.cls }}"><div class="login">
+<img class="login-wm" src="{{ url_for('static', filename='logo-wordmark.svg') }}" width="103" height="32" alt="Riyeser">
 <div class="brand" style="color:var(--ink);padding:0 0 18px"><div class="logo" style="color:#fff">{{ product.letter }}</div><div>{{ product.app }}<small>{{ company.name if company }}</small></div></div>
 {{ flashes() }}
 {% if central_demo %}<div class="flash demo" role="status">Demo mode: sign in with <b>{{ demo_login[0] }}</b> / <b>{{ demo_login[1] }}</b></div>{% endif %}

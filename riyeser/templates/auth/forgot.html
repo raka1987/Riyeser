@@ -10,6 +10,7 @@
 <style>.login .way{border-top:1px solid var(--line);margin-top:20px;padding-top:16px}.login .way h2{font-size:16px;margin:0 0 4px}
 .login .way p{margin:0 0 12px}@media (max-width:440px){.login{margin:16px;padding:22px}}</style></head>
 <body class="{{ product.cls }}"><div class="login">
+<img class="login-wm" src="{{ url_for('static', filename='logo-wordmark.svg') }}" width="103" height="32" alt="Riyeser">
 <div class="brand" style="color:var(--ink);padding:0 0 10px"><div class="logo" style="color:#fff">{{ product.letter }}</div><div>Reset password<small>{{ company.name if company }}</small></div></div>
 {{ flashes() }}
 {% if not allowed %}
