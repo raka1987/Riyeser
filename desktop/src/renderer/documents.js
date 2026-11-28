@@ -492,7 +492,7 @@ const TABS = {
     const s = await call('settings:get');
     return `<div class="box"><b>Backups</b><p class="note" style="margin:0">Riyeser Documents backs up its settings on this PC every day. Your documents are ordinary files in the library folder: include that folder in your office backup.</p>
       <div class="row2"><button class="btn" type="button" data-bk="now">Back up now</button><button class="btn" type="button" data-bk="restore">Restore from a backup…</button><button class="btn ghost" type="button" data-bk="folder">Open the backups folder</button></div></div>
-      <div class="box"><b>About</b><p class="note" style="margin:0">Riyeser Documents ${esc(S.nav.version)} by Riyeser Group. Formerly Riyeser Desk Assistant. Free for 3 users.</p>
+      <div class="box"><b>About</b><p class="note" style="margin:0">Riyeser Documents ${esc(S.nav.version)} by Riyeser. Formerly Riyeser Desk Assistant. Free for 3 users.</p>
       <div class="row2"><button class="btn" type="button" data-act="help">${icon('help')}Help</button><button class="btn ghost" type="button" data-weblink="https://riyeser.com/help/">Help on riyeser.com</button></div></div>
       <div class="box info"><b>Coming next</b><p class="note" style="margin:0;color:var(--ink)">Riyeser cloud sync between offices, share links, links for customers to send you files, and access for your accountant.</p></div>${s.demo ? '' : ''}`;
   },

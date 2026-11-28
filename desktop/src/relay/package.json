@@ -10,5 +10,5 @@
     "test": "node --test --test-timeout=120000 --test-force-exit test/*.test.js"
   },
   "license": "UNLICENSED",
-  "copyright": "Copyright © 2026 Riyeser Group. All rights reserved."
+  "copyright": "Copyright © 2026 Riyeser. All rights reserved."
 }

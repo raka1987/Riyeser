@@ -8,7 +8,7 @@
 // Documents\Riyeser Documents, or a shared office folder chosen in Settings.
 const { app, BrowserWindow, ipcMain, Tray, Menu, Notification, shell, dialog, nativeImage, nativeTheme, clipboard } = require('electron');
 const { registerInstalledApp, runUninstall } = require('./uninstall');
-const APP_INFO = { id: 'DeskAssistant', name: 'Riyeser Documents', publisher: 'Riyeser Group', pdfProgId: 'DeskAssistant.PDF', description: 'Riyeser Group: scan, file and find the office\'s documents' };
+const APP_INFO = { id: 'DeskAssistant', name: 'Riyeser Documents', publisher: 'Riyeser', pdfProgId: 'DeskAssistant.PDF', description: 'Scan, file and find the office\'s documents' };
 const NAME = APP_INFO.name;
 const path = require('path');
 // Keep the data folder from the Desk Assistant days (settings, backups), so nothing is lost by the update.

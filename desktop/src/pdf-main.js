@@ -1,7 +1,7 @@
 // Riyeser PDF (formerly Desk PDF): the stand-alone PDF viewer/editor. Same editor as inside Riyeser Desk Assistant, without the rest of the app.
 const { app, ipcMain, nativeTheme } = require('electron');
 const { registerInstalledApp, runUninstall } = require('./uninstall');
-const APP_INFO = { id: 'DeskPDF', name: 'Riyeser PDF', publisher: 'Riyeser Group', pdfProgId: 'DeskPDF.PDF', description: 'View, edit, fill in and sign PDFs' };
+const APP_INFO = { id: 'DeskPDF', name: 'Riyeser PDF', publisher: 'Riyeser', pdfProgId: 'DeskPDF.PDF', description: 'View, edit, fill in and sign PDFs' };
 const path = require('path');
 const { Store } = require('./core/store');
 const { registerPdfIpc, createEditorWindow, pdfArg } = require('./pdf-ipc');

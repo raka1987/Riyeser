@@ -371,7 +371,7 @@ const SEO_TITLE = {
 const metaDesc = (t) => { t = String(t).replace(/\s+/g, ' ').trim(); if (t.length <= 158) return t;
   const s = t.slice(0, 158); const dot = s.lastIndexOf('. '); return dot > 90 ? s.slice(0, dot + 1) : s.slice(0, s.lastIndexOf(' ')).replace(/[,:;]$/, '') + '…'; };
 // Structured data (JSON-LD). Offers come from PRICE; no ratings or reviews (we have none to show).
-const ORG = { '@type': 'Organization', '@id': 'https://riyeser.com/#org', name: 'Riyeser Group', url: 'https://riyeser.com/', logo: 'https://riyeser.com/assets/logo.png', email: 'info@riyeser.com' };
+const ORG = { '@type': 'Organization', '@id': 'https://riyeser.com/#org', name: 'Riyeser', url: 'https://riyeser.com/', logo: 'https://riyeser.com/assets/logo.png', email: 'info@riyeser.com' };
 const crumbs = (list) => ({ '@type': 'BreadcrumbList', itemListElement: list.map(([name, path], i) => ({ '@type': 'ListItem', position: i + 1, name, item: `https://riyeser.com/${path}` })) });
 const appLd = (p) => { const m = MOD[p.id]; const f = FACTS[p.id] || {};
   const offer = p.comesWith ? null : { '@type': 'Offer', price: m ? String(PRICE[m]) : '0', priceCurrency: 'USD', url: `https://riyeser.com/${m ? 'pricing.html' : `programs/${p.id}.html`}`,
@@ -1011,7 +1011,7 @@ document.querySelectorAll('.links > .dd > a').forEach(function(a){a.addEventList
       <div><h2 class="fh">Riyeser</h2><a href="${up}pricing.html">Pricing</a><a href="${up}features.html">What works today</a><a href="${up}trust.html">Trust &amp; security</a><a href="/link/?signup">Create an account</a><a href="${up}developers/">Developers</a><a href="${up}terms.html">Terms of use</a></div>
     </div>
   </div>
-  <div class="fbase"><span>© ${new Date().getFullYear()} Riyeser Group</span><span class="fwin"><span>For Windows 10 &amp; 11</span><span>Most programs work offline</span><span>Free trials: no account or card</span></span></div></div></footer>
+  <div class="fbase"><span>© ${new Date().getFullYear()} Riyeser</span><span class="fwin"><span>For Windows 10 &amp; 11</span><span>Most programs work offline</span><span>Free trials: no account or card</span></span></div></div></footer>
 <script>/* links inside cards and menus (data-href) */
 document.addEventListener('click',function(e){var x=e.target.closest&&e.target.closest('[data-href]');if(!x)return;e.preventDefault();e.stopPropagation();location.href=x.getAttribute('data-href')},true);
 document.addEventListener('keydown',function(e){var x=e.target.closest&&e.target.closest('[data-href]');if(x&&(e.key==='Enter'||e.key===' ')){e.preventDefault();location.href=x.getAttribute('data-href')}});</script>
