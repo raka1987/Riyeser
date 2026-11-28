@@ -388,7 +388,8 @@ async function installUpdates(ids) {
     // the self-update's installer runs from this folder after Central has closed, so it stays then
     if (!(r && r.restarting)) { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* temp folder */ } }
   }
-  store.set('updateCheck', null);
+  // checked again next time; kept when something didn't update, so Try again doesn't need GitHub to answer first
+  if (r && !(r.failed || []).length) store.set('updateCheck', null);
   return r;
 }
 

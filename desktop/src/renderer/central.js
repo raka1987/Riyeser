@@ -619,6 +619,9 @@ async function runUpdates(ids) {
   } catch (e) {
     updFailed = { ids, failed: [{ name: 'Updates', message: e.message, fix: 'Click Try again. If it happens again, click Get help.' }] }; updError = e.message;
   } finally { updating = false; }
+  // drawn now, not only after the next check: a check that fails (offline, GitHub busy) must never leave the banner on
+  // its last "Downloading … 100%" (what Central 1.9.0 did)
+  renderUpdates(); renderHome(); if ($('#upddlg').open) renderUpdPanel();
   await checkForUpdates(true);
   return r;
 }
