@@ -844,7 +844,7 @@ location.replace(${JSON.stringify(SERVICES_APP)}+'/'+s+h)})()</script>` : ''}
     <a href="${up}downloads.html"${active === 'downloads' ? ' class="on"' : ''}>Downloads</a>
     <a class="mob-only" href="/link/">Sign in / Create account</a>
   </nav>
-  <div class="right"><a class="signin" href="/link/">Sign in<span class="sx"> / Create account</span></a><a class="btn p" href="${up}downloads.html">${WINDL}</a></div>
+  <div class="right"><a class="signin" href="/link/">Sign in<span class="sx"> / Create account</span></a><a class="btn p hdl" href="${up}downloads.html" aria-label="Download for Windows">${WINLOGO}<span class="dlt"> Download for Windows</span></a></div>
   <button class="menu" aria-label="Menu" aria-expanded="false">☰</button>
 </div></header>
 <script>/* the phone menu button (no inline onclick: the Content-Security-Policy allows only these listed scripts) */

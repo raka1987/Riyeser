@@ -1313,7 +1313,7 @@ section.conn { padding: 0; scroll-margin-top: 76px; }
 @media (max-width: 560px) { .tcards { grid-template-columns: 1fr; } }
 /* tablets (761-1000 px): the header ran 156 px past the screen at 768; the Download button moves out of the header there
    (it is on every page's top band and footer call-to-action) */
-@media (max-width: 1000px) and (min-width: 761px) { .nav .right .btn { display: none; } .nav .c { gap: 14px; } }
+@media (max-width: 1000px) and (min-width: 761px) { .nav .right .hdl .dlt { display: none; } .nav .right .hdl { padding: 0; width: 44px; height: 44px; justify-content: center; } .nav .c { gap: 12px; } .links > .dd > a, .links > a { padding: 0 7px; } }
 /* the phone menu button and breadcrumb links: at least 44 px to tap */
 .menu { min-width: 44px; min-height: 44px; }
 .crumbs a { display: inline-block; padding: 10px 0; }
