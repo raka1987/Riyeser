@@ -362,6 +362,10 @@ def stop_lan():
 
 def autostart(app):
     """At start-up (riyeser/desktop.py): open the network listener again if it was left on."""
+    import os
+    path = app.config.get("DATABASE")
+    if not path or not os.path.exists(path) or os.path.getsize(path) == 0:
+        return  # no company file yet: opening one here would leave an empty file and break first-time setup
     try:
         with app.app_context():
             from flask import g as _g

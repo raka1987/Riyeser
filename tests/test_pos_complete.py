@@ -876,3 +876,15 @@ def test_table_moves_and_splits_sent_twice_happen_once(shop):
         assert db.execute("SELECT COUNT(*) FROM pos_bills").fetchone()[0] == 1
         assert db.execute("SELECT COUNT(*) FROM pos_order_events WHERE kind='move_items'").fetchone()[0] == 1
         ok(db)
+
+
+def test_kitchen_screen_autostart_leaves_a_new_install_alone(tmp_path, monkeypatch):
+    """A first start with no company file yet: the kitchen screen's start-up check makes no (empty) file, so setup opens."""
+    monkeypatch.setenv("RIYESER_APP_EDITION", "pos")
+    from riyeser.views.kds import autostart
+    db = tmp_path / "company.db"
+    app = create_app({"DATABASE": str(db), "SECRET_KEY": "t", "TESTING": True})
+    autostart(app)
+    assert not db.exists()
+    r = app.test_client().get("/setup")
+    assert r.status_code == 200 and b"Riyeser POS" in r.data
