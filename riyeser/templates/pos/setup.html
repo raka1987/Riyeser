@@ -13,7 +13,10 @@
 .sw::after{content:"";position:absolute;left:3px;top:3px;width:24px;height:24px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:left .15s}
 .sw:checked{background:#0f7b63}.sw:checked::after{left:23px}.sw:focus{outline:3px solid #c7dbf3}
 .tip{display:flex;gap:10px;align-items:flex-start;background:var(--brand-l);color:#1e3a5f;border-radius:12px;padding:12px 14px;margin-bottom:18px}
+.pinset{display:grid;grid-template-columns:repeat(2,minmax(0,280px));gap:12px 18px}
+.newtill{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;background:#fff4e5;color:#7a3a05;border-radius:12px;padding:10px 12px;margin-bottom:12px}
 @media (max-width:900px){.ptypes,.feats{grid-template-columns:1fr}}
+@media (max-width:560px){.pinset{grid-template-columns:1fr}}
 </style>
 <div class="head"><div><h1>POS setup</h1><p class="sub">Tell Riyeser what kind of business you run. The till only shows the buttons and screens you need.</p></div>
   <div class="actions"><a class="btn" href="{{ url_for('pos.register') }}">Open the till</a></div></div>
@@ -41,9 +44,17 @@
   <tr><td><input name="new_till" maxlength="40" placeholder="+ Add another till, e.g. Till 2" aria-label="New till"></td><td><input name="new_till_loc" maxlength="60" placeholder="Where it is" aria-label="Where the new till is"></td>
     <td><select name="new_till_stock" aria-label="Stock location for the new till">{% for l in stock_locations %}<option value="{{ l.id }}">{{ l.name }}</option>{% endfor %}</select></td><td></td></tr></table></div>
 </div>
-<div class="card"><h2 style="margin-top:0">4 · Card payments, cash drawer and kitchen</h2>
-  <p class="sub" style="margin-top:-4px">Link each till to a card machine (EFTPOS): Manual, the Practice terminal, or a linked terminal (coming soon). Open the cash drawer from the receipt printer. Send orders to printed dockets, a kitchen screen, or both.</p>
-  <div style="display:flex;gap:10px;flex-wrap:wrap"><a class="btn" href="{{ url_for('pos.card_setup') }}">Card payments</a><a class="btn" href="{{ url_for('pos.drawer_setup') }}">Cash drawer</a>{% if mode == 'restaurant' %}<a class="btn" href="{{ url_for('pos.kitchen_setup') }}">Kitchen: stations &amp; screen</a>{% endif %}<a class="btn" href="{{ url_for('inventory.locations') }}">Stock locations</a></div></div>
+<div class="card"><h2 style="margin-top:0">4 · Who's selling: Till PINs</h2>
+  <p class="sub" style="margin-top:-4px">Each person taps their name and types their own PIN at the till, so every sale, refund and “No sale” shows who did it. Set PINs under <a href="{{ url_for('auth.users') }}">Users &amp; roles</a>. PINs are checked on this PC, so they work without the internet.</p>
+  <div class="pinset">
+    <div><label for="pinsOn">Ask who's selling</label><select name="pins" id="pinsOn"><option value="auto" {{ 'selected' if pins.pins != 'off' }}>Yes, once staff have a Till PIN</option><option value="off" {{ 'selected' if pins.pins == 'off' }}>No: the person signed in on this PC sells</option></select></div>
+    <div><label for="lockMin">Lock the till after no use for</label><select name="lock_minutes" id="lockMin">{% for m, n in lock_choices %}<option value="{{ m }}" {{ 'selected' if pins.lock_minutes == m }}>{{ n }}</option>{% endfor %}</select></div>
+  </div>
+  <p class="muted" style="margin:10px 0 0;font-size:13px">{% if pins_live %}{{ pin_people }} {{ 'person has' if pin_people == 1 else 'people have' }} a Till PIN, so the till asks who's selling.{% elif pins.pins == 'off' %}The till doesn't ask: the person signed in on this PC sells.{% else %}The till starts asking once a member of staff (not only managers) has a Till PIN.{% endif %} Five wrong PINs lock the PIN pad for a minute; every wrong PIN is in the audit trail.</p></div>
+<div class="card"><h2 style="margin-top:0">5 · Hardware, card payments and kitchen</h2>
+  <p class="sub" style="margin-top:-4px">Receipt and kitchen printers, the cash drawer and the barcode scanner are on the Hardware page, with a test for each. Link each till to a card machine (EFTPOS): Manual, the Practice terminal, or a linked terminal (coming soon).</p>
+  {% for t in tills if not t.hw_setup_at %}{% if loop.first %}<div class="newtill">{% endif %}<span>{{ t.name }}'s printer, drawer and scanner aren't set up yet.</span> <a class="btn sm pri" href="{{ url_for('pos.hardware_start', till=t.id) }}">Set up {{ t.name }}</a>{% if loop.last %}</div>{% endif %}{% endfor %}
+  <div style="display:flex;gap:10px;flex-wrap:wrap"><a class="btn" href="{{ url_for('pos.hardware') }}">Hardware</a><a class="btn" href="{{ url_for('pos.card_setup') }}">Card payments</a>{% if mode == 'restaurant' %}<a class="btn" href="{{ url_for('pos.kitchen_setup') }}">Kitchen: stations &amp; screen</a>{% endif %}<a class="btn" href="{{ url_for('inventory.locations') }}">Stock locations</a></div></div>
 {% if can_change %}<p class="actions" style="justify-content:flex-end"><a class="btn" href="{{ url_for('core.dashboard') }}">Cancel</a><button class="btn pri">Save POS setup</button></p>{% endif %}
 </fieldset>
 </form>

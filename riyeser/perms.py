@@ -40,6 +40,84 @@ PRESETS = {
                                     "accounts": HIDDEN, "setup": HIDDEN, "expenses": EDIT}),
     "readonly": ("Read-only (no payroll)", {**{a: VIEW for a in AREA_KEYS}, "payroll": HIDDEN}),
 }
+# Riyeser POS's own starting points (2.11.1). Levels only: the till's own rules do the rest. Sales "Add & edit" sells,
+# takes payments and opens/closes the person's own till; refunds, voids, "No sale" and discounts over the limit need a
+# manager's PIN (pos.void / pos.refund / no sale check for themselves). Sales "Full" is a manager at the till.
+_NONE = {a: HIDDEN for a in AREA_KEYS}
+PRESETS.update({
+    "cashier": ("Cashier", {**_NONE, "sales": EDIT}),
+    "supervisor": ("Supervisor / shift manager", {**_NONE, "sales": FULL, "kitchen": EDIT, "stock": VIEW, "bookings": EDIT}),
+    "stock_staff": ("Stock & products", {**_NONE, "stock": FULL, "purchases": EDIT}),
+    "manager": ("Manager", {**{a: FULL for a in AREA_KEYS}, "payroll": HIDDEN}),
+})
+HINTS = {
+    "cashier": "Sell, take payments and open or close their own till. Refunds, voids, No sale and big discounts need "
+               "a manager's PIN.",
+    "supervisor": "Everything a Cashier can do, plus approve refunds, voids, No sale and discounts, close any till, and "
+                  "see the day's sales.",
+    "stock_staff": "Products, variants, stock, transfers, stocktake and receiving deliveries. No till.",
+    "kitchen": "The kitchen screen only: order tickets to cook and bump. No prices or customers.",
+    "manager": "Everything in the POS, including reports and setup, but not managing users.",
+    "owner": "Full access to every area, but not managing users.",
+    "bookkeeper": "Full access to the books; can look at setup but not change it.",
+    "sales": "Invoices, quotes, customers and bookings. No banking, payroll or reports.",
+    "payroll": "Employees, pay runs and payslips. Can look at bookings and banking.",
+    "readonly": "Look and print only. Can't change anything.",
+    "admin": "Everything, including adding users and changing what they can do.",
+}
+# Which starting points each app offers (the others still apply to people who already have them).
+APP_PRESETS = {
+    "pos": ["cashier", "supervisor", "stock_staff", "kitchen", "manager", "readonly"],
+    "accounting": ["owner", "bookkeeper", "sales", "payroll", "readonly"],
+    "invoices": ["owner", "bookkeeper", "sales", "readonly"],
+    "bookings": ["owner", "bookkeeper", "sales", "readonly"],
+    "estimate": ["owner", "sales", "readonly"],
+    None: ["owner", "bookkeeper", "cashier", "supervisor", "sales", "stock_staff", "kitchen", "payroll", "readonly"],
+}
+PRESET_LABELS = {"readonly": {"pos": "Read-only"}, "sales": {"bookings": "Bookings & sales staff"}}
+DEFAULT_PRESET = {"pos": "cashier"}
+
+
+def app_key():
+    """'pos', 'accounting', 'invoices', 'bookings', 'estimate' or None (run from source: everything is there)."""
+    from .edition import app_product
+    p = app_product()
+    return "accounting" if p in ("basic", "enterprise") else p
+
+
+def presets_for_app(key=None):
+    """The starting points this app shows, in order: {key: (label, levels, hint)} (Administrator is added by the page)."""
+    key = app_key() if key is None else key
+    out = {}
+    for k in APP_PRESETS.get(key, APP_PRESETS[None]):
+        name, levels = PRESETS[k]
+        out[k] = (PRESET_LABELS.get(k, {}).get(key, name), levels, HINTS.get(k, ""))
+    return out
+
+
+def closest_preset(user, offered, most=2):
+    """(key, customised): the offered starting point this person's access matches, or is closest to (a few areas
+    changed: "Cashier (customised)"); (None, True) when it's nothing like any of them ("Custom")."""
+    exact = matching_preset(user, offered)
+    if exact:
+        return exact, False
+    have = levels_for(user)
+    best = min(((sum(have.get(a) != lv.get(a, HIDDEN) for a in AREA_KEYS), k) for k, (_, lv, _) in offered.items()),
+               default=(99, None))
+    return (best[1], True) if best[0] <= most else (None, True)
+
+
+def matching_preset(user, offered):
+    """Which offered starting point this person's access matches exactly, else None ("Custom")."""
+    if user["role"] == "admin":
+        return "admin"
+    have = levels_for(user)
+    for k, (_, levels, _) in offered.items():
+        if all(have.get(a) == levels.get(a, HIDDEN) for a in AREA_KEYS):
+            return k
+    return None
+
+
 PAYROLL_SOURCES = ("payrun", "payroll_import")
 
 
@@ -182,7 +260,9 @@ def area_of(endpoint, view_args, args, db):
         return "setup"
     if bp == "bookings":
         return "bookings"
-    if endpoint in ("pos.setup", "pos.set_mode", "pos.approvals"):
+    if endpoint in ("pos.setup", "pos.set_mode", "pos.approvals", "pos.hardware", "pos.hardware_save",
+                    "pos.hardware_start", "pos.hardware_test_print", "pos.hardware_test_docket",
+                    "pos.hardware_scanner_tested"):
         return "setup"  # how the till is set up is a setup decision, not a sales one
     if bp == "pos":
         return "sales"

@@ -1,6 +1,8 @@
 {% extends "base.html" %}{% block title %}Users{% endblock %}
 {% import "_list.html" as ls %}
 {% block content %}
+<style>.user-tags{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}.preset-hint{margin:6px 0 0;max-width:340px;line-height:1.4}
+.preset-field{min-width:240px}</style>
 <div class="head"><div><h1>Users &amp; roles</h1><p class="sub">Choose what each person can see and change. Administrators can do everything, including managing users.</p></div></div>
 
 <div class="card perm-key"><b>Access levels:</b>
@@ -14,7 +16,8 @@
   <input type="hidden" name="id" value="{{ u.id }}">
   <div class="user-head">
     <div class="av">{{ ((u.full_name or u.username) or '?')[:1]|upper }}</div>
-    <div><b>{{ u.username }}</b>{% if not u.active %} <span class="badge void">inactive</span>{% endif %}<div class="muted">{{ u.full_name or '' }}</div></div>
+    <div><b>{{ u.username }}</b>{% if not u.active %} <span class="badge void">inactive</span>{% endif %}<div class="muted">{{ u.full_name or '' }}</div>
+      <div class="user-tags"><span class="badge" title="Their access matches this starting point. You can still fine-tune it below.">{{ 'Administrator' if u.preset == 'admin' else (presets[u.preset][0] ~ (' (customised)' if u.customised else '')) if u.preset else 'Custom' }}</span>{% if till_pins %} <span class="badge {{ 'paid' if u.pos_pin_hash else '' }}" data-pin-state>{{ 'PIN set' if u.pos_pin_hash else 'No PIN' }}</span>{% endif %}</div></div>
     <div class="user-fields">
       <div><label>Full name</label><input name="full_name" value="{{ u.full_name or '' }}"></div>
       <div><label>Email (for password reset codes)</label><input name="email" type="email" value="{{ u.email or '' }}" autocomplete="off"></div>
@@ -23,11 +26,13 @@
         <option value="accountant" {{ 'selected' if u.role=='accountant' }}>Staff</option>
         <option value="viewer" {{ 'selected' if u.role=='viewer' }}>Read-only</option></select></div>
       <div><label>New password</label><input name="password" type="password" placeholder="Leave blank to keep"></div>
+      {% if till_pins %}<div class="pin-field"><label for="tp{{ u.id }}">Till PIN <span class="muted small">({{ 'PIN set' if u.pos_pin_hash else 'No PIN' }})</span></label><input id="tp{{ u.id }}" name="till_pin" type="password" inputmode="numeric" pattern="[0-9]{4,6}" minlength="4" maxlength="6" autocomplete="new-password" placeholder="{{ 'New PIN to reset it' if u.pos_pin_hash else '4 to 6 numbers' }}" title="4 to 6 numbers">
+        {% if u.pos_pin_hash %}<label class="check small" style="margin-top:6px"><input type="checkbox" name="till_pin_remove" value="1"> Remove PIN</label>{% endif %}</div>{% endif %}
       <label class="check" style="margin-top:22px"><input type="checkbox" name="active" value="1" {{ 'checked' if u.active }}> Active</label>
     </div>
   </div>
   <div class="perm-wrap" {% if u.role == 'admin' %}hidden{% endif %}>
-    <div class="presets"><span class="muted">Quick set:</span>{% for key, (name, _) in presets.items() %}<button type="button" class="btn sm" data-preset="{{ key }}">{{ name }}</button>{% endfor %}</div>
+    <div class="presets"><span class="muted">Quick set:</span>{% for key, (name, _, _) in presets.items() %}<button type="button" class="btn sm" data-preset="{{ key }}">{{ name }}</button>{% endfor %}</div>
     <table class="perm-grid"><tr><th>Area</th>{% for v, name in level_names %}<th class="c">{{ name }}</th>{% endfor %}</tr>
     {% for a, name, desc in areas %}<tr><td><b>{{ name }}</b><div class="muted small">{{ desc }}</div></td>
       {% for v, _ in level_names %}<td class="c"><input type="radio" name="perm_{{ a }}" value="{{ v }}" {{ 'checked' if L[a] == v }} {{ 'disabled' if u.role == 'viewer' and v > 1 }} aria-label="{{ name }}: {{ level_names[v][1] }}"></td>{% endfor %}</tr>{% endfor %}
@@ -39,22 +44,50 @@
 </form>
 {% endfor %}
 
-<form class="card" method="post" action="{{ url_for('auth.save_user') }}">
+<form class="card" method="post" action="{{ url_for('auth.save_user') }}" id="addUser">
   <h3>Add a user</h3>
   <div class="fields">
     <div><label>Username</label><input name="username" required autocomplete="off"></div><div><label>Full name</label><input name="full_name"></div>
     <div><label>Email (for password reset codes)</label><input name="email" type="email" autocomplete="off"></div>
     <div><label>Password</label><input name="password" type="password" required minlength="8" autocomplete="new-password"></div>
-    <div><label>Starting access</label><select name="preset">{% for key, (name, _) in presets.items() %}<option value="{{ key }}" {{ 'selected' if key == 'readonly' }}>{{ name }}</option>{% endfor %}<option value="admin">Administrator</option></select></div>
-    <div><label>&nbsp;</label><button class="btn pri">Add user</button></div>
+    <div class="preset-field"><label for="newPreset">Starting access</label><select name="preset" id="newPreset">{% for key, (name, _, _) in presets.items() %}<option value="{{ key }}" {{ 'selected' if key == default_preset }}>{{ name }}</option>{% endfor %}<option value="admin">Administrator</option></select>
+      <p class="muted small preset-hint" id="presetHint" aria-live="polite"></p></div>
+    {% if till_pins %}<div><label for="newPin">Till PIN <span class="muted small">(optional)</span></label><input id="newPin" name="till_pin" type="password" inputmode="numeric" pattern="[0-9]{4,6}" minlength="4" maxlength="6" autocomplete="new-password" placeholder="4 to 6 numbers" title="4 to 6 numbers">
+      <p class="muted small preset-hint">For signing in at the till and approving. Must be different from everyone else's.</p></div>{% endif %}
   </div>
+  <div class="perm-wrap" id="newPerms">
+    <div class="presets"><span>Access for this person: <b id="newRole">{{ presets[default_preset][0] if default_preset in presets else '' }}</b></span><a href="#" id="newReset" hidden>Reset to <span id="newResetName"></span> standard</a></div>
+    <p class="muted small" style="margin:0 0 8px">Starts from the role you chose. Change any area before adding them.</p>
+    <table class="perm-grid"><tr><th>Area</th>{% for v, name in level_names %}<th class="c">{{ name }}</th>{% endfor %}</tr>
+    {% for a, name, desc in areas %}<tr><td><b>{{ name }}</b><div class="muted small">{{ desc }}</div></td>
+      {% for v, _ in level_names %}<td class="c"><input type="radio" name="perm_{{ a }}" value="{{ v }}" aria-label="{{ name }}: {{ level_names[v][1] }}"></td>{% endfor %}</tr>{% endfor %}
+    </table>
+    <p class="muted small" style="margin:8px 0 0">The till's own rules stay as they are: refunds, voids and “No sale” need a manager's PIN unless the person has Full access to Sales. Only an administrator can change anyone's access.</p>
+  </div>
+  <div class="admin-note muted" id="newAdminNote" hidden>Administrators have full access to every area, including users.</div>
+  <div style="margin-top:12px"><button class="btn pri">Add user</button></div>
   {% if others %}<div class="also" style="margin-top:12px"><span class="muted">Also give them access in:</span>{% for c in others %}<label class="check"><input type="checkbox" name="also" value="{{ c.id }}"> {{ c.name }}</label>{% endfor %}</div>{% endif %}
-  <p class="muted small" style="margin:10px 0 0">You can fine-tune each area after adding them. With an email address saved (and email set up), a person who forgets their password can get a reset code by email.</p>
+  <p class="muted small" style="margin:10px 0 0">You can change their access again at any time. With an email address saved (and email set up), a person who forgets their password can get a reset code by email.</p>
 </form>
 {% endblock %}
 {% block scripts %}<script>
 (function () {
-  const PRESETS = {{ presets_json|safe }};
+  const PRESETS = {{ presets_json|safe }}, HINTS = {{ hints_json|safe }};
+  const ps = document.getElementById('newPreset'), ph = document.getElementById('presetHint');
+  const NAMES = {{ preset_names_json|safe }}, add = document.getElementById('addUser');
+  function hint() { ph.textContent = HINTS[ps.value] || ''; }
+  // "Add a user": the role's standard access shows straight away; change any area before adding (POS 2.11.1)
+  function grid() { return [...add.querySelectorAll('#newPerms input[type=radio]:checked')].reduce((o, r) => (o[r.name.slice(5)] = +r.value, o), {}); }
+  function custom() { const p = PRESETS[ps.value]; if (!p) return false; const g = grid(); return Object.keys(p).some(a => g[a] !== p[a]); }
+  function label() { const n = NAMES[ps.value] || ''; const c = custom();
+    document.getElementById('newRole').textContent = c ? n + ' (customised)' : n;
+    document.getElementById('newReset').hidden = !c; document.getElementById('newResetName').textContent = n; }
+  function standard() { const p = PRESETS[ps.value] || {}; Object.keys(p).forEach(a => { const r = add.querySelector('input[name="perm_' + a + '"][value="' + p[a] + '"]'); if (r) r.checked = true; }); label(); }
+  function role() { const admin = ps.value === 'admin'; document.getElementById('newPerms').hidden = admin;
+    document.getElementById('newAdminNote').hidden = !admin; add.querySelectorAll('#newPerms input').forEach(i => { i.disabled = admin; }); hint(); if (!admin) standard(); }
+  ps.addEventListener('change', role); add.querySelector('#newPerms').addEventListener('change', label);
+  document.getElementById('newReset').addEventListener('click', e => { e.preventDefault(); standard(); });
+  role();
   document.querySelectorAll('.user-card').forEach(function (card) {
     const role = card.querySelector('.role-sel');
     function sync() {

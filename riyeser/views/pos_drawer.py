@@ -24,7 +24,7 @@ def open_drawer(db, till_id, kind, ref=None, reason=None, approval_id=None, forc
     """Send the pulse to the till's printer and record it. Never raises: returns {opened, error}.
     Called after the sale (refund, no sale) is saved, so a printer problem never loses a sale."""
     t = till_row(db, till_id)
-    if not t or (t["drawer_mode"] != "printer" and not force):
+    if not t or (t["drawer_mode"] != "printer" and not force) or (not force and not drawer_opens_on(t, kind)):
         return dict(opened=False, error=None, mode="none")
     err = None
     try:
@@ -46,7 +46,7 @@ def drawer_opened_for(db, kind, ref):
 
 @bp.route("/drawer", methods=["GET", "POST"])
 def drawer_setup():
-    """Setup: how each till's drawer opens (none, or through a receipt printer on this PC), and a test button."""
+    """2.11.0's Cash drawer page: saving still works (older links and scripts); opening it goes to Hardware."""
     db = get_db()
     can_change = perms.can("setup", perms.FULL)
     if request.method == "POST":
@@ -60,22 +60,15 @@ def drawer_setup():
             if mode == "printer" and not printer:
                 flash(f"Choose the receipt printer for {t['name']}, or set its drawer to None.", "error")
                 return redirect(url_for("pos.drawer_setup"))
-            db.execute("UPDATE pos_tills SET drawer_mode=?, drawer_printer=?, raw_receipts=? WHERE id=?",
-                       (mode, printer, 1 if f.get(f"raw_{t['id']}") and mode == "printer" else 0, t["id"]))
+            raw = 1 if f.get(f"raw_{t['id']}") and mode == "printer" else 0
+            db.execute("UPDATE pos_tills SET drawer_mode=?, drawer_printer=?, raw_receipts=?, receipt_printer=? WHERE id=?",
+                       (mode, printer, raw, printer if raw else None, t["id"]))
             audit(db, "pos_drawer_setup", f"{t['name']}: {mode} {printer or ''}")
         db.commit()
         flash("Cash drawer settings saved.", "ok")
-        return redirect(url_for("pos.drawer_setup"))
-    be = D.backend()
-    try:
-        printers = be.printers() if be.available() else []
-    except Exception:
-        printers = []
-    events = db.execute("SELECT e.*, t.name till_name, COALESCE(u.full_name, u.username) who FROM pos_drawer_events e"
-                        " LEFT JOIN pos_tills t ON t.id=e.till_id LEFT JOIN users u ON u.id=e.user_id"
-                        " ORDER BY e.id DESC LIMIT 15").fetchall()
-    return render_template("pos/drawer.html", tills=_tills(db), modes=MODES, printers=printers,
-                           raw_ok=be.available(), can_change=can_change, events=events)
+        return redirect(url_for("pos.hardware") + "#drawer")
+    # 2.11.1: the cash drawer is on POS setup › Hardware now, with the printers and the scanner
+    return redirect(url_for("pos.hardware", till=opt_int(request.args.get("till"))) + "#drawer")
 
 
 @bp.route("/drawer/test", methods=["POST"])
@@ -115,6 +108,8 @@ def no_sale():
             raise PostingError("Choose a till.")
         if t["drawer_mode"] != "printer":
             raise PostingError("This till's drawer isn't set to open from Riyeser. Open it with the key.")
+        if not drawer_opens_on(t, "no_sale"):
+            raise PostingError("No sale is turned off for this till (POS setup › Hardware › Cash drawer).")
         reason = str(d.get("reason") or "").strip()[:120]
         if self_approves():
             if not reason:
@@ -135,6 +130,28 @@ def no_sale():
 
 
 # ------------------------------------------------------------ ESC/POS receipts (when the till's printer takes them)
+def receipt_printer_of(t):
+    """The till's receipt printer (Hardware page), or 2.11.0's "print receipts straight to the drawer's printer"."""
+    if not t:
+        return None
+    return t["receipt_printer"] or (t["drawer_printer"] if t["raw_receipts"] else None)
+
+
+def send_receipt(db, t, printer, data, kick=False, copies=1):
+    from .. import pos_print as PP
+    rs = PP.receipt_settings(db)
+    logo = PP.brand_logo(db)[0] if rs["logo"] else None
+    D.backend().send(printer, PP.receipt_job(data, PP.layout_of(t), logo=logo, copies=copies, kick=kick),
+                     job=f"Riyeser POS receipt {data['number']}")
+
+
+def drawer_opens_on(t, kind):
+    """The Hardware page's "open the drawer on": cash sales, cash refunds and No sale (all on unless turned off)."""
+    from .. import pos_print as PP
+    key = {"sale": "cash_sale", "part": "cash_sale", "refund": "cash_refund", "no_sale": "no_sale"}.get(kind)
+    return PP.drawer_on(t).get(key, True) if key else True
+
+
 def receipt_data(db, sid, part=None):
     s = _sale(db, sid)
     co = db.execute("SELECT * FROM company WHERE id=1").fetchone()
@@ -150,13 +167,16 @@ def receipt_data(db, sid, part=None):
         p = db.execute("SELECT * FROM pos_bill_parts WHERE id=?", (part,)).fetchone()
         n = db.execute("SELECT COUNT(*) FROM pos_bill_parts WHERE bill_id=?", (p["bill_id"],)).fetchone()[0]
         label, total = f"Split bill: {p['label'] or 'part ' + str(p['n'])} ({p['n']} of {n})", p["amount"]
-    head = [x for x in (co["address"], f"{tl['tax_id']} {co['abn']}" if co["abn"] else "", co["phone"]) if x]
-    return dict(company=co["name"] or "", header=head,
+    from .. import pos_print as PP
+    rs = PP.receipt_settings(db)
+    head = PP.header_lines(co, rs, tl)
+    return dict(company=(co["name"] or "") if rs["show_name"] else "", header=head,
                 number=s["number"], date=s["date"], label=label,
                 lines=[(l["qty"], l["description"], l["net_amount"] + l["tax_amount"]) for l in lines],
                 total=total, tax=0 if part or not tax_name else s["tax_total"], tax_name=tax_name,
                 tenders=[(METHOD_LABELS.get(t["method"], t["method"]), t["amount"]) for t in tenders],
-                change=sum(t["change_given"] for t in tenders), footer=["Thank you!"]), \
+                change=sum(t["change_given"] for t in tenders),
+                footer=PP.footer_lines(rs) + [f"Served by {s['full_name'] or s['username']}"]), \
         any(t["method"] == "cash" for t in tenders)
 
 
@@ -167,17 +187,19 @@ def receipt_raw(sid):
     db = get_db()
     d = request.get_json(silent=True) or {}
     t = till_row(db, opt_int(d.get("till_id")))
-    if not t or not t["raw_receipts"] or not t["drawer_printer"]:
-        return jsonify(ok=False, fallback=True, error="This till prints receipts through Windows."), 400
+    printer = receipt_printer_of(t)
+    if not printer:
+        return jsonify(ok=False, fallback=True, error="This till prints receipts through the Windows print box."), 400
     part = opt_int(d.get("part_id"))
     data, cash = receipt_data(db, sid, part)
     ref = f"part {part}" if part else sid
     kind = "part" if part else "sale"
-    kick = cash and t["drawer_mode"] == "printer" and not drawer_opened_for(db, kind, ref)
+    kick = cash and t["drawer_mode"] == "printer" and drawer_opens_on(t, "sale") \
+        and not drawer_opened_for(db, kind, ref)
     try:
-        D.backend().send(t["drawer_printer"], D.receipt_bytes(data, kick=kick), job=f"Riyeser POS receipt {data['number']}")
+        send_receipt(db, t, printer, data, kick=kick, copies=t["receipt_copies"] if d.get("auto") else 1)
     except D.DrawerError as e:
-        return jsonify(ok=False, fallback=True, error=str(e)), 502
+        return jsonify(ok=False, fallback=True, error=f"{e} Printing with the Windows print box instead."), 502
     if kick:
         db.execute("INSERT INTO pos_drawer_events (till_id, kind, ref, user_id, ok) VALUES (?,?,?,?,1)",
                    (t["id"], kind, str(ref), g.user["id"]))

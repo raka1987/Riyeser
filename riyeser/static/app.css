@@ -165,6 +165,10 @@ input[type=checkbox]{width:auto}
 .bars .lab{font-size:11px;color:var(--muted)}
 .legend{display:flex;gap:14px;font-size:12px;color:var(--muted)}.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px}
 .login{max-width:400px;margin:10vh auto;background:#fff;border:1px solid var(--line);border-radius:18px;padding:34px;box-shadow:0 20px 50px rgba(15,23,42,.10)}
+/* sign-in pages: the card is centred by the page itself (a grid), so it stays in the middle of any window width,
+   whatever the window or a zoom level does to the margins */
+body:has(> .login){min-height:100vh;display:grid;place-items:center;padding:16px;box-sizing:border-box}
+body:has(> .login) > .login{width:min(400px,100%);margin:0;box-sizing:border-box}
 /* the Riyeser wordmark (static/logo-wordmark.svg) above the program's own icon and name on sign-in pages */
 .login-wm{display:block;height:32px;width:auto;margin:0 0 18px}
 .cat{columns:3 260px;gap:18px}.cat .card{break-inside:avoid}
@@ -188,7 +192,8 @@ input[type=checkbox]{width:auto}
 .perm-key{display:flex;flex-wrap:wrap;gap:8px 20px;align-items:center;font-size:13px}.perm-key i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px}
 .lv0{background:#cbd5e1}.lv1{background:#93c5fd}.lv2{background:#14b8a6}.lv3{background:var(--brand)}
 .user-head{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}.user-head>div:nth-child(2){min-width:140px}
-.user-fields{display:grid;grid-template-columns:repeat(4,minmax(140px,1fr)) auto;gap:12px;flex:1;min-width:300px;align-items:end}
+.user-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;flex:1 1 300px;min-width:min(300px,100%);align-items:end}
+.user-fields>div{min-width:0}
 .user-fields>.check{margin:0!important;min-height:var(--ctl-h)}
 .perm-wrap{margin-top:16px}.presets{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px}
 .perm-grid{border:1px solid var(--line);border-radius:12px;overflow:hidden}.perm-grid th.c,.perm-grid td.c{text-align:center;width:110px}

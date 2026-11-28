@@ -67,7 +67,7 @@
 
 {# ------------------------------------------------ Photos #}
 <div class="card" id="photos"><h3>Photos</h3>
-{% if photos %}<div class="site-photos">{% for p in photos %}<figure><a href="{{ url_for('bookings.site_photo_file', pid=p.id) }}" target="_blank" rel="noopener"><img src="{{ url_for('bookings.site_photo_file', pid=p.id, thumb=1) }}" alt="{{ (kinds|selectattr(0, 'equalto', p.kind)|first)[1] }} photo{{ ': ' ~ p.caption if p.caption }}" loading="lazy"></a>
+{% if photos %}<div class="site-photos">{% for p in photos %}<figure><a data-inapp href="{{ url_for('bookings.site_photo_file', pid=p.id) }}"><img src="{{ url_for('bookings.site_photo_file', pid=p.id, thumb=1) }}" alt="{{ (kinds|selectattr(0, 'equalto', p.kind)|first)[1] }} photo{{ ': ' ~ p.caption if p.caption }}" loading="lazy"></a>
 <figcaption><b>{{ (kinds|selectattr(0, 'equalto', p.kind)|first)[1] }}</b>{% if p.caption %} · {{ p.caption }}{% endif %}</figcaption>
 {% if edit %}<details><summary>Edit</summary><form method="post" action="{{ url_for('bookings.site_photo_edit', pid=p.id) }}"><select name="kind" aria-label="Before or after">{% for k, label in kinds %}<option value="{{ k }}" {{ 'selected' if p.kind == k }}>{{ label }}</option>{% endfor %}</select><input name="caption" value="{{ p.caption or '' }}" placeholder="Caption" aria-label="Caption"><div class="site-row"><button class="btn sm">Save</button><button class="btn sm danger" name="delete" value="1" onclick="return confirm('Remove this photo?')">Remove</button></div></form></details>{% endif %}</figure>{% endfor %}</div>
 {% else %}<p class="muted small">No photos yet.</p>{% endif %}
@@ -106,7 +106,7 @@
 <div class="bk-two">
 <div class="card" id="sheet"><h3>Job sheet</h3>
 <p class="muted small">Customer, address, times, work done, checklist, parts, photos and signature for every visit on job {{ job_no(j.id) }}.</p>
-<p class="site-row"><a class="btn" href="{{ url_for('bookings.job_sheet', jid=j.id) }}" target="_blank" rel="noopener">View job sheet (PDF)</a><a class="btn" href="{{ url_for('bookings.job_sheet', jid=j.id, download=1) }}">Download</a></p>
+<p class="site-row"><a data-inapp class="btn" href="{{ url_for('bookings.job_sheet', jid=j.id) }}">View job sheet (PDF)</a><a class="btn" href="{{ url_for('bookings.job_sheet', jid=j.id, download=1) }}">Download</a></p>
 {% if can('bookings', 2) %}{% if email_ready %}<form method="post" action="{{ url_for('bookings.job_sheet_email', jid=j.id) }}" class="site-row"><input type="hidden" name="back" value="{{ url_for('bookings.site', bid=b.id) }}#sheet"><input type="email" name="to" value="{{ b.cemail or '' }}" placeholder="Customer's email" aria-label="Customer's email" required><button class="btn pri">Email job sheet</button></form>
 {% else %}<p class="muted small">To email it from here, set up email in Setup, Email. Until then, download it and attach it to an email.</p>{% endif %}{% endif %}
 </div>

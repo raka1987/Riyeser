@@ -5,7 +5,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, sessio
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from ..db import get_db, init_db, audit
-from . import admin_only, guarded
+from . import admin_only, guarded, once
 from .. import perms
 
 bp = Blueprint("auth", __name__)
@@ -523,14 +523,22 @@ def users():
         me = co.user_row(c["path"], g.user["username"])
         if me and me["role"] == "admin":
             others.append({**c, "has": {r["username"] for r in _users_in(c["path"])}})
+    offered = perms.presets_for_app()
+    app = perms.app_key()
+    for r in rows:
+        r["preset"], r["customised"] = perms.closest_preset(r, offered)
     return render_template("auth/users.html", users=rows, others=others, lst=lst, areas=perms.AREAS, level_names=perms.LEVELS,
-                           presets=perms.PRESETS, presets_json=json.dumps({k: v for k, (_, v) in perms.PRESETS.items()}),
-                           levels=perms.levels_for)
+                           presets=offered, presets_json=json.dumps({k: v for k, (_, v, _) in offered.items()}),
+                           preset_names_json=json.dumps({**{k: n for k, (n, _, _) in offered.items()}, "admin": "Administrator"}),
+                           hints_json=json.dumps({**{k: h for k, (_, _, h) in offered.items()}, "admin": perms.HINTS["admin"]}),
+                           default_preset=perms.DEFAULT_PRESET.get(app, "readonly"),
+                           till_pins=app in ("pos", None), levels=perms.levels_for)
 
 
 @bp.route("/users/save", methods=["POST"])
 @admin_only
 @guarded
+@once
 def save_user():
     db = get_db()
     f = request.form
@@ -549,6 +557,7 @@ def save_user():
         db.execute("UPDATE users SET full_name=?, role=?, active=?, perms=?, email=? WHERE id=?",
                    (f.get("full_name"), role, active, None if role == "admin" else json.dumps(levels),
                     _email_field(f), uid))
+        _save_till_pin(db, uid, f, active)
         if f.get("password"):
             check_password_rules(f["password"])
             new_hash = generate_password_hash(f["password"])
@@ -570,16 +579,45 @@ def save_user():
         elif preset == "admin":
             role, levels = "admin", None
         elif preset in perms.PRESETS:
-            role, levels = "accountant", perms.PRESETS[preset][1]
+            role, levels = "accountant", dict(perms.PRESETS[preset][1])
+            changed = {a: v for a, v in perms.parse_form(f).items() if levels.get(a) != v}
+            if changed:   # ticked or unticked on the Add a user form, before adding: "Cashier (customised)"
+                levels.update(changed)
+                preset += " (customised: " + ", ".join(f"{a}={v}" for a, v in changed.items()) + ")"
         else:
             raise ValueError("Choose what the new user can access.")
-        db.execute("INSERT INTO users (username, password_hash, full_name, role, perms, email) VALUES (?,?,?,?,?,?)",
-                   (f["username"].strip(), generate_password_hash(f["password"]), f.get("full_name"), role,
-                    json.dumps(levels) if levels else None, _email_field(f)))
+        if (f.get("till_pin") or "").strip():
+            from .. import pos_pins
+            pos_pins.check_format(f["till_pin"])
+            if pos_pins.taken(db, f["till_pin"].strip()):
+                raise ValueError(pos_pins.TAKEN)
+        new_id = db.execute("INSERT INTO users (username, password_hash, full_name, role, perms, email) VALUES (?,?,?,?,?,?)",
+                            (f["username"].strip(), generate_password_hash(f["password"]), f.get("full_name"), role,
+                             json.dumps(levels) if levels else None, _email_field(f))).lastrowid
+        _save_till_pin(db, new_id, f, 1)
         audit(db, "add_user", f"{f['username'].strip()}: {preset}")
     _copy_to_other_companies(db, f)
     flash("User saved.", "ok")
     return redirect(url_for("auth.users"))
+
+
+def _save_till_pin(db, uid, f, active):
+    """Till PIN (POS): set or reset it, or remove it. Stored hashed only; the page only ever says "PIN set"."""
+    from .. import pos_pins
+    name = db.execute("SELECT username FROM users WHERE id=?", (uid,)).fetchone()["username"]
+    if not active:   # someone who can't sign in can't use the till either; a new PIN is set when they come back
+        if db.execute("SELECT pos_pin_hash FROM users WHERE id=?", (uid,)).fetchone()[0]:
+            db.execute("UPDATE users SET pos_pin_hash=NULL WHERE id=?", (uid,))
+            audit(db, "pos_pin_removed", f"{name} (made inactive)")
+        return
+    if f.get("till_pin_remove"):
+        db.execute("UPDATE users SET pos_pin_hash=NULL WHERE id=?", (uid,))
+        audit(db, "pos_pin_removed", name)
+        return
+    pin = (f.get("till_pin") or "").strip()
+    if pin:
+        pos_pins.set_pin(db, uid, pin)
+        audit(db, "pos_pin_set", name)
 
 
 def _email_field(f):

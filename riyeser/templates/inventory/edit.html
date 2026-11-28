@@ -16,7 +16,7 @@
 <label class="check"><input type="checkbox" name="is_bought" value="1" {{ 'checked' if not item or (vf.bought if vf else item.is_bought) }}> I buy this item</label>
 {% if vf %}<p class="muted" style="margin:0;font-size:13px">{{ 'Its variants track quantity and cost.' if vf.stock else "Its variants don't track stock." }}</p>{% else %}
 <label class="check"><input type="checkbox" name="is_inventoried" value="1" {{ 'checked' if item and item.is_inventoried }}> I inventory this item (track quantity &amp; cost)</label>{% endif %}
-<label for="item-barcodes">Barcodes <small>(one or more, separated by commas)</small></label><input id="item-barcodes" name="barcodes" value="{{ item.barcodes or '' if item }}">
+<label for="item-barcodes">Barcodes <small>(one or more, separated by commas)</small></label><input id="item-barcodes" name="barcodes" value="{{ item.barcodes or '' if item else prefill_barcode or '' }}">
 <label class="check"><input type="checkbox" name="block_oversell" value="1" {{ 'checked' if item and item.block_oversell }}> Never sell more than is in stock (otherwise the till and invoices ask first)</label>
 <label class="check"><input type="checkbox" name="active" value="1" {{ 'checked' if not item or item.active }}> Active</label>
 <label class="check"><input type="checkbox" name="pos_favourite" value="1" {{ 'checked' if item and item.pos_favourite }}> Show in POS Favourites</label>

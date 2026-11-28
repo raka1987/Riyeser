@@ -11,13 +11,23 @@ input.code{font:800 30px/1 ui-monospace,Consolas,monospace;letter-spacing:10px;t
 button{width:100%;border:0;border-radius:12px;background:#0f7b63;color:#fff;font:inherit;font-weight:800;font-size:18px;min-height:56px;cursor:pointer}
 .err{background:#fdecea;color:#b42318;border-radius:12px;padding:10px 14px;font-weight:600;margin-bottom:14px}
 small{display:block;color:#64748b;margin-top:14px;font-size:13px}
+.kp{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:-4px 0 16px}
+.kp button{background:#fff;color:#0f172a;border:1.5px solid #cbd5e1;min-height:54px;font-size:22px}
+.kp button[data-k=clear]{color:#b42318;border-color:#f3c3bd;font-size:19px}
 </style></head><body>
 <form class="box" method="post"><div class="logo" aria-hidden="true">Po</div>
 <h1>Pair this kitchen screen</h1>
 <p>On the till, open <b>POS setup › Kitchen &amp; screens</b> and tap <b>New pairing code</b>. Type the code here.{% if company %} ({{ company.name }}){% endif %}</p>
 {% if err %}<div class="err" role="alert">{{ err }}</div>{% endif %}
 <label for="code">Pairing code</label><input class="code" id="code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required autofocus placeholder="000000">
+<div class="kp" id="kp" aria-label="Keypad">{% for k in ['1','2','3','4','5','6','7','8','9'] %}<button type="button" data-k="{{ k }}">{{ k }}</button>{% endfor %}<button type="button" data-k="clear" aria-label="Clear (C)">C</button><button type="button" data-k="0">0</button><button type="button" data-k="del" aria-label="Delete">&#9003;</button></div>
 <label for="name">Name this screen</label><input id="name" name="name" maxlength="40" placeholder="e.g. Kitchen tablet" value="Kitchen screen">
 <button>Pair and open the kitchen screen</button>
 <small>This screen will only show order tickets: no prices, sales or settings. The owner can sign it out at any time.</small>
-</form></body></html>
+</form>
+<script>
+(function(){const c=document.getElementById('code');
+  document.getElementById('kp').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;const k=b.dataset.k;
+    if(k==='clear')c.value='';else if(k==='del')c.value=c.value.slice(0,-1);else if(c.value.replace(/\D/g,'').length<6)c.value+=k;c.focus();});
+  c.addEventListener('keydown',e=>{if(e.key==='Escape'){c.value='';e.preventDefault();}});})();
+</script></body></html>

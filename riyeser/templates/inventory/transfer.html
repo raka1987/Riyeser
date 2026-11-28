@@ -3,7 +3,7 @@
 {% set cls = {'draft':'quote','sent':'open','partial':'open','received':'paid','cancelled':'void'}[t.status] %}
 <div class="head"><div><h1>Transfer {{ t.number }} <span class="badge {{ cls }}">{{ status[t.status] }}</span></h1>
 <p class="sub">{{ t.from_name }} → {{ t.to_name }}{% if t.note %} · {{ t.note }}{% endif %}</p></div>
-<div class="actions"><a class="btn" href="{{ url_for('inventory.transfers') }}">All transfers</a><a class="btn" href="{{ url_for('inventory.transfer_docket', tid=t.id) }}" target="_blank" rel="noopener">Print docket</a>
+<div class="actions"><a class="btn" href="{{ url_for('inventory.transfers') }}">All transfers</a><a data-inapp class="btn" href="{{ url_for('inventory.transfer_docket', tid=t.id) }}">Print docket</a>
 {% if can_edit and t.status == 'draft' %}<a class="btn" href="{{ url_for('inventory.transfer_edit', tid=t.id) }}">Edit</a>{% endif %}</div></div>
 <div class="steps card" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:14px 18px">
 {% for k, n in [('draft', 'Draft'), ('sent', 'Sent: in transit'), ('received', 'Received')] %}{% set on = (k == 'draft') or (k == 'sent' and t.status in ('sent','partial','received')) or (k == 'received' and t.status == 'received') %}

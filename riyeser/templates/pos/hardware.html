@@ -1,0 +1,271 @@
+{% extends "base.html" %}{% block title %}Hardware{% endblock %}
+{% block content %}
+<style>
+.hw-note{display:flex;gap:10px;align-items:flex-start;background:var(--brand-l);color:#1e3a5f;border-radius:12px;padding:12px 14px;margin-bottom:16px}
+.hw-tills{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 16px}
+.hw-tills a{border:1.5px solid var(--line);background:#fff;border-radius:999px;padding:8px 16px;font-weight:600;color:var(--ink);text-decoration:none;min-height:40px;display:inline-flex;align-items:center}
+.hw-tills a.on{border-color:var(--brand);background:var(--brand-l);color:var(--brand)}
+.hw-check{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}
+.hw-check a{display:flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:12px;padding:10px 12px;color:var(--ink);text-decoration:none;min-width:0}
+.hw-check a:hover{border-color:var(--brand);text-decoration:none}
+.hw-check b{display:block;font-size:14.5px}.hw-check small{display:block;color:var(--muted);font-size:12.5px;overflow-wrap:anywhere}
+.hw-dot{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-weight:800;flex-shrink:0;font-size:15px}
+.st-ok .hw-dot{background:var(--ok-bg);color:var(--ok)}.st-none .hw-dot,.st-info .hw-dot{background:#eef1f4;color:#64748b}
+.st-problem .hw-dot{background:var(--err-bg);color:var(--err)}.st-planned .hw-dot{background:#f3e8ff;color:#7c3aed}
+.hw-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}
+.hw-grid>.card{margin:0;min-width:0}.hw-wide{grid-column:1/-1}
+.hw-h{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:10px}
+.hw-h h2{margin:0;font-size:18px}.hw-h p{margin:2px 0 0;color:var(--muted);font-size:13.5px}
+.hw-st{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:12.5px;font-weight:700;white-space:nowrap;flex-shrink:0;max-width:52%;overflow:hidden;text-overflow:ellipsis}
+.hw-prob{margin:-2px 0 12px;background:var(--err-bg);color:var(--err);border-radius:10px;padding:8px 12px;font-weight:600;font-size:13.5px}
+.hw-st.ok{background:var(--ok-bg);color:var(--ok)}.hw-st.none,.hw-st.info{background:#eef1f4;color:#475467}.hw-st.problem{background:var(--err-bg);color:var(--err)}.hw-st.planned{background:#f3e8ff;color:#6d28d9}
+.hw-f{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 14px}
+.hw-f>div{min-width:0}.hw-f .full{grid-column:1/-1}
+.hw-f label.lb{display:block;font-weight:600;font-size:13.5px;margin-bottom:5px}
+.hw-f select,.hw-f input[type=text],.hw-f textarea{width:100%;max-width:100%}
+.hw-seg{display:flex;gap:8px;flex-wrap:wrap}
+.hw-seg label{display:flex;align-items:center;gap:8px;border:1.5px solid var(--line);border-radius:10px;padding:8px 12px;cursor:pointer;min-height:42px;font-weight:600}
+.hw-seg label:has(input:checked){border-color:var(--brand);background:var(--brand-l);color:var(--brand)}
+.hw-seg input,.hw-checks input{width:auto;margin:0}
+.hw-checks{display:flex;flex-direction:column;gap:8px}.hw-checks label{display:flex;gap:10px;align-items:flex-start;font-weight:500}
+.hw-checks small{display:block;color:var(--muted)}
+.hw-foot{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+.hw-foot .sp{flex:1}
+.hw-res{font-weight:600;font-size:13.5px}.hw-res.ok{color:var(--ok)}.hw-res.err{color:var(--err)}
+.hw-prev{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:18px;align-items:start}
+.hw-paper{background:#eef1f4;border-radius:14px;padding:14px;display:flex;flex-direction:column;align-items:center;gap:8px}
+.hw-paper iframe{border:0;background:#fff;box-shadow:0 4px 18px rgba(15,23,42,.12);height:430px;width:80mm;max-width:100%;transition:width .15s}
+.hw-paper iframe.mm58{width:58mm}
+.scan-box{width:100%;font:600 20px/1.2 ui-monospace,Consolas,monospace;border:2px dashed var(--brand);border-radius:12px;padding:14px;text-align:center}
+.scan-out{margin-top:10px;border-radius:12px;padding:10px 12px;background:#f8fafc;min-height:48px;font-size:14px}
+.scan-out b{font-family:ui-monospace,Consolas,monospace;font-size:16px;overflow-wrap:anywhere}
+.scan-out.ok{background:var(--ok-bg);color:var(--ok)}.scan-out.warn{background:#fff4e5;color:#b54708}
+.hw-tbl{overflow-x:auto;border:1px solid var(--line);border-radius:12px}
+.hw-tbl table{width:100%;border-collapse:collapse;min-width:520px}.hw-tbl th,.hw-tbl td{padding:9px 10px;border-bottom:1px solid var(--line);text-align:left;font-size:14px;vertical-align:middle}
+.hw-tbl th{font-size:11.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);background:#f8fafc}
+.hw-tbl tr:last-child td{border-bottom:0}.hw-tbl select{min-width:150px}
+.hw-steps{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px}.hw-steps span{font-size:12.5px;font-weight:700;padding:4px 10px;border-radius:999px;background:#eef1f4;color:#475467}
+.hw-steps span.on{background:var(--brand);color:#fff}.hw-steps span.done{background:var(--ok-bg);color:var(--ok)}
+.hw-wiz{max-width:960px}
+.stepr{display:flex;align-items:center;gap:6px}.stepr input{width:84px!important;text-align:center}
+.stepr button{width:42px;height:42px;border-radius:10px;border:1.5px solid var(--line);background:#fff;font-size:20px;font-weight:700;flex-shrink:0}
+.adj-help{background:#f8fafc;border:1px solid var(--line);border-radius:12px;padding:10px 12px;font-size:13.5px;line-height:1.5}
+@media (max-width:1100px){.hw-prev{grid-template-columns:1fr}.hw-paper iframe{height:380px}}
+@media (max-width:900px){.hw-grid{grid-template-columns:1fr}}
+@media (max-width:560px){.hw-f{grid-template-columns:1fr}.hw-st{max-width:60%}.hw-h{flex-wrap:wrap}}
+</style>
+{% set dev = {} %}{% for d in devices %}{% set _ = dev.update({d.key: d}) %}{% endfor %}
+{% macro status(key) %}{% set d = dev.get(key) %}{% if d %}<span class="hw-st {{ d.state }}" title="{{ d.text }}">{{ {'ok': '✓ Set up', 'problem': '! Problem', 'none': 'Not set up', 'planned': 'Planned'}.get(d.state, d.text) }}</span>{% endif %}{% endmacro %}
+{% macro problem(key) %}{% set d = dev.get(key) %}{% if d and d.state == 'problem' %}<p class="hw-prob" role="status">{{ d.text }}</p>{% endif %}{% endmacro %}
+{% macro save(label) %}{% if wizard %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}{% if can_change %}<button class="btn pri">{{ 'Save and continue' if wizard else label }}</button>{% endif %}{% endmacro %}
+{% macro printer_select(name, current, blank, id) %}<select name="{{ name }}" id="{{ id }}"><option value="">{{ blank }}</option>{% for p in printers %}<option {{ 'selected' if p == current }}>{{ p }}</option>{% endfor %}{% if current and current not in printers %}<option selected>{{ current }}</option>{% endif %}</select>{% endmacro %}
+
+<div class="head"><div><h1>{% if wizard %}Set up {{ t.name }}{% else %}Hardware{% endif %}</h1><p class="sub">{% if wizard %}A few quick steps for this till's printer, cash drawer and scanner. Skip anything you don't have. You can change it all later under POS setup › Hardware.{% else %}Printers, cash drawer, barcode scanner and card machine, for each till. Each one shows whether it's set up, with a Test button.{% endif %}</p></div>
+  <div class="actions"><a class="btn" href="{{ url_for('pos.setup') }}">POS setup</a><a class="btn" href="{{ url_for('pos.register') }}">Open the till</a></div></div>
+<div class="hw-note"><span aria-hidden="true">ⓘ</span><div><b>Works with most 80 mm and 58 mm receipt printers installed in Windows (ESC/POS).</b> Riyeser prints straight to the printer you choose, without the Windows print box, and falls back to the print box if anything goes wrong. <span class="badge">Beta</span> Not yet tested by Riyeser on every printer, drawer and scanner.{% if not raw_ok %} <b>This computer isn't Windows, so it can't print straight to a printer: receipts use the print box.</b>{% endif %}{% if not can_change %} Only an owner or administrator can change these settings.{% endif %}</div></div>
+
+{% if tills|length > 1 %}<nav class="hw-tills" aria-label="Till">{% for x in tills %}<a href="{{ url_for('pos.hardware_start' if wizard else 'pos.hardware', till=x.id) }}" class="{{ 'on' if x.id == t.id }}">{{ x.name }}{% if not x.hw_setup_at %} <span class="muted small" style="margin-left:6px">· new</span>{% endif %}</a>{% endfor %}</nav>{% endif %}
+
+{% if wizard %}
+<div class="hw-steps" aria-label="Steps">{% for k, n in steps %}<span class="{{ 'on' if k == wizard else 'done' if loop.index < step_no else '' }}">{{ loop.index }} · {{ n }}</span>{% endfor %}</div>
+{% else %}
+<div class="card"><div class="hw-h"><div><h2>{{ t.name }} checklist</h2><p>Tap a line to go to its settings.</p></div>{% if can_change %}<a class="btn sm" href="{{ url_for('pos.hardware_start', till=t.id) }}">Walk me through it</a>{% endif %}</div>
+  <div class="hw-check">{% for d in devices %}<a href="#{{ d.key }}" class="st-{{ d.state }}"><span class="hw-dot" aria-hidden="true">{{ {'ok': '✓', 'problem': '!', 'planned': '…'}.get(d.state, '–') }}</span><span style="min-width:0"><b>{{ d.name }}</b><small>{{ d.text }}</small></span></a>{% endfor %}</div></div>
+{% endif %}
+
+<div class="{{ 'hw-wiz' if wizard else 'hw-grid' }}">
+{% if not wizard or wizard == 'receipt' %}
+<form class="card" id="receipt" method="post" action="{{ url_for('pos.hardware_save') }}"><input type="hidden" name="what" value="receipt"><input type="hidden" name="till_id" value="{{ t.id }}">
+  <div class="hw-h"><div><h2>Receipt printer</h2><p>For {{ t.name }}.</p></div>{{ status('receipt') }}</div>
+  {{ problem('receipt') }}
+  <fieldset {{ 'disabled' if not can_change }} style="border:0;padding:0;margin:0;min-width:0"><div class="hw-f">
+    <div class="full"><label class="lb" for="rp">Printer</label>{{ printer_select('receipt_printer', t.receipt_printer, 'Ask each time (Windows print box)', 'rp') }}</div>
+    <div><span class="lb" style="display:block;font-weight:600;font-size:13.5px;margin-bottom:5px">Paper</span><p style="margin:8px 0 0">{{ lay_t.mm }} mm · {{ lay_t.cpl }} characters a line{% if not wizard %} · <a href="{{ url_for('pos.hardware', till=t.id, adj='till:' ~ t.id) }}#adjust">Adjust print layout</a>{% endif %}</p></div>
+    <div><span class="lb" style="display:block;font-weight:600;font-size:13.5px;margin-bottom:5px">Copies</span><div class="hw-seg">{% for n in (1, 2) %}<label><input type="radio" name="copies" value="{{ n }}" {{ 'checked' if (t.receipt_copies or 1) == n }}> {{ n }}</label>{% endfor %}</div></div>
+    <div class="full"><label class="lb" for="pa">Print a receipt after a sale</label><select name="print_after" id="pa">{% for k, n in print_after.items() %}<option value="{{ k }}" {{ 'selected' if (t.print_after or 'ask') == k }}>{{ n }}</option>{% endfor %}</select></div>
+  </div></fieldset>
+  <div class="hw-foot">{{ save('Save receipt printer') }}<button type="button" class="btn" data-testprint {{ 'disabled' if not can_change }}>Test print</button><span class="hw-res" id="tpRes" role="status"></span></div>
+</form>
+{% endif %}
+
+{% if not wizard or wizard == 'drawer' %}
+<form class="card" id="drawer" method="post" action="{{ url_for('pos.hardware_save') }}"><input type="hidden" name="what" value="drawer"><input type="hidden" name="till_id" value="{{ t.id }}">
+  <div class="hw-h"><div><h2>Cash drawer</h2><p>Works with drawers that plug into an ESC/POS receipt printer (the cable goes into the printer's drawer port, often marked DK).</p></div>{{ status('drawer') }}</div>
+  {{ problem('drawer') }}
+  <fieldset {{ 'disabled' if not can_change }} style="border:0;padding:0;margin:0;min-width:0"><div class="hw-f">
+    <div class="full hw-checks"><label><input type="radio" name="drawer_mode" value="none" {{ 'checked' if t.drawer_mode != 'printer' }}> None: open it with the key</label>
+      <label><input type="radio" name="drawer_mode" value="printer" {{ 'checked' if t.drawer_mode == 'printer' }}> Opens through the receipt printer</label></div>
+    <div class="full"><label class="lb" for="dp">The printer it plugs into</label>{{ printer_select('drawer_printer', t.drawer_printer or t.receipt_printer, 'Choose the Windows printer…', 'dp') }}</div>
+    <div class="full hw-checks"><span class="lb" style="font-weight:600;font-size:13.5px">Open the drawer on</span>
+      <label><input type="checkbox" name="cash_sale" value="1" {{ 'checked' if don.cash_sale }}> Cash sales (once per sale, and cash out on the card machine)</label>
+      <label><input type="checkbox" name="cash_refund" value="1" {{ 'checked' if don.cash_refund }}> Cash refunds</label>
+      <label><input type="checkbox" name="no_sale" value="1" {{ 'checked' if don.no_sale }}> <span>No sale, with a reason<small>Staff need a manager's PIN (or manager card). Managers approve their own. Every one is in Manager approvals.</small></span></label></div>
+  </div></fieldset>
+  {% if events %}<details style="margin-top:10px"><summary class="muted" style="cursor:pointer">Recent openings</summary><div class="hw-tbl" style="margin-top:8px"><table style="min-width:0"><tr><th>When</th><th>Why</th><th>Who</th><th>Result</th></tr>{% for e in events %}<tr><td>{{ e.created_at[5:16] }}</td><td>{{ {'sale':'Cash sale','part':'Split bill','refund':'Cash refund','no_sale':'No sale','test':'Test','receipt':'Receipt'}.get(e.kind, e.kind) }}</td><td>{{ e.who or '' }}</td><td>{% if e.ok %}<span class="badge paid">Opened</span>{% else %}<span class="badge void" title="{{ e.error }}">Didn't open</span>{% endif %}</td></tr>{% endfor %}</table></div></details>{% endif %}
+  <div class="hw-foot">{{ save('Save cash drawer') }}<button type="button" class="btn" data-testdrawer {{ 'disabled' if not can_change or not raw_ok }}>Test: open the drawer</button><span class="hw-res" id="tdRes" role="status"></span></div>
+</form>
+{% endif %}
+
+{% if not wizard or wizard == 'layout' %}
+<form class="card hw-wide" id="layout" method="post" action="{{ url_for('pos.hardware_save') }}"><input type="hidden" name="what" value="layout"><input type="hidden" name="till_id" value="{{ t.id }}">
+  <div class="hw-h"><div><h2>What the receipt says</h2><p>For every till. The preview shows it as it prints.</p></div></div>
+  <div class="hw-prev"><fieldset {{ 'disabled' if not can_change }} style="border:0;padding:0;margin:0;min-width:0"><div class="hw-f">
+    <div class="full hw-checks"><label><input type="checkbox" name="logo" value="1" {{ 'checked' if rs.logo }} data-live> <span>Business logo at the top<small>{% if has_logo %}Uses your business logo.{% else %}Uses your business logo once one is added to your business details.{% endif %}</small></span></label></div>
+    <div class="full hw-checks"><span class="lb" style="font-weight:600;font-size:13.5px">Header lines</span>
+      <label><input type="checkbox" name="show_name" value="1" {{ 'checked' if rs.show_name }} data-live> Business name</label>
+      <label><input type="checkbox" name="show_address" value="1" {{ 'checked' if rs.show_address }} data-live> Address</label>
+      <label><input type="checkbox" name="show_tax_id" value="1" {{ 'checked' if rs.show_tax_id }} data-live> {{ tl_tax_id }} (tax number)</label>
+      <label><input type="checkbox" name="show_phone" value="1" {{ 'checked' if rs.show_phone }} data-live> Phone</label>
+      <small class="muted">The name, address and numbers come from Setup › Company.</small></div>
+    <div class="full"><label class="lb" for="footer">Footer message</label><textarea name="footer" id="footer" rows="3" maxlength="300" placeholder="e.g. Thank you! Returns within 14 days with your receipt." data-live>{{ rs.footer }}</textarea></div>
+  </div></fieldset>
+  <div class="hw-paper"><div class="hw-seg" role="group" aria-label="Preview paper width"><label><input type="radio" name="pv" value="80" {{ 'checked' if (t.paper_mm or 80) == 80 }}> 80 mm</label><label><input type="radio" name="pv" value="58" {{ 'checked' if t.paper_mm == 58 }}> 58 mm</label></div>
+    <iframe id="pvFrame" title="Receipt preview" class="{{ 'mm58' if t.paper_mm == 58 }}" src="{{ url_for('pos.hardware_preview', till=t.id, paper=t.paper_mm or 80) }}"></iframe></div></div>
+  <div class="hw-foot">{{ save('Save receipt layout') }}</div>
+</form>
+{% endif %}
+
+{% if not wizard or wizard == 'adjust' %}{% set L = adj_lay %}
+<form class="card hw-wide" id="adjust" method="post" action="{{ url_for('pos.hardware_save') }}"><input type="hidden" name="what" value="adjust" id="adjWhat"><input type="hidden" name="till_id" value="{{ t.id }}">
+  <div class="hw-h"><div><h2>Adjust print layout</h2><p>If a receipt or docket is cut off, off-centre or too small, fix it here. Each printer keeps its own settings.</p></div></div>
+  <div class="hw-prev"><fieldset {{ 'disabled' if not can_change }} style="border:0;padding:0;margin:0;min-width:0"><div class="hw-f">
+    <div class="full"><label class="lb" for="adjTarget">Printer</label><select name="target" id="adjTarget">{% for k, n in targets %}<option value="{{ k }}" {{ 'selected' if k == adj }}>{{ n }}</option>{% endfor %}</select></div>
+    <div class="full"><span class="lb" style="display:block;font-weight:600;font-size:13.5px;margin-bottom:5px">Paper width</span><div class="hw-seg">{% for k, n in (('80', '80 mm'), ('58', '58 mm'), ('custom', 'Custom')) %}<label><input type="radio" name="paper" value="{{ k }}" {{ 'checked' if L.paper == k }} data-adj> {{ n }}</label>{% endfor %}
+      <label class="adj-custom" style="cursor:default"><input type="number" name="custom_mm" value="{{ L.custom_mm }}" min="40" max="112" step="1" style="width:76px" aria-label="Custom width in mm" data-adj> mm</label></div></div>
+    <div><label class="lb" for="adjChars">Characters a line (straight to the printer)</label><select name="chars" id="adjChars" data-adj>{% for k in ('auto', '32', '42', '48', 'custom') %}<option value="{{ k }}" {{ 'selected' if L.chars == k }}>{{ {'auto': 'Automatic (' ~ L.cpl ~ ')', 'custom': 'Custom'}.get(k, k) }}</option>{% endfor %}</select></div>
+    <div><label class="lb" for="adjCharsC">Custom characters</label><input type="number" id="adjCharsC" name="chars_custom" value="{{ L.chars_custom }}" min="16" max="80" data-adj></div>
+    {% for k, n in (('left', 'Left'), ('right', 'Right'), ('top', 'Top'), ('bottom', 'Bottom')) %}
+    <div><label class="lb" for="adj_{{ k }}">{{ n }} margin (mm)</label><div class="stepr"><button type="button" data-step="{{ k }}|-0.5" aria-label="{{ n }} margin less">−</button><input type="number" id="adj_{{ k }}" name="{{ k }}" value="{{ '%g'|format(L[k]) }}" min="-10" max="10" step="0.5" data-adj><button type="button" data-step="{{ k }}|0.5" aria-label="{{ n }} margin more">+</button></div></div>{% endfor %}
+    <div><label class="lb" for="adjScale">Scale: <span id="adjScaleV">{{ L.scale }}</span>%</label><input type="range" id="adjScale" name="scale" min="80" max="120" step="5" value="{{ L.scale }}" data-adj style="width:100%"></div>
+    <div><span class="lb" style="display:block;font-weight:600;font-size:13.5px;margin-bottom:5px">Text size</span><div class="hw-seg">{% for k, n in fonts.items() %}<label><input type="radio" name="font" value="{{ k }}" {{ 'checked' if L.font == k }} data-adj> {{ n }}</label>{% endfor %}</div></div>
+    <div><label class="lb" for="adjLogo">Logo width (mm)</label><input type="number" id="adjLogo" name="logo_mm" value="{{ L.logo_mm }}" min="10" max="72" data-adj></div>
+    <div><label class="lb" for="adjFeed">Blank lines before the cut</label><input type="number" id="adjFeed" name="feed" value="{{ L.feed }}" min="0" max="10" data-adj></div>
+    <div class="full hw-checks"><label><input type="checkbox" name="cut" value="1" {{ 'checked' if L.cut }} data-adj> <span>Cut the paper after each receipt<small>For printers with a cutter (ESC/POS cut command). Turn off if yours has none.</small></span></label></div>
+    <div class="full adj-help"><b>Reading the alignment test:</b> if the <b>L</b> marker is cut off, make the left margin bigger (+1 mm). If the <b>R</b> marker is cut off, make the right margin bigger. If <b>TOP</b> is cut off, add to the top margin. Text too small or big: change the text size, or the characters a line. Scale only changes the Windows print box path.</div>
+  </div></fieldset>
+  <div class="hw-paper"><div class="hw-seg" role="group" aria-label="Preview"><label><input type="radio" name="adjpv" value="sample" checked> Sample</label><label><input type="radio" name="adjpv" value="align"> Alignment test</label></div>
+    <iframe id="adjFrame" title="Print layout preview" src="{{ url_for('pos.hardware_preview', target=adj) }}"></iframe></div></div>
+  <div class="hw-foot">{{ save('Save print layout') }}{% if can_change %}<button type="submit" class="btn" name="what" value="adjust_reset" data-reset>Reset to defaults</button>{% endif %}<button type="button" class="btn" data-align {{ 'disabled' if not can_change }}>Print alignment test</button><span class="hw-res" id="taRes" role="status"></span></div>
+</form>
+{% endif %}
+
+{% if not wizard or wizard == 'scanner' %}
+<form class="card" id="scanner" method="post" action="{{ url_for('pos.hardware_save') }}"><input type="hidden" name="what" value="scanner"><input type="hidden" name="till_id" value="{{ t.id }}">
+  <div class="hw-h"><div><h2>Barcode scanner</h2><p>Most USB scanners act like a keyboard: they type the code, then press Enter.</p></div>{{ status('scanner') }}</div>
+  {{ problem('scanner') }}
+  <label class="lb" for="scanTest" style="display:block;font-weight:600;font-size:13.5px;margin-bottom:5px">Scan something now</label>
+  <input class="scan-box" id="scanTest" autocomplete="off" placeholder="Click here, then scan any barcode" aria-describedby="scanOut">
+  <div class="scan-out" id="scanOut" role="status">Waiting for a scan…</div>
+  <fieldset {{ 'disabled' if not can_change }} style="border:0;padding:0;margin:14px 0 0;min-width:0"><div class="hw-f">
+    <div><label class="lb" for="sp">Remove from the start</label><input type="text" name="prefix" id="sp" value="{{ sc.prefix }}" maxlength="10" placeholder="Nothing"></div>
+    <div><label class="lb" for="ss">Remove from the end</label><input type="text" name="suffix" id="ss" value="{{ sc.suffix }}" maxlength="10" placeholder="Nothing"></div>
+    <div class="full hw-checks">
+      <label><input type="checkbox" name="capture" value="1" {{ 'checked' if sc.capture }}> <span>Scans always go to the sale, even if another box is selected<small>Riyeser spots a scan by its speed (a whole code in a blink, then Enter). Normal typing in a search box is left alone.</small></span></label>
+      <label><input type="checkbox" name="beep" value="1" {{ 'checked' if sc.beep }}> Beep on each scan</label></div>
+    <div class="full"><label class="lb" for="su">A barcode nobody knows</label><select name="unknown" id="su"><option value="offer" {{ 'selected' if sc.unknown == 'offer' }}>Offer to add a new product with this code</option><option value="say" {{ 'selected' if sc.unknown != 'offer' }}>Just say it isn't known</option></select>
+      <small class="muted" style="display:block;margin-top:5px">Only people who can add products (Stock: Add &amp; edit) are offered it. Others see “Ask a manager”.</small></div>
+  </div></fieldset>
+  <div class="hw-foot">{{ save('Save scanner settings') }}</div>
+</form>
+{% endif %}
+
+{% if not wizard or wizard == 'card' %}
+<div class="card" id="card"><div class="hw-h"><div><h2>Card machine</h2><p>Manual (key the amount into the machine) or the Practice terminal. Linked terminals (Windcave, Stripe) are planned.</p></div>{{ status('card') }}</div>
+  <p style="margin:0">{% if card_name %}{{ t.name }} uses <b>{{ card_name }}</b>.{% else %}{{ t.name }} has no card machine linked: card payments are keyed into the machine by hand.{% endif %}</p>
+  <div class="hw-foot"><a class="btn{{ ' pri' if not card_name }}" href="{{ url_for('pos.card_setup') }}">Set up card payments</a>{% if wizard %}<a class="btn" href="{{ next_url }}">Continue</a>{% endif %}</div></div>
+{% endif %}
+
+{% if mode == 'restaurant' and (not wizard or wizard == 'kitchen') %}
+<form class="card hw-wide" id="kitchen" method="post" action="{{ url_for('pos.hardware_save') }}"><input type="hidden" name="what" value="kitchen"><input type="hidden" name="till_id" value="{{ t.id }}">
+  <div class="hw-h"><div><h2>Kitchen and bar printers</h2><p>Each station's dockets go to its own printer. Stations and what they make are under <a href="{{ url_for('pos.kitchen_setup') }}">Kitchen &amp; screens</a>.</p></div>{{ status('kitchen') }}</div>
+  {{ problem('kitchen') }}
+  <fieldset {{ 'disabled' if not can_change }} style="border:0;padding:0;margin:0;min-width:0">
+  <div class="hw-tbl"><table><tr><th>Station</th><th>Orders go to</th><th>Printer</th><th>Layout</th><th></th></tr>
+  {% for s in stations %}<tr><td><b>{{ s.name }}</b>{% if not s.active %} <span class="muted small">(off)</span>{% endif %}</td><td>{{ {'print': 'Printed docket', 'screen': 'Kitchen screen', 'both': 'Docket and screen'}.get(s.output, s.output) }}</td>
+    <td>{% if s.output in ('print', 'both') %}{{ printer_select('printer_' ~ s.id, s.printer, 'Windows print box', 'kp' ~ s.id) }}{% else %}<span class="muted">Screen only</span><input type="hidden" name="printer_{{ s.id }}" value="{{ s.printer or '' }}">{% endif %}</td>
+    <td>{% set sl = station_lay[s.id] %}{{ sl.mm }} mm{% if s.output in ('print', 'both') and not wizard %} · <a href="{{ url_for('pos.hardware', till=t.id, adj='station:' ~ s.id) }}#adjust">Adjust</a>{% endif %}</td>
+    <td>{% if s.output in ('print', 'both') %}<button type="button" class="btn sm" data-testdocket="{{ s.id }}" {{ 'disabled' if not can_change }}>Test docket</button>{% endif %}</td></tr>{% endfor %}</table></div></fieldset>
+  <div class="hw-foot">{{ save('Save kitchen printers') }}<span class="hw-res" id="tkRes" role="status"></span></div>
+</form>
+{% endif %}
+
+{% if not wizard and mode == 'restaurant' %}
+<div class="card" id="kds"><div class="hw-h"><div><h2>Kitchen screens</h2><p>Tablets or PCs in the kitchen showing the order tickets.</p></div>{{ status('kds') }}</div>
+  <p style="margin:0">{{ kds_count }} screen{{ '' if kds_count == 1 else 's' }} paired.</p>
+  <div class="hw-foot"><a class="btn" href="{{ url_for('pos.kitchen_setup') }}">Pair a kitchen screen</a></div></div>
+{% endif %}
+
+{% if not wizard %}
+<div class="card" id="display"><div class="hw-h"><div><h2>Customer display</h2><p>A second screen facing the customer, showing the items and the total.</p></div>{{ status('display') }}</div>
+  <p style="margin:0" class="muted">Planned for a later version. Not available yet.</p></div>
+{% endif %}
+
+{% if wizard == 'done' %}
+<div class="card"><div class="hw-h"><div><h2>{{ t.name }} is ready</h2><p>Here's what's set up. You can change any of it under POS setup › Hardware.</p></div></div>
+  <div class="hw-check">{% for d in devices %}<a href="{{ url_for('pos.hardware', till=t.id) }}#{{ d.key }}" class="st-{{ d.state }}"><span class="hw-dot" aria-hidden="true">{{ {'ok': '✓', 'problem': '!', 'planned': '…'}.get(d.state, '–') }}</span><span style="min-width:0"><b>{{ d.name }}</b><small>{{ d.text }}</small></span></a>{% endfor %}</div>
+  <div class="hw-foot"><a class="btn pri" href="{{ url_for('pos.register') }}">Open the till</a><a class="btn" href="{{ url_for('pos.hardware', till=t.id) }}">Hardware page</a></div></div>
+{% elif wizard and wizard != 'card' %}
+<p class="actions" style="justify-content:flex-start;margin-top:12px"><a class="btn" href="{{ next_url }}">Skip this step</a></p>
+{% endif %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='pos-scanner.js') }}"></script>
+<script>
+(function(){
+const TILL={{ t.id }}, $=s=>document.querySelector(s);
+async function post(url,body){try{const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return await r.json();}catch(e){return{ok:false,error:'Couldn\'t reach Riyeser.'};}}
+function res(el,d){el.className='hw-res '+(d.ok?'ok':'err');el.textContent=d.ok?(d.message||'Sent.'):d.error;}
+const tp=$('[data-testprint]');if(tp)tp.onclick=async()=>{const r=$('#tpRes');r.className='hw-res';r.textContent='Sending…';
+  const d=await post('{{ url_for('pos.hardware_test_print') }}',{till_id:TILL,printer:$('#rp').value});res(r,d);
+  if(!d.ok&&d.fallback&&window.RiyeserInApp)RiyeserInApp.print(d.fallback);};
+const td=$('[data-testdrawer]');if(td)td.onclick=async()=>{const r=$('#tdRes');r.className='hw-res';r.textContent='Sending…';
+  const d=await post('{{ url_for('pos.drawer_test') }}',{till_id:TILL,printer:$('#dp').value});res(r,d.ok?{ok:true,message:'Sent. Did the drawer open?'}:d);};
+document.querySelectorAll('[data-testdocket]').forEach(b=>b.onclick=async()=>{const r=$('#tkRes'),id=b.dataset.testdocket;r.className='hw-res';r.textContent='Sending…';
+  const d=await post('{{ url_for('pos.hardware_test_docket') }}',{station_id:id,printer:$('#kp'+id)?$('#kp'+id).value:null});res(r,d);});
+// live receipt preview
+const fr=$('#pvFrame');
+if(fr){const lay=$('#layout');let h=null;
+  function upd(){const q=new URLSearchParams({till:TILL,live:1,lay:1,paper:(lay.querySelector('[name=pv]:checked')||{value:80}).value});
+    ['logo','show_name','show_address','show_tax_id','show_phone'].forEach(k=>q.set(k,lay.querySelector('[name='+k+']').checked?'1':'0'));
+    q.set('footer',lay.querySelector('[name=footer]').value);fr.classList.toggle('mm58',q.get('paper')==='58');
+    fr.src='{{ url_for('pos.hardware_preview') }}?'+q.toString();}
+  lay.addEventListener('input',()=>{clearTimeout(h);h=setTimeout(upd,250);});lay.addEventListener('change',()=>{clearTimeout(h);h=setTimeout(upd,50);});}
+// adjust print layout: live preview, steppers, alignment test
+const adf=$('#adjust');
+if(adf){const fr2=$('#adjFrame');let h2=null;
+  function q2(){const q=new URLSearchParams({lay:1,target:adf.querySelector('[name=target]').value});
+    ['paper','font'].forEach(k=>{const r=adf.querySelector('[name='+k+']:checked');if(r)q.set(k,r.value);});
+    ['custom_mm','chars','chars_custom','left','right','top','bottom','scale','logo_mm','feed'].forEach(k=>q.set(k,adf.querySelector('[name='+k+']').value));
+    q.set('cut',adf.querySelector('[name=cut]').checked?'1':'0');return q;}
+  function upd2(){$('#adjScaleV').textContent=adf.querySelector('[name=scale]').value;
+    const al=(adf.querySelector('[name=adjpv]:checked')||{}).value==='align';
+    fr2.src=(al?'{{ url_for('pos.hardware_align') }}':'{{ url_for('pos.hardware_preview') }}')+'?'+q2().toString();
+    const mm=adf.querySelector('[name=paper]:checked').value;fr2.style.width=(mm==='58'?58:mm==='custom'?Math.min(112,Math.max(40,+adf.querySelector('[name=custom_mm]').value)):80)+'mm';}
+  adf.addEventListener('input',e=>{if(e.target.name==='target')return;clearTimeout(h2);h2=setTimeout(upd2,200);});
+  adf.addEventListener('change',e=>{if(e.target.name==='target'){location.href='{{ url_for('pos.hardware', till=t.id)|safe }}'+'&adj='+encodeURIComponent(e.target.value)+'#adjust';return;}clearTimeout(h2);h2=setTimeout(upd2,50);});
+  adf.addEventListener('click',e=>{const b=e.target.closest('[data-step]');if(!b)return;const [k,dlt]=b.dataset.step.split('|'),i=adf.querySelector('[name='+k+']');
+    i.value=Math.min(10,Math.max(-10,(parseFloat(i.value)||0)+ +dlt));upd2();});
+  const rb=adf.querySelector('[data-reset]');if(rb)rb.addEventListener('click',e=>{if(!confirm('Put this printer back to the usual layout?'))e.preventDefault();});
+  adf.querySelector('[data-align]').onclick=async()=>{const r=$('#taRes');r.className='hw-res';r.textContent='Sending…';
+    const body=Object.fromEntries(q2());body.kind='align';const d=await post('{{ url_for('pos.hardware_test_print') }}',body);res(r,d);
+    if(!d.ok&&d.fallback&&window.RiyeserInApp)RiyeserInApp.print(d.fallback);};
+  upd2();}
+// scanner test: what came in, how fast, and whether the scanner pressed Enter
+const box=$('#scanTest');
+if(box){let t0=null,last=null,n=0,gaps=[];const out=$('#scanOut'),PRE={{ sc.prefix|tojson }},SUF={{ sc.suffix|tojson }};
+  function done(enter){const raw=box.value;if(!raw){return;}const code=RiyeserScanner.strip(raw,PRE,SUF),ms=last&&t0?Math.round(last-t0):0,avg=gaps.length?Math.round(gaps.reduce((a,b)=>a+b,0)/gaps.length):0;
+    const fast=RiyeserScanner.looksScanned(gaps);
+    out.className='scan-out '+(enter&&fast?'ok':'warn');
+    out.innerHTML=`Read <b>${code.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}</b> · ${raw.length} characters in ${ms} ms (${avg} ms each)`+
+      (enter?(fast?'<br>✓ That came from a scanner, and it pressed Enter at the end. It works.':'<br>That was typed by hand (too slow for a scanner). Try scanning a barcode.')
+        :'<br>The scanner didn\'t press Enter at the end. Scan the “Add Enter (CR) suffix” barcode in your scanner\'s manual, then test again.');
+    if(enter&&fast){post('{{ url_for('pos.hardware_scanner_tested') }}',{enter:true});if({{ sc.beep|tojson }})RiyeserScanner.beep(true);}
+    box.value='';t0=null;gaps=[];n=0;}
+  let idle=null;
+  box.addEventListener('keydown',e=>{const now=performance.now();if(e.key==='Enter'){e.preventDefault();clearTimeout(idle);done(true);return;}
+    if(e.key.length===1){if(t0===null)t0=now;else gaps.push(now-last);last=now;n++;clearTimeout(idle);
+      idle=setTimeout(()=>{if(box.value&&RiyeserScanner.looksScanned(gaps)){post('{{ url_for('pos.hardware_scanner_tested') }}',{enter:false});done(false);}},600);}});}
+})();
+</script>
+{% endblock %}

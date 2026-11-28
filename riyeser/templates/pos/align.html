@@ -1,0 +1,25 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Alignment test · {{ name }}</title>
+{# "Print alignment test" for the Windows print path: a ruler border the exact width the printer should print, L / R
+   edge markers and TOP / BOTTOM. The same slip goes straight to the printer as ESC/POS (riyeser/pos_print.py). #}
+<style>
+body{margin:0;background:#fff;color:#000;font:{{ (12 * lc.font)|round(1) }}px/1.35 "Courier New",monospace}
+.r{width:{{ lc.width }};max-width:100%;margin:0 auto;padding:calc(6px + {{ lc.top }}) 0 calc(6px + {{ lc.bottom }});box-sizing:border-box}
+.edge{position:relative;border:2px solid #000;padding:6px 18px;min-height:150px;box-sizing:border-box}
+.edge .l,.edge .rr{position:absolute;top:50%;transform:translateY(-50%);font-weight:800;font-size:18px}
+.edge .l{left:3px}.edge .rr{right:3px}
+.c{text-align:center}.b{font-weight:800;font-size:15px;letter-spacing:2px}
+.ruler{display:flex;height:14px;border-bottom:1px solid #000;margin:4px 0}
+.ruler i{flex:1;border-left:1px solid #000;height:6px;align-self:flex-end}.ruler i:nth-child(5n+1){height:10px}.ruler i:nth-child(10n+1){height:14px}
+@media print{.r{margin:0 0 0 {{ lc.left }}}@page{size:{{ lc.page_mm }}mm auto;margin:0}}
+</style></head>
+<body{% if not preview %} onload="setTimeout(()=>window.print(),300)"{% endif %}><div class="r">
+<div class="c b">TOP</div>
+<div class="edge"><span class="l">L</span><span class="rr">R</span>
+  <div class="ruler" aria-hidden="true">{% for i in range((lay.content_mm)|int) %}<i></i>{% endfor %}</div>
+  <div class="c">{{ name }}</div>
+  <div class="c">{{ lay.mm }} mm paper · {{ lay.cpl }} characters</div>
+  <div class="c">Left {{ '%+g'|format(lay.left) }} · Right {{ '%+g'|format(lay.right) }} mm</div>
+  <div class="ruler" aria-hidden="true">{% for i in range((lay.content_mm)|int) %}<i></i>{% endfor %}</div>
+</div>
+<div class="c b">BOTTOM</div>
+</div></body></html>

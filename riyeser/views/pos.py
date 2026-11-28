@@ -217,6 +217,7 @@ def approve():
                 who, method = _find_approver(db, rules, d.get("pin"), d.get("card"))
             except PostingError as e:
                 db.execute("INSERT INTO pos_auth_fails (user_id) VALUES (?)", (g.user["id"],))
+                audit(db, "pos_pin_failed", f"manager approval for {action} asked by {g.user['username']}")
                 db.commit()
                 left = MAX_FAILS - _fails(db, g.user["id"])
                 raise PostingError(f"{e} {left} tr{'y' if left == 1 else 'ies'} left." if left > 0 else
@@ -283,12 +284,11 @@ def _save_approvals(db, f):
     name = person["full_name"] or person["username"]
     others = [u for u in approvers(db) if u["id"] != uid]
     if f.get("what") == "pin":
-        pin = (f.get("pin") or "").strip()
-        if not (pin.isdigit() and 4 <= len(pin) <= 6):
-            raise PostingError("A PIN is 4 to 6 numbers.")
-        if any(u["pos_pin_hash"] and check_password_hash(u["pos_pin_hash"], pin) for u in others):
-            raise PostingError("Another manager already uses that PIN. Choose a different one.")
-        db.execute("UPDATE users SET pos_pin_hash=? WHERE id=?", (generate_password_hash(pin), uid))
+        from .. import pos_pins   # the same Till PIN the person signs in to the till with: unique among active users
+        try:
+            pos_pins.set_pin(db, uid, f.get("pin"))
+        except pos_pins.PinError as e:
+            raise PostingError(str(e))
         audit(db, "pos_pin_set", name)
         return f"PIN saved for {name}."
     if f.get("what") == "card":
@@ -345,6 +345,44 @@ def terminal_totals(db, where, args, refund_where, refund_args):
     return T.card_totals(pays, refs)
 
 
+def cashier_totals(db, day=None, shift=None):
+    """Sales by cashier (POS 2.11.1) for a day (the Today screen) or one till shift (the close-till / Z report):
+    each person's sales, voids, refunds and "No sale" openings. Voided sales don't count towards sales."""
+    if shift is not None:
+        sw, sa = "p.shift_id=?", (shift["id"],)
+        rw, ra = "r.shift_id=?", (shift["id"],)
+        nw, na = "e.till_id=? AND e.created_at>=? AND (? IS NULL OR e.created_at<=?)", \
+            (shift["till_id"], shift["opened_at"], shift["closed_at"], shift["closed_at"])
+    else:
+        sw, sa = "d.date=?", (day,)
+        rw, ra = "substr(r.created_at,1,10)=?", (day,)
+        nw, na = "substr(e.created_at,1,10)=?", (day,)
+    out = {}
+
+    def row(uid):
+        return out.setdefault(uid, dict(user_id=uid, name="", sales=0, total=0, voids=0, refunds=0, refund_total=0,
+                                        no_sales=0))
+    for r in db.execute("SELECT p.user_id, p.voided, d.total FROM pos_sales p JOIN documents d ON d.id=p.document_id"
+                        f" WHERE {sw}", sa):
+        x = row(r["user_id"])
+        if r["voided"]:
+            x["voids"] += 1
+        else:
+            x["sales"] += 1
+            x["total"] += r["total"]
+    for r in db.execute(f"SELECT r.user_id, r.amount FROM pos_refunds r WHERE {rw}", ra):
+        x = row(r["user_id"])
+        x["refunds"] += 1
+        x["refund_total"] += r["amount"]
+    for r in db.execute(f"SELECT e.user_id FROM pos_drawer_events e WHERE e.kind='no_sale' AND {nw}", na):
+        row(r["user_id"])["no_sales"] += 1
+    names = {u["id"]: u["full_name"] or u["username"] for u in db.execute("SELECT id, full_name, username FROM users")}
+    for x in out.values():
+        x["name"] = names.get(x["user_id"], "Unknown")
+        x["net"] = x["total"] - x["refund_total"]
+    return sorted(out.values(), key=lambda x: (-x["net"], x["name"]))
+
+
 def shift_figures(db, sh):
     """Everything the X / Z report needs for one shift."""
     sales = db.execute("SELECT p.*, d.total, d.tax_total FROM pos_sales p JOIN documents d ON d.id=p.document_id"
@@ -360,7 +398,8 @@ def shift_figures(db, sh):
                       (sh["id"],)).fetchone()[0]
     term = terminal_totals(db, "p.shift_id=?", (sh["id"],), "r.shift_id=?", (sh["id"],))
     extras = term["tips"] + term["cashout"] + term["surcharge"]
-    return dict(count=len(live), total=cash + card, cash=cash, card=card, gst=sum(r["tax_total"] for r in live)
+    return dict(by_cashier=cashier_totals(db, shift=sh),
+                count=len(live), total=cash + card, cash=cash, card=card, gst=sum(r["tax_total"] for r in live)
                 - sum(r["tax"] for r in refunds), voids=len(voids), void_total=sum(r["total"] for r in voids),
                 refunds=len(refunds), refund_cash=ref_cash, refund_card=ref_card, discounts=int(disc),
                 float=sh["float_amount"], expected=sh["float_amount"] + cash - ref_cash - term["cashout"],
@@ -422,10 +461,23 @@ def close_till():
                            banks=banks, default_bank=linked(db, "default_bank"), active="close",
                            opener=db.execute("SELECT full_name, username FROM users WHERE id=?",
                                              (sh["opened_by"],)).fetchone() if sh else None,
+                           not_yours=own_till_rule(db, sh), by_cashier=cashier_totals(db, shift=sh) if sh else [],
                            **approval_ctx(db))
 
 
+def own_till_rule(db, sh):
+    """With Till PINs in use, a cashier closes the till they opened; a supervisor (Full on Sales) closes any till."""
+    from .. import pos_pins
+    if sh and g.get("cashier") is not None and not self_approves() and sh["opened_by"] != g.user["id"]:
+        who = db.execute("SELECT full_name, username FROM users WHERE id=?", (sh["opened_by"],)).fetchone()
+        return (f"{pos_pins.name_of(who) or 'Someone else'} opened this till. They (or a supervisor) can close it.")
+    return None
+
+
 def _close(db, sh, f):
+    why = own_till_rule(db, sh)
+    if why:
+        raise PostingError(why)
     counts = {}
     for d in DENOMS:
         n = f.get(f"n{d}") or "0"
@@ -488,7 +540,12 @@ def shift_report(shid):
         if sh["approval_id"] else None
     bank = db.execute("SELECT name FROM accounts WHERE id=?", (sh["deposit_account_id"],)).fetchone() \
         if sh["deposit_account_id"] else None
+    if "by_cashier" not in fig:   # a till closed before 2.11.1
+        fig["by_cashier"] = cashier_totals(db, shift=sh)
+    from .. import pos_print as PP
+    till = db.execute("SELECT * FROM pos_tills WHERE id=?", (sh["till_id"],)).fetchone()
     return render_template("pos/shift.html", sh=sh, fig=fig, users=users, appr=appr, bank=bank,
+                           lc=PP.css_vars(PP.layout_of(till)),
                            counts=sorted(((int(k), v) for k, v in json.loads(sh["counts"]).items()), reverse=True)
                            if sh["counts"] else [], now=_now())
 
@@ -579,12 +636,16 @@ def register():
                          " AND qty_on_hand<=reorder_level").fetchone()[0]
     from ..locations import several, stores
     till_locs = {t["id"]: t["location_id"] for t in tills}
-    drawers = {t["id"]: dict(mode=t["drawer_mode"], raw=bool(t["raw_receipts"])) for t in tills}
+    from .pos_drawer import receipt_printer_of, drawer_opens_on
+    from .. import pos_print as PP
+    drawers = {t["id"]: dict(mode=t["drawer_mode"], raw=bool(receipt_printer_of(t)), after=t["print_after"] or "ask",
+                             nosale=drawer_opens_on(t, "no_sale")) for t in tills}
     return render_template("pos/front.html", items_json=json.dumps(items), cats=cats, customers=customers, low_count=low,
                            till_locs=till_locs, drawers=drawers, multi_loc=several(db),
                            locations={l["id"]: l["name"] for l in stores(db)},
                            walk_in=WALK_IN, methods=METHODS, mode=mode, features=sorted(features),
                            tills=tills, shifts=shifts, floats=floats, card_payments=card_ctx(db),
+                           scanner=PP.scanner_settings(db), can_add_products=perms.can("stock", perms.EDIT),
                            **approval_ctx(db))
 
 
@@ -636,15 +697,28 @@ def setup():
             db.execute("INSERT INTO pos_tills (name, location, location_id) VALUES (?,?,?)",
                        (f["new_till"].strip()[:40], (f.get("new_till_loc") or "").strip()[:60] or None,
                         pick(f.get("new_till_stock"))))
+        new_till = None
+        if (f.get("new_till") or "").strip():
+            new_till = db.execute("SELECT MAX(id) FROM pos_tills").fetchone()[0]
+        if f.get("pins") is not None or f.get("lock_minutes") is not None:
+            from .. import pos_pins
+            ps = pos_pins.save_settings(db, f.get("pins"), f.get("lock_minutes"))
+            audit(db, "pos_cashier_settings", json.dumps(ps))
         audit(db, "pos_setup", f"{mode}: {', '.join(sorted(on)) or 'no extras'}")
         db.commit()
+        if new_till:   # a new till: walk through its printer, drawer and scanner (each step can be skipped)
+            flash("Till added. Set up its printer, cash drawer and scanner, or skip any step.", "ok")
+            return redirect(url_for("pos.hardware_start", till=new_till))
         flash(f"POS setup saved: {MODES[mode]['name']}." if f.get("mode_changed") != "1" else
               f"Switched to {MODES[mode]['name']}. Sensible features are on; adjust them below.", "ok")
         return redirect(url_for("pos.setup"))
     mode, on = pos_config(db)
     from ..locations import stores
+    from .. import pos_pins
     return render_template("pos/setup.html", modes=MODES, mode=mode, on=on, tills=_tills(db),
-                           can_change=perms.can("setup", perms.FULL), stock_locations=stores(db))
+                           can_change=perms.can("setup", perms.FULL), stock_locations=stores(db),
+                           pins=pos_pins.settings(db), lock_choices=pos_pins.LOCK_CHOICES,
+                           pin_people=len(pos_pins.cashiers(db)), pins_live=pos_pins.active(db))
 
 
 @bp.route("/mode", methods=["POST"])
@@ -748,8 +822,12 @@ def save_order():
         db.rollback()
         return jsonify(ok=False, error=str(e)), 400
     o = db.execute("SELECT * FROM pos_orders WHERE id=?", (oid,)).fetchone()
+    from .pos_kitchen import print_dockets
+    left, printed, errors = print_dockets(db, o, send_no, printing) if printing else ([], [], [])
     return jsonify(ok=True, id=oid, order=_order_json(db, o), sent=bool(send_no), nothing_new=bool(d.get("kitchen"))
-                   and not send_no, docket_url=url_for("pos.docket", oid=oid, send=send_no) if printing else None)
+                   and not send_no, printed=printed, docket_error=" ".join(errors) or None,
+                   docket_url=url_for("pos.docket", oid=oid, send=send_no, only=",".join(map(str, left)))
+                   if left else None)
 
 
 @bp.route("/order/<int:oid>/cancel", methods=["POST"])
@@ -1076,8 +1154,9 @@ def receipt(sid):
         part = next((p for p in parts if p["id"] == opt_int(request.args.get("part"))), None)
         if part:
             tenders = [t for t in tenders if t["part_id"] == part["id"]]
+    from .pos_hardware import receipt_ctx
     return render_template("pos/receipt.html", s=s, lines=lines, methods=METHOD_LABELS, tenders=tenders,
-                           entry_modes=ENTRY_MODES, part=part, parts=parts)
+                           entry_modes=ENTRY_MODES, part=part, parts=parts, **receipt_ctx(db, s["till_id"]))
 
 
 def day_summary(db, day):
@@ -1128,7 +1207,8 @@ def sales():
     return render_template("pos/sales.html", day=day, day_label=day_label, methods=METHODS, labels=METHOD_LABELS,
                            mode=mode, card_payments=card_ctx(db),
                            features=sorted(features),
-                           tills=_tills(db), **day_summary(db, day), **day_extras(db, day), **approval_ctx(db))
+                           tills=_tills(db), by_cashier=cashier_totals(db, day=day),
+                           **day_summary(db, day), **day_extras(db, day), **approval_ctx(db))
 
 
 @bp.route("/sales/all")
@@ -1316,3 +1396,5 @@ from . import pos_card  # noqa: E402,F401  card terminal routes (riyeser/views/p
 from . import pos_drawer  # noqa: E402,F401  the cash drawer and ESC/POS receipts (riyeser/views/pos_drawer.py)
 from . import pos_kitchen  # noqa: E402,F401  kitchen stations, dockets per send (riyeser/views/pos_kitchen.py)
 from . import pos_tables  # noqa: E402,F401  move, merge and split tables (riyeser/views/pos_tables.py)
+from . import pos_hardware  # noqa: E402,F401  printers, drawer, scanner: the Hardware page (pos_hardware.py)
+from . import pos_cashier  # noqa: E402,F401  who's selling: Till PINs, switch cashier, auto-lock (pos_cashier.py)

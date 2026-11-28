@@ -26,7 +26,7 @@
 .pm i{display:inline-block;width:12px;height:12px;border-radius:4px;margin-right:8px}
 table.t{width:100%;border-collapse:collapse}table.t th,table.t td{padding:12px 14px;border-bottom:1px solid var(--line);text-align:left;font-size:15px}
 table.t th{font-size:11.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);background:#f8fafc;font-weight:700}
-table.t td.r,table.t th.r{text-align:right}table.t tr.void td{color:#94a3b8}table.t form{display:inline}
+table.t td.r,table.t th.r{text-align:right}.tscroll{overflow-x:auto}.bycash table.t th,.bycash table.t td{white-space:nowrap;padding:10px 8px;font-size:14px}.bycash table.t th:first-child,.bycash table.t td:first-child{padding-left:20px}table.t tr.void td{color:#94a3b8}table.t form{display:inline}
 .none{color:var(--muted);padding:16px 0}
 @media (max-width:1100px){.k4{grid-template-columns:repeat(2,1fr)}.g2{grid-template-columns:1fr}}
 @media print{.tbar,.h1 form,.noprint{display:none!important}.shell{height:auto}.main{overflow:visible}body{background:#fff}}
@@ -62,17 +62,19 @@ table.t td.r,table.t th.r{text-align:right}table.t tr.void td{color:#94a3b8}tabl
       <table class="t"><tr><th>Time</th><th>Receipt</th><th>Customer</th><th>Paid</th><th class="r">Total</th><th class="r noprint"></th></tr>
       {% for r in rows %}<tr class="{{ 'void' if r.voided }}"><td class="n">{{ r.created_at[11:16] }}</td><td><a href="{{ url_for('documents.view', doc_id=r.document_id) }}">{{ r.number }}</a>{% if r.till_name and tills|length > 1 %}<br><small style="color:var(--muted)">{{ r.till_name }}</small>{% endif %}</td>
         <td>{{ r.cname }}</td><td>{{ labels[r.method] }}</td><td class="r n">{% if r.voided %}<s>{{ r.total|money }}</s>{% else %}{{ r.total|money }}{% endif %}</td>
-        <td class="r noprint"><div class="sale-acts">{% if r.voided %}<span class="badge err">Voided</span>{% else %}{% if refunded.get(r.id) %}<span class="badge warn">Refunded {{ refunded[r.id]|money }}</span> {% endif %}<a class="btn sm" href="{{ url_for('pos.receipt', sid=r.id) }}" target="_blank">Receipt</a>
+        <td class="r noprint"><div class="sale-acts">{% if r.voided %}<span class="badge err">Voided</span>{% else %}{% if refunded.get(r.id) %}<span class="badge warn">Refunded {{ refunded[r.id]|money }}</span> {% endif %}<a class="btn sm" href="{{ url_for('pos.receipt', sid=r.id) }}" data-print>Receipt</a>
         {% if lv('sales') >= 2 %}<button class="btn sm" data-refund="{{ r.id }}">Refund</button>{% if not refunded.get(r.id) %} <button class="btn sm danger" data-void="{{ r.id }}" data-num="{{ r.number }}" data-total="{{ r.total }}" data-method="{{ labels[r.method] }}" data-time="{{ r.created_at[11:16] }}">Void</button>{% endif %}{% endif %}{% endif %}</div></td></tr>
       {% else %}<tr><td colspan="6" class="none">No POS sales on this day.</td></tr>{% endfor %}</table>
       {% if refunds %}<div class="pd" style="padding-bottom:6px"><h3>Refunds</h3></div><table class="t"><tr><th>Time</th><th>From sale</th><th>Paid back</th><th>Reason</th><th class="r">Amount</th></tr>
       {% for f in refunds %}<tr><td class="n">{{ f.created_at[11:16] }}</td><td>{{ f.number }}</td><td>{{ methods[f.method] }}</td><td>{{ f.reason or '' }}</td><td class="r n">-{{ f.amount|money }}</td></tr>{% endfor %}</table>{% endif %}</div>
+    <div style="display:flex;flex-direction:column;gap:18px;min-width:0"><div class="card" style="overflow:hidden"><div class="pd" style="padding-bottom:8px"><h3>Sales by cashier</h3><p style="margin:0;color:var(--muted);font-size:13.5px">Who sold what{{ ' today' if day == today() }}, after refunds.</p></div>
+      {% with rows = by_cashier %}{% include "pos/_by_cashier.html" %}{% endwith %}</div>
     <div class="card pd"><h3>How people paid</h3>
       {% if total %}<div class="meter"><i style="width:{{ (card / total * 100)|round(1) }}%;background:var(--green)"></i><i style="width:{{ (cash / total * 100)|round(1) }}%;background:var(--mint)"></i></div>{% endif %}
       <div class="pm"><div><span><i style="background:var(--green)"></i>{{ methods.card }}</span><b class="n">{{ card|money }}</b></div>
         <div><span><i style="background:var(--mint)"></i>{{ methods.cash }}</span><b class="n">{{ cash|money }}</b></div>
         <div><span>Change given (already taken off)</span><span class="n">{{ cash_out|money }}</span></div>
-        <div><span>GST included</span><span class="n">{{ gst|money }}</span></div></div></div>
+        <div><span>GST included</span><span class="n">{{ gst|money }}</span></div></div></div></div>
   </div>
 </div>
 {% endblock %}
