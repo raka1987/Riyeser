@@ -59,7 +59,7 @@
     <div class="presets"><span>Access for this person: <b id="newRole">{{ presets[default_preset][0] if default_preset in presets else '' }}</b></span><a href="#" id="newReset" hidden>Reset to <span id="newResetName"></span> standard</a></div>
     <p class="muted small" style="margin:0 0 8px">Starts from the role you chose. Change any area before adding them.</p>
     <table class="perm-grid"><tr><th>Area</th>{% for v, name in level_names %}<th class="c">{{ name }}</th>{% endfor %}</tr>
-    {% for a, name, desc in areas %}<tr><td><b>{{ name }}</b><div class="muted small">{{ desc }}</div></td>
+    {% for a, name, desc in areas %}<tr><td><b>{{ name }}</b><div class="muted small">{{ desc if tl.bas or 'GST/BAS' not in desc else desc.replace('GST/BAS', tl.report if tl.has_tax else 'tax reports') }}</div></td>
       {% for v, _ in level_names %}<td class="c"><input type="radio" name="perm_{{ a }}" value="{{ v }}" aria-label="{{ name }}: {{ level_names[v][1] }}"></td>{% endfor %}</tr>{% endfor %}
     </table>
     <p class="muted small" style="margin:8px 0 0">The till's own rules stay as they are: refunds, voids and “No sale” need a manager's PIN unless the person has Full access to Sales. Only an administrator can change anyone's access.</p>
