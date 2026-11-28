@@ -103,6 +103,7 @@ if AFTER and mode == "retail":
                               "lines": [{"item_id": nm, "qty": 1}], "checkout_ref": "shot-1"})
     c.post("/pos/drawer/open", json={"till_id": 1, "reason": "Swap notes for coins"})
 if mode == "restaurant":
+    c.post("/pos/tables", data={"new_area": "Inside", "new_area_tables": "1-20"})   # POS setup › Tables
     if AFTER:
         c.post("/pos/kitchen", data={"what": "stations", "name_1": "Kitchen", "output_1": "both", "new_name": "Bar",
                                      "new_output": "screen", "amber": "8", "red": "15"})

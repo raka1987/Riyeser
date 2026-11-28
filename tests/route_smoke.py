@@ -8,6 +8,7 @@ data of its own, and a shop PC is often offline). Run directly it prints the fai
 """
 import json
 import os
+import re
 import sys
 import traceback
 
@@ -16,6 +17,33 @@ SKIP = {"static", "auth.logout", "online_api.api_unknown", "companies.switch"}
 TEXT_ARGS = {"side": ("sale", "purchase"), "kind": ("customer", "supplier", "spend", "receive"),
              "token": ("x",), "iid": ("1",), "filename": ("app.css",)}
 ERROR_PAGE = "Nothing was saved from that last step"
+
+
+_TARGETED = re.compile(r"<(?:a|form|area|base)\b[^>]*>", re.I)
+_OURS = re.compile(r"^(?:https?:)?//(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?(?:/|$)", re.I)
+
+
+def browser_leaks(html):
+    """What on this page could hand one of Riyeser's own pages to the computer's web browser (which isn't signed in:
+    a receipt opened there at the sign-in page, POS 2.11.0). A link or form that opens a new window, or a script
+    calling window.open, is only fine when it goes to another website, or the page loads static/inapp.js, which
+    keeps our own pages inside the app window."""
+    if "inapp.js" in html:
+        return []
+    out = []
+    for m in _TARGETED.finditer(html):
+        tag = m.group(0)
+        t = re.search(r"\btarget\s*=\s*[\"']?([^\"'\s>]+)", tag, re.I)
+        if not t or t.group(1).lower() in ("_self", "_top", "_parent"):
+            continue
+        h = re.search(r"\b(?:href|action)\s*=\s*[\"']([^\"']*)", tag, re.I)
+        href = h.group(1) if h else ""
+        outside = re.match(r"(?:https?:)?//", href, re.I) and not _OURS.match(href)
+        if not (outside or href.startswith(("mailto:", "tel:"))):
+            out.append(tag[:160])
+    if "window.open(" in html:
+        out.append("window.open(...) in a script")
+    return out
 
 
 def no_internet():
@@ -152,6 +180,11 @@ def run(work, edition, kinds, offline=False, no_tz=False):
                 r = client.get(url, headers=api_headers if url.startswith("/online/api/") else None)
                 if r.status_code >= 500 or (r.mimetype == "text/html" and ERROR_PAGE in r.get_data(as_text=True)):
                     failures.append((kind, url, f"HTTP {r.status_code}"))
+                elif r.mimetype == "text/html":
+                    leaks = browser_leaks(r.get_data(as_text=True))
+                    if leaks:
+                        failures.append((kind, url, "would open the web browser for one of our own pages: "
+                                         + "; ".join(leaks)))
             except Exception as e:
                 failures.append((kind, url, "".join(traceback.format_exception(type(e), e, e.__traceback__)[-4:])))
     return failures

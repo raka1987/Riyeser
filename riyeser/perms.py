@@ -262,7 +262,7 @@ def area_of(endpoint, view_args, args, db):
         return "bookings"
     if endpoint in ("pos.setup", "pos.set_mode", "pos.approvals", "pos.hardware", "pos.hardware_save",
                     "pos.hardware_start", "pos.hardware_test_print", "pos.hardware_test_docket",
-                    "pos.hardware_scanner_tested"):
+                    "pos.hardware_scanner_tested", "pos.tables_setup", "pos.promotions"):
         return "setup"  # how the till is set up is a setup decision, not a sales one
     if bp == "pos":
         return "sales"

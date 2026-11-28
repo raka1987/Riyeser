@@ -1,0 +1,64 @@
+{% extends "base.html" %}{% block title %}Tables{% endblock %}
+{% block content %}
+<style>
+.tb-area{margin-bottom:var(--sp-4)}
+.tb-area h2{margin:0;font-size:18px}
+.tb-head{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.tb-head input[type=text]{max-width:260px;font-weight:700;min-height:44px}
+.tb-head .sp{flex:1}
+.tb-rows{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
+.tb-row{display:grid;grid-template-columns:minmax(0,1fr) 78px;gap:8px;align-items:end;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:#fff}
+.tb-row label.lb,.tb-add label.lb{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin-bottom:3px}
+.tb-row input,.tb-row select,.tb-add input{min-height:44px;width:100%}
+.tb-row .more{grid-column:1/-1;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.tb-row .more select{flex:1;min-width:120px}
+.tb-row .check,.tb-head .check{margin:0;min-height:44px;display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
+.tb-row .check input,.tb-head .check input{width:22px;height:22px;min-height:0}
+.tb-row.busy{border-color:#f8d9a8;background:#fffaf2}
+.tb-add{display:grid;grid-template-columns:minmax(0,2fr) 110px;gap:10px;align-items:end;margin-top:12px;padding-top:12px;border-top:1px dashed var(--line-2)}
+.tb-add.new{grid-template-columns:minmax(0,1fr) minmax(0,2fr) 110px;border-top:0;margin-top:0;padding-top:0}
+.tb-hint{color:var(--muted);font-size:13px;margin:6px 0 0}
+.tb-empty{text-align:center;padding:10px 0 4px}.tb-empty h2{margin:0 0 4px}
+.tb-save{position:sticky;bottom:0;padding:10px 0 6px;justify-content:flex-end;pointer-events:none}.tb-save>*{pointer-events:auto;box-shadow:0 4px 14px rgba(15,23,42,.18)}
+.tb-save .btn{min-height:48px;padding:8px 22px}
+@media (max-width:640px){.tb-add,.tb-add.new{grid-template-columns:1fr}.tb-rows{grid-template-columns:1fr}}
+</style>
+<div class="head"><div><h1>Tables</h1><p class="sub">Add your tables and the areas they are in, such as Inside and Outside. The till's Tables screen shows them the same way, so staff can open a table, add items, and move or split it.</p></div>
+  <div class="actions"><a class="btn" href="{{ url_for('pos.setup') }}">POS setup</a><a class="btn" href="{{ url_for('pos.register') }}#tables">Open the till</a></div></div>
+{% if mode != 'restaurant' or not tables_on %}<div class="flash warn" role="status">{% if mode != 'restaurant' %}The till is set up for Retail, so it doesn't show tables. Switch to Restaurant in <a href="{{ url_for('pos.setup') }}">POS setup</a> to use them.{% else %}“Tables (dine-in)” is turned off in <a href="{{ url_for('pos.setup') }}">POS setup</a>, so the till doesn't show tables. Turn it on to use them.{% endif %}</div>{% endif %}
+<form method="post" id="tablesForm">
+<fieldset {{ 'disabled' if not can_change }} style="border:0;padding:0;margin:0;min-width:0">
+{% if not areas and not tables %}
+<div class="card tb-empty"><h2>No tables yet</h2><p class="sub" style="margin:0 auto 14px">Start with one area and its tables. You can add more areas, rename tables and change seats afterwards.</p>
+  <div class="tb-add new" style="text-align:left">
+    <div><label class="lb" for="new_area">Area</label><input type="text" id="new_area" name="new_area" value="Inside" maxlength="30"></div>
+    <div><label class="lb" for="new_area_tables">Tables</label><input type="text" id="new_area_tables" name="new_area_tables" value="1-10" placeholder="1-10, or A1, A2, Bar 1"></div>
+    <div><label class="lb" for="new_area_seats">Seats each</label><input type="number" id="new_area_seats" name="new_area_seats" value="4" min="1" max="99" inputmode="numeric"></div></div>
+  <p class="tb-hint" style="text-align:left">“1-10” adds tables 1 to 10. For other names, separate them with commas (up to {{ name_max }} characters each).</p></div>
+{% else %}
+{% macro row(t) %}<div class="tb-row{{ ' busy' if t.name in busy }}">
+  <div><label class="lb" for="tn{{ t.id }}">Table</label><input type="text" id="tn{{ t.id }}" name="table_name_{{ t.id }}" value="{{ t.name }}" maxlength="{{ name_max }}" required></div>
+  <div><label class="lb" for="ts{{ t.id }}">Seats</label><input type="number" id="ts{{ t.id }}" name="table_seats_{{ t.id }}" value="{{ t.seats }}" min="1" max="99" inputmode="numeric"></div>
+  <div class="more">{% if areas|length > 1 or not t.area_id %}<select name="table_area_{{ t.id }}" aria-label="Area for table {{ t.name }}">{% if not t.area_id %}<option value="">No area</option>{% endif %}{% for a in areas %}<option value="{{ a.id }}" {{ 'selected' if a.id == t.area_id }}>{{ a.name }}</option>{% endfor %}</select>{% else %}<span style="flex:1"></span>{% endif %}
+    {% if t.name in busy %}<span class="badge open">Order open</span>{% else %}<label class="check"><input type="checkbox" name="table_remove_{{ t.id }}" value="1"> Remove</label>{% endif %}</div></div>{% endmacro %}
+{% for a in areas %}
+<div class="card tb-area" data-area="{{ a.name }}">
+  <div class="tb-head"><label class="lb" for="an{{ a.id }}" style="position:absolute;left:-9999px">Area name</label><input type="text" id="an{{ a.id }}" name="area_name_{{ a.id }}" value="{{ a.name }}" maxlength="30" required aria-label="Area name">
+    <span class="muted">{{ by_area[a.id]|length }} table{{ '' if by_area[a.id]|length == 1 else 's' }} · {{ by_area[a.id]|sum(attribute='seats') }} seats</span><span class="sp"></span>
+    <label class="check"><input type="checkbox" name="area_remove_{{ a.id }}" value="1"> Remove this area{{ ' and its tables' if by_area[a.id] }}</label></div>
+  <div class="tb-rows">{% for t in by_area[a.id] %}{{ row(t) }}{% endfor %}</div>
+  <div class="tb-add">
+    <div><label class="lb" for="nt{{ a.id }}">Add tables to {{ a.name }}</label><input type="text" id="nt{{ a.id }}" name="new_tables_{{ a.id }}" placeholder="e.g. 11-14, or Deck 1, Deck 2"></div>
+    <div><label class="lb" for="ns{{ a.id }}">Seats each</label><input type="number" id="ns{{ a.id }}" name="new_seats_{{ a.id }}" value="4" min="1" max="99" inputmode="numeric"></div></div>
+</div>{% endfor %}
+{% if loose %}<div class="card tb-area"><div class="tb-head"><h2>Tables without an area</h2></div><div class="tb-rows">{% for t in loose %}{{ row(t) }}{% endfor %}</div></div>{% endif %}
+<div class="card tb-area"><h2 style="margin-bottom:10px">Add another area</h2>
+  <div class="tb-add new">
+    <div><label class="lb" for="new_area">Area</label><input type="text" id="new_area" name="new_area" maxlength="30" placeholder="e.g. Outside"></div>
+    <div><label class="lb" for="new_area_tables">Its tables</label><input type="text" id="new_area_tables" name="new_area_tables" placeholder="e.g. 21-26, or P1, P2"></div>
+    <div><label class="lb" for="new_area_seats">Seats each</label><input type="number" id="new_area_seats" name="new_area_seats" value="4" min="1" max="99" inputmode="numeric"></div></div>
+  <p class="tb-hint">“21-26” adds tables 21 to 26. For other names, separate them with commas (up to {{ name_max }} characters each). Every table needs its own name or number.</p></div>
+{% endif %}
+{% if can_change %}<p class="actions tb-save"><a class="btn" href="{{ url_for('pos.setup') }}">Cancel</a><button class="btn pri">Save tables</button></p>{% else %}<p class="muted">Only an owner or administrator can change the tables.</p>{% endif %}
+</fieldset></form>
+{% endblock %}

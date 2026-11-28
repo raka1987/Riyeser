@@ -22,18 +22,20 @@
   <div class="actions"><a class="btn" href="{{ url_for('pos.register') }}">Open the till</a></div></div>
 <div class="tip"><span>ⓘ</span><div>Changing this never deletes sales, products or stock. It only changes what the till shows{% if not can_change %}. <b>Only an owner or administrator can change it.</b>{% else %}, and you can switch back at any time.{% endif %}</div></div>
 <form method="post" id="setupForm">
-<input type="hidden" name="mode_changed" id="modeChanged" value="0">
+<input type="hidden" name="mode_changed" id="modeChanged" value="0"><input type="hidden" name="features_for" id="featuresFor" value="{{ mode }}">
 <fieldset {{ 'disabled' if not can_change }} style="border:0;padding:0;margin:0;min-width:0">
 <div class="card"><h2 style="margin-top:0">1 · What kind of business is this?</h2>
   <div class="ptypes">{% for k, m in modes.items() %}
     <label class="ptype"><input type="radio" name="mode" value="{{ k }}" {{ 'checked' if k == mode }} data-mode>
       <span><b>{{ m.name }}</b><small>{{ m.blurb }}</small></span></label>{% endfor %}</div>
-  <p class="muted" id="modeNote" style="margin:12px 0 0;display:none">Saving switches the till to this business type and turns on its usual features. You can fine-tune them afterwards.</p>
+  <p class="muted" id="modeNote" style="margin:12px 0 0;display:none" role="status">Its features are below: turn any on or off, then press <b>Save POS setup</b> to switch the till over.</p>
 </div>
 <div class="card" id="featCard"><h2 style="margin-top:0">2 · Features on the till</h2>
-  <p class="sub" style="margin-top:-4px">For <b>{{ modes[mode].name }}</b>. Turn any on or off.</p>
-  <div class="feats">{% for key, name, help in modes[mode].features %}
-    <label class="ft"><div><b>{{ name }}</b><small>{{ help }}</small></div><input class="sw" type="checkbox" name="feature" value="{{ key }}" {{ 'checked' if key in on }} aria-label="{{ name }}"></label>{% endfor %}</div>
+  {# each business type has its own switches; choosing the other type shows its switches straight away #}
+  {% for k, m in modes.items() %}<div data-feats="{{ k }}"{{ ' hidden' if k != mode }}>
+  <p class="sub" style="margin-top:-4px">For <b>{{ m.name }}</b>. Turn any on or off.</p>
+  <div class="feats">{% for key, name, help in m.features %}
+    <label class="ft"><div><b>{{ name }}</b><small>{{ help }}</small></div><input class="sw" type="checkbox" name="feature_{{ k }}" value="{{ key }}" {{ 'checked' if key in on_by[k] }} aria-label="{{ name }}"></label>{% endfor %}</div></div>{% endfor %}
 </div>
 <div class="card"><h2 style="margin-top:0">3 · Tills</h2>
   <p class="sub" style="margin-top:-4px">Give each register a name. Each sale records which till it was made on, and the till is picked at the top of the POS screen. Each till sells stock from its <b>stock location</b>{% if stock_locations|length < 2 %} (you have one: add more under <a href="{{ url_for('inventory.locations') }}">Stock locations</a>){% endif %}.</p>
@@ -51,16 +53,23 @@
     <div><label for="lockMin">Lock the till after no use for</label><select name="lock_minutes" id="lockMin">{% for m, n in lock_choices %}<option value="{{ m }}" {{ 'selected' if pins.lock_minutes == m }}>{{ n }}</option>{% endfor %}</select></div>
   </div>
   <p class="muted" style="margin:10px 0 0;font-size:13px">{% if pins_live %}{{ pin_people }} {{ 'person has' if pin_people == 1 else 'people have' }} a Till PIN, so the till asks who's selling.{% elif pins.pins == 'off' %}The till doesn't ask: the person signed in on this PC sells.{% else %}The till starts asking once a member of staff (not only managers) has a Till PIN.{% endif %} Five wrong PINs lock the PIN pad for a minute; every wrong PIN is in the audit trail.</p></div>
-<div class="card"><h2 style="margin-top:0">5 · Hardware, card payments and kitchen</h2>
-  <p class="sub" style="margin-top:-4px">Receipt and kitchen printers, the cash drawer and the barcode scanner are on the Hardware page, with a test for each. Link each till to a card machine (EFTPOS): Manual, the Practice terminal, or a linked terminal (coming soon).</p>
+<div class="card"><h2 style="margin-top:0">5 · {{ 'Tables and promotions' if mode == 'restaurant' else 'Promotions' }}</h2>
+  <p class="sub" style="margin-top:-4px">{% if mode == 'restaurant' %}Add your tables and areas (Inside, Outside) so staff can open a table at the till. {% endif %}Promotions take money off by themselves: a happy hour, a sale on a category, or a promo code.</p>
+  <div style="display:flex;gap:10px;flex-wrap:wrap">{% if mode == 'restaurant' %}<a class="btn" href="{{ url_for('pos.tables_setup') }}">Tables{{ ' (' ~ table_count ~ ')' if table_count else ': add tables' }}</a>{% endif %}<a class="btn" href="{{ url_for('pos.promotions') }}">Promotions{{ ' (' ~ promo_count ~ ' on)' if promo_count }}</a></div></div>
+<div class="card"><h2 style="margin-top:0">6 · Hardware, card payments and kitchen</h2>
+  <p class="sub" style="margin-top:-4px">Receipt printer (58 or 80 mm paper, margins, logo), kitchen printers, the cash drawer and the barcode scanner are all on the Hardware page, with a test for each. Link each till to a card machine (EFTPOS): Manual, the Practice terminal, or a linked terminal (coming soon).</p>
   {% for t in tills if not t.hw_setup_at %}{% if loop.first %}<div class="newtill">{% endif %}<span>{{ t.name }}'s printer, drawer and scanner aren't set up yet.</span> <a class="btn sm pri" href="{{ url_for('pos.hardware_start', till=t.id) }}">Set up {{ t.name }}</a>{% if loop.last %}</div>{% endif %}{% endfor %}
   <div style="display:flex;gap:10px;flex-wrap:wrap"><a class="btn" href="{{ url_for('pos.hardware') }}">Hardware</a><a class="btn" href="{{ url_for('pos.card_setup') }}">Card payments</a>{% if mode == 'restaurant' %}<a class="btn" href="{{ url_for('pos.kitchen_setup') }}">Kitchen: stations &amp; screen</a>{% endif %}<a class="btn" href="{{ url_for('inventory.locations') }}">Stock locations</a></div></div>
 {% if can_change %}<p class="actions" style="justify-content:flex-end"><a class="btn" href="{{ url_for('core.dashboard') }}">Cancel</a><button class="btn pri">Save POS setup</button></p>{% endif %}
 </fieldset>
 </form>
 <script>
-(function(){const cur='{{ mode }}';document.querySelectorAll('[data-mode]').forEach(r=>r.addEventListener('change',()=>{
-  const changed=r.value!==cur;document.getElementById('modeChanged').value=changed?'1':'0';
-  document.getElementById('modeNote').style.display=changed?'block':'none';document.getElementById('featCard').style.opacity=changed?.45:1;}));})();
+/* Choosing the other business type shows that type's switches straight away, ready to use (they used to be greyed
+   out until the page was saved, which looked as if the features had stopped working). */
+(function(){const cur='{{ mode }}';function sync(){const r=document.querySelector('[data-mode]:checked');if(!r)return;
+  const changed=r.value!==cur;document.getElementById('modeChanged').value=changed?'1':'0';document.getElementById('featuresFor').value=r.value;
+  document.getElementById('modeNote').style.display=changed?'block':'none';
+  document.querySelectorAll('[data-feats]').forEach(d=>{d.hidden=d.dataset.feats!==r.value;});}
+  document.querySelectorAll('[data-mode]').forEach(r=>r.addEventListener('change',sync));sync();})();
 </script>
 {% endblock %}

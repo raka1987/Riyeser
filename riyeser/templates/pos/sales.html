@@ -1,7 +1,7 @@
 {% extends "pos/_pos.html" %}{% set active = 'sales' %}
 {% block title %}Sales {{ day }}{% endblock %}
 {% block css %}
-.sale-acts{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;align-items:center;min-width:150px}
+.sale-acts{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;align-items:center;min-width:230px}
 .today{padding:20px 22px 40px;max-width:1320px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
 .h1{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap}
 .h1 h1{margin:0;font-size:30px;letter-spacing:-.5px}.h1 p{margin:4px 0 0;color:var(--muted)}
@@ -60,9 +60,9 @@ table.t td.r,table.t th.r{text-align:right}.tscroll{overflow-x:auto}.bycash tabl
   <div class="g2">
     <div class="card" style="overflow:hidden"><div class="pd" style="padding-bottom:8px"><h3>Sales</h3></div>
       <table class="t"><tr><th>Time</th><th>Receipt</th><th>Customer</th><th>Paid</th><th class="r">Total</th><th class="r noprint"></th></tr>
-      {% for r in rows %}<tr class="{{ 'void' if r.voided }}"><td class="n">{{ r.created_at[11:16] }}</td><td><a href="{{ url_for('documents.view', doc_id=r.document_id) }}">{{ r.number }}</a>{% if r.till_name and tills|length > 1 %}<br><small style="color:var(--muted)">{{ r.till_name }}</small>{% endif %}</td>
+      {% for r in rows %}<tr class="{{ 'void' if r.voided }}"><td class="n">{{ r.created_at[11:16] }}</td><td><a href="{{ url_for('pos.receipt_view', sid=r.id) }}">{{ r.number }}</a>{% if r.till_name and tills|length > 1 %}<br><small style="color:var(--muted)">{{ r.till_name }}</small>{% endif %}</td>
         <td>{{ r.cname }}</td><td>{{ labels[r.method] }}</td><td class="r n">{% if r.voided %}<s>{{ r.total|money }}</s>{% else %}{{ r.total|money }}{% endif %}</td>
-        <td class="r noprint"><div class="sale-acts">{% if r.voided %}<span class="badge err">Voided</span>{% else %}{% if refunded.get(r.id) %}<span class="badge warn">Refunded {{ refunded[r.id]|money }}</span> {% endif %}<a class="btn sm" href="{{ url_for('pos.receipt', sid=r.id) }}" data-print>Receipt</a>
+        <td class="r noprint"><div class="sale-acts">{% if r.voided %}<span class="badge err">Voided</span>{% else %}{% if refunded.get(r.id) %}<span class="badge warn">Refunded {{ refunded[r.id]|money }}</span> {% endif %}<a class="btn sm" href="{{ url_for('pos.receipt_view', sid=r.id) }}" data-view-receipt>View receipt</a> <a class="btn sm" href="{{ url_for('pos.receipt', sid=r.id) }}" data-print>Print</a>
         {% if lv('sales') >= 2 %}<button class="btn sm" data-refund="{{ r.id }}">Refund</button>{% if not refunded.get(r.id) %} <button class="btn sm danger" data-void="{{ r.id }}" data-num="{{ r.number }}" data-total="{{ r.total }}" data-method="{{ labels[r.method] }}" data-time="{{ r.created_at[11:16] }}">Void</button>{% endif %}{% endif %}{% endif %}</div></td></tr>
       {% else %}<tr><td colspan="6" class="none">No POS sales on this day.</td></tr>{% endfor %}</table>
       {% if refunds %}<div class="pd" style="padding-bottom:6px"><h3>Refunds</h3></div><table class="t"><tr><th>Time</th><th>From sale</th><th>Paid back</th><th>Reason</th><th class="r">Amount</th></tr>

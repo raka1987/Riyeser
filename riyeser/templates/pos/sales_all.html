@@ -24,11 +24,11 @@ table.t tr.tot td{font-weight:800;background:var(--green-l)}
   <div class="card pd">
     {{ ls.bar(lst) }}
     <div class="tscroll"><table class="t"><tr>{{ ls.th(lst, 'created_at') }}{{ ls.th(lst, 'number') }}{{ ls.th(lst, 'cname') }}{% if tills|length > 1 %}{{ ls.th(lst, 'till_name') }}{% endif %}{{ ls.th(lst, 'method') }}{{ ls.th(lst, 'total', cls='r') }}{{ ls.th(lst, 'refunded', cls='r') }}<th class="r"></th></tr>
-    {% for r in rows %}<tr class="{{ 'void' if r.voided }}"><td class="n" style="white-space:nowrap">{{ r.date }} {{ r.created_at[11:16] }}</td><td><a href="{{ url_for('documents.view', doc_id=r.document_id) }}">{{ r.number }}</a></td>
+    {% for r in rows %}<tr class="{{ 'void' if r.voided }}"><td class="n" style="white-space:nowrap">{{ r.date }} {{ r.created_at[11:16] }}</td><td><a href="{{ url_for('pos.receipt_view', sid=r.id, back='all') }}">{{ r.number }}</a></td>
       <td>{{ r.cname }}</td>{% if tills|length > 1 %}<td>{{ r.till_name or '' }}</td>{% endif %}<td>{{ labels.get(r.method, r.method) }}</td>
       <td class="r n">{% if r.voided %}<s>{{ r.total|money }}</s>{% else %}{{ r.total|money }}{% endif %}</td>
       <td class="r n">{{ ('-' ~ (r.refunded|money)) if r.refunded else '' }}</td>
-      <td class="r" style="white-space:nowrap">{% if r.voided %}<span class="badge err">Voided</span>{% else %}<a class="btn sm" href="{{ url_for('pos.receipt', sid=r.id) }}" data-print>Receipt</a> <a class="btn sm" href="{{ url_for('pos.sales', date=r.date) }}">That day</a>{% endif %}</td></tr>
+      <td class="r" style="white-space:nowrap">{% if r.voided %}<span class="badge err">Voided</span>{% else %}<a class="btn sm" href="{{ url_for('pos.receipt_view', sid=r.id, back='all') }}" data-view-receipt>View receipt</a> <a class="btn sm" href="{{ url_for('pos.receipt', sid=r.id) }}" data-print>Print</a> <a class="btn sm" href="{{ url_for('pos.sales', date=r.date) }}">That day</a>{% endif %}</td></tr>
     {% else %}<tr><td colspan="8" class="none">{{ 'No sales match these filters.' if lst.filtered else 'No POS sales yet.' }}</td></tr>{% endfor %}
     {% if rows %}<tr class="tot"><td colspan="{{ 5 if tills|length > 1 else 4 }}">{{ lst.shown }} sale{{ '' if lst.shown == 1 else 's' }} · after refunds, voided sales left out</td><td class="r n" colspan="2">{{ net|money }}</td><td></td></tr>{% endif %}</table></div>
     {{ ls.pager(lst) }}

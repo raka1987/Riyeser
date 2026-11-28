@@ -24,7 +24,7 @@ OPEN_WHEN_LOCKED = {"pos.register", "pos.cashier_state", "pos.cashier_unlock", "
 BACK_OFFICE = {"pos.setup", "pos.set_mode", "pos.approvals", "pos.hardware", "pos.hardware_save", "pos.hardware_start",
                "pos.hardware_test_print", "pos.hardware_test_docket", "pos.hardware_scanner_tested",
                "pos.hardware_preview", "pos.hardware_align", "pos.card_setup", "pos.drawer_setup", "pos.drawer_test",
-               "pos.kitchen_setup"}
+               "pos.kitchen_setup", "pos.tables_setup", "pos.promotions"}
 
 
 def _company_key():

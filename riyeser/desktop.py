@@ -31,6 +31,40 @@ def _wait_until_up(url, timeout=30):
     return False
 
 
+def is_internal(url, base):
+    """Is this address one of this program's own pages (the private server on this PC)?"""
+    from urllib.parse import urlsplit
+    try:
+        u, b = urlsplit(str(url)), urlsplit(base)
+    except ValueError:
+        return False
+    return u.scheme in ("http", "https") and (u.hostname or "").lower() in ("127.0.0.1", "localhost", "::1") \
+        and (u.port or 80) == (b.port or 80)
+
+
+def keep_own_pages_in_app(base, show=None):
+    """The app window hands any link that opens a new window to the computer's web browser (through Python's
+    webbrowser module). The browser isn't signed in, so one of Riyeser's own pages opened there shows the sign-in
+    page (a receipt did, in POS 2.11.0). From here on the browser is only ever given other websites: one of our own
+    pages is shown in the app window instead (show(url)), whatever asked for it. Returns the browser's real opener
+    (for the no-window fallback, where the browser IS the app)."""
+    real = webbrowser.open
+
+    def guarded_open(url, new=0, autoraise=True):
+        if is_internal(url, base):
+            if show:
+                try:
+                    show(str(url))
+                except Exception:
+                    pass
+            return True
+        return real(url, new, autoraise)
+    webbrowser.open = guarded_open
+    webbrowser.open_new = lambda url: guarded_open(url, 1)
+    webbrowser.open_new_tab = lambda url: guarded_open(url, 2)
+    return real
+
+
 # Screens Riyeser Central can open the app on (quick access): --page=pos opens the Shop counter.
 START_PAGES = {"pos": "/pos/", "invoice": "/sale/new", "estimate": "/estimate/new"}
 
@@ -92,6 +126,7 @@ def main(argv=None):
     print(f"{app_name} running at {url}  (company file: {app.config['DATABASE']}"
           f"{', demo mode' if app.config.get('DEMO_MODE') else ''})", flush=True)
 
+    open_browser = webbrowser.open
     if args.no_window:
         try:
             while True:
@@ -104,11 +139,20 @@ def main(argv=None):
             webview.settings["ALLOW_DOWNLOADS"] = True  # PDFs, CSV exports
         except Exception:
             pass
-        webview.create_window(app_name, url + start_path(args.page), width=1360, height=860, min_size=(1000, 650))
+        window = webview.create_window(app_name, url + start_path(args.page), width=1360, height=860,
+                                       min_size=(1000, 650))
+
+        def show_in_app(link):
+            # not on the window's own thread (it is busy handing us the link): the in-app viewer, else the page itself
+            import json
+            js = ("(function(u){if(window.RiyeserInApp){RiyeserInApp.view(u);}else{location.href=u;}})(%s)"
+                  % json.dumps(link))
+            threading.Thread(target=lambda: window.evaluate_js(js), daemon=True).start()
+        open_browser = keep_own_pages_in_app(url, show_in_app)
         webview.start()
     except Exception as e:  # no GUI toolkit - use the browser instead
         print(f"(No app window available: {e}; opening your browser instead. Close this window to quit.)")
-        webbrowser.open(url + start_path(args.page))
+        open_browser(url + start_path(args.page))
         try:
             while True:
                 time.sleep(3600)

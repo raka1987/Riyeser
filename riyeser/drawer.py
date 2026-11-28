@@ -204,7 +204,7 @@ def _wrap(text, width):
 
 def receipt_bytes(r, kick=False, width=WIDTH):
     """An ESC/POS receipt from a plain dict: company, number, date, lines [(qty, description, amount)], total, tax,
-    tax_name, tenders [(label, amount)], change, footer. kick: the drawer pulse first, so the drawer opens as the
+    tax_name, tenders [(label, amount)], change, footer, promos [(name, amount)], saved. kick: the drawer pulse first, so the drawer opens as the
     receipt starts printing."""
     b = bytearray()
     fm = r.get("money_fmt")
@@ -220,6 +220,10 @@ def receipt_bytes(r, kick=False, width=WIDTH):
     b += _enc("-" * width + "\n")
     for qty, desc, amt in r.get("lines", []):
         b += _enc(_row(f"{qty:g} x {desc}", money(amt, fm), width))
+    for name, amt in r.get("promos", []):   # promotions already taken off the prices above
+        b += _enc(_row(f"  {name}", "-" + money(amt, fm), width))
+    if r.get("saved"):
+        b += _enc(_row("You saved", money(r["saved"], fm), width))
     b += _enc("-" * width + "\n") + BOLD_ON + _enc(_row("TOTAL", money(r.get("total", 0), fm), width)) + BOLD_OFF
     if r.get("tax"):
         b += _enc(_row(f"Includes {r.get('tax_name') or 'GST'}", money(r["tax"], fm), width))

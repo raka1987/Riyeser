@@ -121,7 +121,7 @@ details.um{position:relative}details.um>summary{list-style:none;cursor:pointer}d
       <div class="who"><b>{{ user.full_name or user.username }}</b><small>{% if tlk.pins_on %}Selling at the till · this PC is signed in as {{ tlk.signed_in_name }}{% else %}{{ user.role|title }}{% endif %}</small></div>
       {% if office %}<a href="{{ back }}">{{ 'Products & setup' if pos_app else 'Back office' }}</a>{% endif %}
       {% if tlk.pins_on %}<a href="#" data-switch>Switch cashier</a>{% endif %}
-      {% if can('setup') %}<a href="{{ url_for('pos.setup') }}">POS setup</a><a href="{{ url_for('pos.hardware') }}">Hardware</a><a href="{{ url_for('pos.card_setup') }}">Card payments</a>{% if mode == 'restaurant' %}<a href="{{ url_for('pos.kitchen_setup') }}">Kitchen &amp; screens</a>{% endif %}<a href="{{ url_for('pos.approvals') }}">Manager approvals</a>{% endif %}
+      {% if can('setup') %}<a href="{{ url_for('pos.setup') }}">POS setup</a>{% if mode == 'restaurant' %}<a href="{{ url_for('pos.tables_setup') }}">Tables</a>{% endif %}<a href="{{ url_for('pos.promotions') }}">Promotions</a><a href="{{ url_for('pos.hardware') }}">Hardware</a><a href="{{ url_for('pos.card_setup') }}">Card payments</a>{% if mode == 'restaurant' %}<a href="{{ url_for('pos.kitchen_setup') }}">Kitchen &amp; screens</a>{% endif %}<a href="{{ url_for('pos.approvals') }}">Manager approvals</a>{% endif %}
       {% if mode == 'restaurant' and can('kitchen') %}<a data-inapp href="{{ url_for('kds.board') }}">Kitchen screen</a>{% endif %}
       <a href="{{ url_for('help.index') }}#pos">Help</a>
       <a href="{{ url_for('auth.logout') }}">Sign out</a></div></details>

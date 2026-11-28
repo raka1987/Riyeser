@@ -125,3 +125,33 @@ def ensure_schema(db):
     db.execute("UPDATE pos_tills SET receipt_printer=drawer_printer WHERE receipt_printer IS NULL AND raw_receipts=1"
                " AND drawer_printer IS NOT NULL")
     _add(db, "pos_stations", (("printer", "TEXT"), ("paper_mm", "INTEGER NOT NULL DEFAULT 80"), ("print_layout", "TEXT")))
+    # ---- tables and areas for restaurants, and promotions (the owner's 2.11.0 reports)
+    first_time = not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pos_tables'").fetchone()
+    db.execute("""CREATE TABLE IF NOT EXISTS pos_areas (
+        id INTEGER PRIMARY KEY, name TEXT NOT NULL, sort INTEGER NOT NULL DEFAULT 0)""")
+    db.execute("""CREATE TABLE IF NOT EXISTS pos_tables (
+        id INTEGER PRIMARY KEY, area_id INTEGER REFERENCES pos_areas(id), name TEXT NOT NULL,   -- pos_orders.table_no
+        seats INTEGER NOT NULL DEFAULT 4, sort INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1)""")
+    if first_time:
+        # A restaurant that already runs tables on 2.11.0 / 2.11.1 (which always showed tables 1 to 20) keeps them,
+        # as ordinary tables it can now rename or remove. Everyone else starts with none and adds their own.
+        mode = db.execute("SELECT pos_mode FROM company WHERE id=1").fetchone()
+        used = db.execute("SELECT 1 FROM pos_orders WHERE order_type='dine_in' LIMIT 1").fetchone()
+        if used or (mode and mode[0] == "restaurant"):
+            area = db.execute("INSERT INTO pos_areas (name, sort) VALUES ('Inside', 1)").lastrowid
+            db.executemany("INSERT INTO pos_tables (area_id, name, seats, sort) VALUES (?,?,4,?)",
+                           [(area, str(n), n) for n in range(1, 21)])
+    db.execute("""CREATE TABLE IF NOT EXISTS pos_promotions (
+        id INTEGER PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'percent',   -- percent, amount
+        value REAL NOT NULL DEFAULT 0,                    -- percent: 0 to 100; amount: cents
+        scope TEXT NOT NULL DEFAULT 'sale',               -- sale (everything), category, item
+        category TEXT, item_id INTEGER REFERENCES items(id),
+        start_date TEXT, end_date TEXT, days TEXT,        -- days: JSON [0..6], Monday = 0; NULL = every day
+        time_from TEXT, time_to TEXT, code TEXT,          -- code: only when the cashier types it at the till
+        active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))""")
+    db.execute("""CREATE TABLE IF NOT EXISTS pos_sale_promos (
+        id INTEGER PRIMARY KEY, document_id INTEGER NOT NULL REFERENCES documents(id),
+        line_id INTEGER REFERENCES document_lines(id),    -- the line it came off
+        promo_id INTEGER REFERENCES pos_promotions(id), name TEXT NOT NULL, amount INTEGER NOT NULL,
+        whole INTEGER NOT NULL DEFAULT 0)""")             # whole = 1: the line's share of an amount off the sale
+    db.execute("CREATE INDEX IF NOT EXISTS pos_sale_promos_doc ON pos_sale_promos(document_id)")

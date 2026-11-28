@@ -326,12 +326,15 @@ def split_bill(oid):
             return jsonify(ok=False, error=str(e), confirm_stock=e.confirm,
                            confirm_key="sell_anyway" if e.confirm else None), 409
         disc = discount_approval(db, lines, d)
+        from .. import pos_promos
+        promo_used = pos_promos.apply(db, lines, d.get("promo_codes") or ())
         cid = opt_int(o["customer_id"]) or walk_in_customer(db)
         today = date.today().isoformat()
         info = dict(order_type=o["order_type"], table_no=o["table_no"])
         doc_id = save_document(db, "sale", dict(contact_id=cid, date=today, due_date=today, tax_inclusive=True,
                                                 reference=sale_reference(info) + " (split bill)",
                                                 notes=(o["note"] or "")[:200], location_id=loc), lines, "open")
+        pos_promos.remember(db, doc_id, promo_used)
         doc = db.execute("SELECT * FROM documents WHERE id=?", (doc_id,)).fetchone()
         total = doc["total"]
         if total <= 0:
@@ -461,7 +464,8 @@ def _part_reply(db, bid, part_id, repeat=False, drawer=None):
                    cashout=sum(x["cashout"] or 0 for x in txns),
                    cards=[dict(scheme=x["card_scheme"], last4=x["card_last4"], auth=x["auth_code"],
                                amount=x["amount"]) for x in txns],
-                   receipt_url=url_for("pos.receipt", sid=b["sale_id"], part=part_id))
+                   receipt_url=url_for("pos.receipt", sid=b["sale_id"], part=part_id),
+                   view_url=url_for("pos.receipt_view", sid=b["sale_id"], part=part_id, new=1))
 
 
 @bp.route("/bill/<int:bid>/undo", methods=["POST"])

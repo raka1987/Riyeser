@@ -95,6 +95,15 @@ def pos_free_plan():
         return None
 
 
+@bp.app_template_global()
+def pos_is_restaurant():
+    """For the menus: Tables only shows for a restaurant."""
+    try:
+        return pos_config(get_db())[0] == "restaurant"
+    except Exception:
+        return False
+
+
 def _tills(db):
     return db.execute("SELECT * FROM pos_tills WHERE active=1 ORDER BY id").fetchall()
 
@@ -604,7 +613,8 @@ def _items(db):
                  barcodes=[b.strip().lower() for b in (r["barcodes"] or "").split(",") if b.strip()],
                  cat=r["category"] or "Other", color=color.get(r["category"], "#475467"),
                  fav=bool(r["pos_favourite"]), photo=bool(r["has_photo"] or (par and par["has_photo"])),
-                 stock=r["qty_on_hand"] if r["is_inventoried"] else None, parent=r["parent_id"])
+                 stock=r["qty_on_hand"] if r["is_inventoried"] else None, parent=r["parent_id"],
+                 pcat=r["category"] or (par["category"] if par else None))   # for promotions on a category
         if per_loc and r["is_inventoried"]:
             d["stocks"] = {str(l): round(v.get(r["id"], 0), 6) for l, v in per_loc.items()}
         if r["parent_id"]:
@@ -640,6 +650,8 @@ def register():
     till_locs = {t["id"]: t["location_id"] for t in tills}
     from .pos_drawer import receipt_printer_of, drawer_opens_on
     from .. import pos_print as PP
+    from .. import pos_promos
+    from .pos_floor import floor
     drawers = {t["id"]: dict(mode=t["drawer_mode"], raw=bool(receipt_printer_of(t)), after=t["print_after"] or "ask",
                              nosale=drawer_opens_on(t, "no_sale")) for t in tills}
     return render_template("pos/front.html", items_json=json.dumps(items), cats=cats, customers=customers, low_count=low,
@@ -648,7 +660,8 @@ def register():
                            walk_in=WALK_IN, methods=METHODS, mode=mode, features=sorted(features),
                            tills=tills, shifts=shifts, floats=floats, card_payments=card_ctx(db),
                            scanner=PP.scanner_settings(db), can_add_products=perms.can("stock", perms.EDIT),
-                           **approval_ctx(db))
+                           promos=pos_promos.active_promotions(db), floor=floor(db) if mode == "restaurant" else [],
+                           can_setup=perms.can("setup", perms.FULL), **approval_ctx(db))
 
 
 @bp.route("/photo/<int:iid>")
@@ -677,8 +690,14 @@ def setup():
             saved = saved if isinstance(saved, dict) else {}
         except ValueError:
             saved = {}
-        if f.get("mode_changed") == "1":
-            on = DEFAULT_ON[mode]  # a new business type starts from its sensible defaults
+        if f.get("features_for") in MODES:
+            # the page shows each business type's own switches; the ones on screen when Save was pressed count
+            if f.get("features_for") == mode:
+                on = {k for k in f.getlist(f"feature_{mode}") if k in allowed}
+            else:
+                on = (set(saved[mode]) & allowed) if isinstance(saved.get(mode), list) else DEFAULT_ON[mode]
+        elif f.get("mode_changed") == "1":
+            on = DEFAULT_ON[mode]  # (older form) a new business type starts from its sensible defaults
         else:
             on = {k for k in f.getlist("feature") if k in allowed}
         saved[mode] = sorted(on)
@@ -711,13 +730,30 @@ def setup():
         if new_till:   # a new till: walk through its printer, drawer and scanner (each step can be skipped)
             flash("Till added. Set up its printer, cash drawer and scanner, or skip any step.", "ok")
             return redirect(url_for("pos.hardware_start", till=new_till))
-        flash(f"POS setup saved: {MODES[mode]['name']}." if f.get("mode_changed") != "1" else
-              f"Switched to {MODES[mode]['name']}. Sensible features are on; adjust them below.", "ok")
+        if f.get("mode_changed") != "1":
+            flash(f"POS setup saved: {MODES[mode]['name']}.", "ok")
+        elif f.get("features_for") == mode:
+            flash(f"Switched to {MODES[mode]['name']}. The till now shows the features you chose.", "ok")
+        else:
+            flash(f"Switched to {MODES[mode]['name']}. Sensible features are on; adjust them below.", "ok")
+        if mode == "restaurant" and "tables" in on and f.get("mode_changed") == "1" \
+                and not db.execute("SELECT 1 FROM pos_tables WHERE active=1").fetchone():
+            flash("Next: add your tables and areas.", "ok")
+            return redirect(url_for("pos.tables_setup"))
         return redirect(url_for("pos.setup"))
     mode, on = pos_config(db)
+    try:
+        saved = json.loads(db.execute("SELECT pos_features FROM company WHERE id=1").fetchone()[0] or "{}")
+    except ValueError:
+        saved = {}
+    on_by = {m: (on if m == mode else
+                 (set(saved[m]) if isinstance(saved, dict) and isinstance(saved.get(m), list) else DEFAULT_ON[m])
+                 & {k for k, _, _ in MODES[m]["features"]}) for m in MODES}
     from ..locations import stores
     from .. import pos_pins
-    return render_template("pos/setup.html", modes=MODES, mode=mode, on=on, tills=_tills(db),
+    return render_template("pos/setup.html", modes=MODES, mode=mode, on=on, on_by=on_by, tills=_tills(db),
+                           table_count=db.execute("SELECT COUNT(*) FROM pos_tables WHERE active=1").fetchone()[0],
+                           promo_count=db.execute("SELECT COUNT(*) FROM pos_promotions WHERE active=1").fetchone()[0],
                            can_change=perms.can("setup", perms.FULL), stock_locations=stores(db),
                            pins=pos_pins.settings(db), lock_choices=pos_pins.LOCK_CHOICES,
                            pin_people=len(pos_pins.cashiers(db)), pins_live=pos_pins.active(db))
@@ -748,14 +784,21 @@ def _clean_lines(raw):
 def _order_json(db, o):
     from .pos_kitchen import lines_of, label
     lines = lines_of(o)
-    names = {r["id"]: r for r in db.execute("SELECT i.id, i.name, i.sell_price, t.rate FROM items i LEFT JOIN tax_codes t"
-                                            " ON t.id=i.sale_tax_code_id")}
-    total = 0
+    names = {r["id"]: r for r in db.execute("SELECT i.id, i.name, i.sell_price, i.parent_id, i.category, t.rate"
+                                            " FROM items i LEFT JOIN tax_codes t ON t.id=i.sale_tax_code_id")}
     for l in lines:
         it = names.get(l["item_id"])
         l["name"] = it["name"] if it else "?"
         l["price"] = _price_inc(it, it["rate"]) if it else 0
-        total += round(l["qty"] * l["price"] * (1 - l["discount_pct"] / 100))
+    from .. import pos_promos
+    cart = []
+    for l in lines:   # the table's total with the promotions running now (a variant uses its product's category)
+        it = names.get(l["item_id"])
+        par = names.get(it["parent_id"]) if it and it["parent_id"] else None
+        cart.append(dict(item_id=l["item_id"], parent_id=it["parent_id"] if it else None,
+                         category=(it["category"] or (par["category"] if par else None)) if it else None,
+                         qty=l["qty"], price=l["price"], manual_pct=l["discount_pct"]))
+    total = sum(x["total"] for x in pos_promos.price(pos_promos.active_promotions(db), cart)[0])
     bill = None
     if o["status"] == "billing":
         from .pos_tables import bill_json
@@ -952,7 +995,7 @@ def _sale_reply(db, sid, low=None, repeat=False, drawer=None):
                    drawer_opened=bool(drawer and drawer["opened"]), drawer_error=drawer["error"] if drawer else None,
                    cards=[dict(scheme=x["card_scheme"], last4=x["card_last4"], auth=x["auth_code"],
                                amount=x["amount"], total=x["approved_amount"], tip=x["tip"]) for x in txns],
-                   receipt_url=url_for("pos.receipt", sid=sid))
+                   receipt_url=url_for("pos.receipt", sid=sid), view_url=url_for("pos.receipt_view", sid=sid, new=1))
 
 
 def build_sale_lines(db, raw):
@@ -972,6 +1015,16 @@ def build_sale_lines(db, raw):
     if not lines:
         raise PostingError("Add at least one item.")
     return lines
+
+
+def promo_time(at):
+    """When the till worked out the sale's promotions (it sends the minute payment started), so a happy hour that
+    ends while the customer is paying still counts. Only a time within the last 15 minutes is believed."""
+    try:
+        t = datetime.strptime(str(at), "%Y-%m-%d %H:%M")
+    except (ValueError, TypeError):
+        return None
+    return t if timedelta(minutes=-2) <= datetime.now() - t <= timedelta(minutes=15) else None
 
 
 def discount_approval(db, lines, data):
@@ -1063,13 +1116,23 @@ def sale():
         if big > BIG_QTY and not data.get("confirm_big"):
             return jsonify(ok=False, error=f"{big:g} of one item is a lot. Is that right?", confirm_key="confirm_big"), 409
         disc_approval = discount_approval(db, lines, data)
+        from .. import pos_promos
+        promo_used = pos_promos.apply(db, lines, data.get("promo_codes") or (), promo_time(data.get("promo_at")))
         cid = opt_int(data.get("customer_id")) or walk_in_customer(db)
         today = date.today().isoformat()
         doc_id = save_document(db, "sale", dict(contact_id=cid, date=today, due_date=today, tax_inclusive=True,
                                                 reference=sale_reference(data), notes=(data.get("note") or "")[:200],
                                                 location_id=loc),
                                lines, "open")
+        pos_promos.remember(db, doc_id, promo_used)
         total = db.execute("SELECT total FROM documents WHERE id=?", (doc_id,)).fetchone()["total"]
+        expect = data.get("expect_total")
+        if expect is not None and int(expect) != total:
+            # a promotion started or ended (or a price changed) since the till worked out its total
+            db.rollback()
+            return jsonify(ok=False, reprice=True, total=total,
+                           error=f"A price or promotion has just changed: the total is now {request_money(total)}."
+                                 " Check it with the customer, then take payment again."), 409
         tenders = [] if total == 0 else _tenders_from(data, total, T.provider_for(db, till))
         cash_t = next((t for t in tenders if t["method"] == "cash"), None)
         if cash_t and cash_t["change"] > BIG_CHANGE and not data.get("confirm_big"):
@@ -1157,8 +1220,73 @@ def receipt(sid):
         if part:
             tenders = [t for t in tenders if t["part_id"] == part["id"]]
     from .pos_hardware import receipt_ctx
+    from .. import pos_promos
+    pr = pos_promos.on_document(db, s["document_id"])
+    ctx = receipt_ctx(db, s["till_id"], preview=bool(request.args.get("view")))
     return render_template("pos/receipt.html", s=s, lines=lines, methods=METHOD_LABELS, tenders=tenders,
-                           entry_modes=ENTRY_MODES, part=part, parts=parts, **receipt_ctx(db, s["till_id"]))
+                           entry_modes=ENTRY_MODES, part=part, parts=parts, pr=pr, **ctx)
+
+
+def _receipt_till(db, s):
+    """The till a receipt prints on: the one this screen is using (?till=), else the one the sale was made on."""
+    t = db.execute("SELECT * FROM pos_tills WHERE id=? AND active=1",
+                   (opt_int(request.values.get("till")) or s["till_id"] or 0,)).fetchone()
+    return t or (_tills(db) or [None])[0]
+
+
+@bp.route("/receipt/<int:sid>/view")
+def receipt_view(sid):
+    """A past sale's receipt on the screen, inside the app: look at it, print it again, or email it."""
+    db = get_db()
+    s = _sale(db, sid)
+    from .. import mailer
+    from .pos_drawer import receipt_printer_of
+    mode, features = pos_config(db)
+    t = _receipt_till(db, s)
+    cust = db.execute("SELECT c.email FROM contacts c JOIN documents d ON d.contact_id=c.id WHERE d.id=?",
+                      (s["document_id"],)).fetchone()
+    refunded = db.execute("SELECT COALESCE(SUM(amount),0) FROM pos_refunds WHERE sale_id=?", (sid,)).fetchone()[0]
+    part = opt_int(request.args.get("part"))
+    return render_template("pos/receipt_view.html", s=s, mode=mode, features=sorted(features), tills=_tills(db),
+                           active="sales", till=t, printer=receipt_printer_of(t), part=part,
+                           email_ready=bool(mailer.settings(db)), cust_email=(cust["email"] if cust else "") or "",
+                           refunded=refunded, labels=METHOD_LABELS, can_setup=perms.can("setup", perms.FULL),
+                           just_sold=bool(request.args.get("new")), back=request.args.get("back") or "")
+
+
+@bp.route("/receipt/<int:sid>/email", methods=["POST"])
+def receipt_email(sid):
+    """Email a sale's receipt (the tax invoice as a PDF, with the receipt in the message) from the till."""
+    db = get_db()
+    s = _sale(db, sid)
+    d = request.get_json(silent=True) or request.form
+    to = str(d.get("to") or "").strip()
+    try:
+        if not to:
+            raise ValueError("Type the customer's email address.")
+        from .email import send_or_queue
+        from .. import pdf as pdfmod
+        from .pos_drawer import receipt_data
+        data, _cash = receipt_data(db, sid)
+        fm = data["money_fmt"]
+        from ..drawer import money
+        body = [f"Thank you for shopping with {g.company['name']}.", "", f"Receipt {s['number']} · {s['date']}", ""]
+        body += [f"{qty:g} x {desc}  {money(amt, fm)}" for qty, desc, amt in data["lines"]]
+        body += [f"  {name}  -{money(amt, fm)}" for name, amt in data["promos"]]
+        body += ["", f"Total  {money(data['total'], fm)}"]
+        if data["tax"]:
+            body.append(f"Includes {data['tax_name']}  {money(data['tax'], fm)}")
+        body += [f"{label}  {money(amt, fm)}" for label, amt in data["tenders"]]
+        body += ["", "Your tax invoice is attached as a PDF." if data["tax"] else "Your invoice is attached as a PDF."]
+        msg = send_or_queue(db, to, f"Your receipt {s['number']} from {g.company['name']}", "\n".join(body),
+                            (f"Receipt {s['number']}.pdf", pdfmod.document_pdf(db, s["document_id"])), "receipt",
+                            s["document_id"])
+        audit(db, "pos_receipt_email", f"{s['number']} to {to}")
+        db.commit()
+    except (ValueError, PostingError) as e:
+        db.rollback()
+        return jsonify(ok=False, error=str(e)), 400
+    return jsonify(ok=True, message=msg)
 
 
 def day_summary(db, day):
@@ -1400,3 +1528,5 @@ from . import pos_kitchen  # noqa: E402,F401  kitchen stations, dockets per send
 from . import pos_tables  # noqa: E402,F401  move, merge and split tables (riyeser/views/pos_tables.py)
 from . import pos_hardware  # noqa: E402,F401  printers, drawer, scanner: the Hardware page (pos_hardware.py)
 from . import pos_cashier  # noqa: E402,F401  who's selling: Till PINs, switch cashier, auto-lock (pos_cashier.py)
+from . import pos_floor  # noqa: E402,F401  tables and areas for restaurants (pos_floor.py)
+from . import pos_promotions  # noqa: E402,F401  the Promotions screen (pos_promotions.py; rules in riyeser/pos_promos.py)

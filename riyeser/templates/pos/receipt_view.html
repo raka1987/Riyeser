@@ -1,0 +1,64 @@
+{% extends "pos/_pos.html" %}
+{% set rc = url_for('pos.receipt', sid=s.id, part=part) if part else url_for('pos.receipt', sid=s.id) %}
+{% block title %}Receipt {{ s.number }}{% endblock %}
+{% block css %}
+.rv{padding:20px 22px 40px;max-width:1100px;margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:20px;align-items:start}
+.rv-paper{background:#e9edf2;border-radius:18px;padding:18px;display:flex;justify-content:center}
+.rv-paper iframe{border:0;background:#fff;box-shadow:0 4px 18px rgba(15,23,42,.14);width:84mm;max-width:100%;height:calc(100vh - 170px);min-height:420px}
+.rv-paper iframe.mm58{width:62mm}
+.rv-side{display:flex;flex-direction:column;gap:14px}
+.rv-side .card{padding:18px}
+.rv-side h1{margin:0;font-size:24px;letter-spacing:-.3px}.rv-side p{margin:4px 0 0;color:var(--muted)}
+.rv-facts{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin-top:12px;font-size:15px}.rv-facts span{color:var(--muted)}.rv-facts b{text-align:right}
+.rv-btns{display:flex;flex-direction:column;gap:10px}.rv-btns .btn{width:100%;min-height:54px}
+.rv-note{font-size:13.5px;color:var(--muted);margin:0}
+.rv-hint{background:var(--warn-bg);color:#7a3a05;border-radius:12px;padding:12px 14px;font-size:14px}.rv-hint a{font-weight:700;color:inherit}
+.rv-mail{display:flex;flex-direction:column;gap:8px}.rv-mail label{font-weight:700}
+.rv-mail input{border:1.5px solid var(--line2);border-radius:12px;padding:12px 14px;font-size:16px;min-height:50px;width:100%}
+.rv-msg{font-weight:600;min-height:1.3em;margin:0}.rv-msg.ok{color:var(--ok)}.rv-msg.err{color:var(--err)}
+@media (max-width:900px){.rv{grid-template-columns:1fr;padding:14px}.rv-paper iframe{height:70vh}}
+{% endblock %}
+{% block body %}
+<div class="rv">
+  <div class="rv-paper"><iframe id="rvFrame" class="{{ 'mm58' if till and till.paper_mm == 58 }}" title="Receipt {{ s.number }}" src="{{ rc }}{{ '&' if part else '?' }}view=1"></iframe></div>
+  <div class="rv-side">
+    <div class="card"><h1>Receipt {{ s.number }}</h1><p>{{ s.created_at[:16] }}{% if s.voided %} · <span class="badge err">Voided</span>{% elif refunded %} · <span class="badge warn">Refunded {{ refunded|money }}</span>{% endif %}</p>
+      <div class="rv-facts"><span>Total</span><b class="n">{{ s.total|money }}</b><span>Paid by</span><b>{{ labels.get(s.method, s.method) }}</b><span>Customer</span><b>{{ s.cname }}</b><span>Served by</span><b>{{ s.full_name or s.username }}</b></div></div>
+    <div class="card rv-btns">
+      <button class="btn go" id="rvPrint"><svg class="ic" viewBox="0 0 24 24"><path d="M6 9V3h12v6M6 18H4v-7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v7h-2M7 14h10v7H7z"/></svg>{{ 'Print receipt' if just_sold else 'Print it again' }}</button>
+      <p class="rv-note" id="rvWhere">{% if printer %}Prints on {{ printer }}{% if till %} ({{ till.name }}){% endif %}.{% else %}Opens the Windows print box.{% endif %}</p>
+      {% if not printer %}<div class="rv-hint" id="rvHint">No receipt printer is chosen for {{ till.name if till else 'this till' }}. On an office (A4) printer the receipt still prints at receipt width, as a narrow strip at the top of the page.{% if can_setup %} To print on receipt paper, <a href="{{ url_for('pos.hardware', till=till.id if till else None) }}#receipt">choose your receipt printer in Hardware</a>.{% else %} Ask an owner or manager to choose the receipt printer in Setup › Hardware.{% endif %}</div>{% endif %}
+      <p class="rv-msg" id="rvMsg" role="status"></p>
+    </div>
+    <div class="card rv-mail">
+      {% if email_ready %}<label for="rvTo">Email the receipt</label>
+      <input type="email" id="rvTo" inputmode="email" autocomplete="off" placeholder="customer@example.com" value="{{ cust_email }}">
+      <button class="btn" id="rvSend">Email receipt</button><p class="rv-msg" id="rvMailMsg" role="status"></p>
+      {% else %}<b>Email the receipt</b><p class="rv-note" id="rvNoMail">Email isn't set up yet.{% if can_setup %} <a href="{{ url_for('email.index') }}">Set up email</a> to send receipts to customers.{% else %} An owner or manager can set it up under Setup › Email.{% endif %}</p>{% endif %}
+    </div>
+    <div class="rv-btns">{% if just_sold %}<a class="btn go" href="{{ url_for('pos.register') }}">New sale</a>{% endif %}
+      <a class="btn" href="{{ url_for('pos.sales_history') if back == 'all' else url_for('pos.sales', date=s.date) }}">{{ 'Back to all sales' if back == 'all' else 'Sales on ' ~ s.date if s.date != today() else "Today's sales" }}</a>
+      {% if not just_sold %}<a class="btn" href="{{ url_for('pos.register') }}">Back to the till</a>{% endif %}</div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function(){
+const $=s=>document.querySelector(s), RC={{ rc|tojson }}, RAW={{ url_for('pos.receipt_raw', sid=s.id)|tojson }}, HAS_PRINTER={{ (printer is not none and printer != '')|tojson }};
+const TILL={{ (till.id if till else none)|tojson }}, PART={{ part|tojson }};
+function msg(el,t,ok){el.textContent=t;el.className='rv-msg '+(ok?'ok':'err');}
+async function post(url,body){try{const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return await r.json();}
+  catch(e){return{ok:false,error:'Riyeser isn\'t answering. Check this PC is on, then try again.'};}}
+// printing stays inside the app: straight to the till's receipt printer, else the print box (never the web browser)
+$('#rvPrint').onclick=async()=>{const b=$('#rvPrint');b.disabled=true;
+  if(HAS_PRINTER){const d=await post(RAW,{till_id:TILL,part_id:PART});b.disabled=false;
+    if(d.ok){msg($('#rvMsg'),'Receipt printed.',true);return;}
+    msg($('#rvMsg'),d.error||'The printer didn\'t answer: using the print box instead.',false);}
+  b.disabled=false;RiyeserInApp.print(RC);};
+if($('#rvSend'))$('#rvSend').onclick=async()=>{const to=$('#rvTo').value.trim();if(!to){msg($('#rvMailMsg'),'Type the customer\'s email address.',false);$('#rvTo').focus();return;}
+  $('#rvSend').disabled=true;const d=await post({{ url_for('pos.receipt_email', sid=s.id)|tojson }},{to});$('#rvSend').disabled=false;
+  msg($('#rvMailMsg'),d.ok?d.message:d.error,d.ok);};
+})();
+</script>
+{% endblock %}

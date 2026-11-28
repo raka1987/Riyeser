@@ -1,0 +1,72 @@
+{% extends "base.html" %}{% block title %}Promotions{% endblock %}
+{% block content %}
+<style>
+.pm-list{display:grid;gap:10px}
+.pm{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 14px;align-items:center;border:1px solid var(--line);border-radius:14px;padding:14px 16px;background:#fff}
+.pm.off{background:#f8fafc}.pm.off .pm-t b{color:var(--muted)}
+.pm-t b{font-size:16px}.pm-t .off-amt{font-weight:700;color:var(--ok);margin-left:8px;white-space:nowrap}
+.pm-t small{display:block;color:var(--muted);margin-top:2px;white-space:normal}
+.pm-a{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;align-items:center}
+.pm-a .btn{min-height:44px;padding:6px 16px}.pm-a form{display:inline}
+.pm-code{font:700 13px ui-monospace,Consolas,monospace;background:#eef1f4;border-radius:6px;padding:2px 7px}
+.pf{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 18px}
+.pf .full{grid-column:1/-1}.pf label.lb,.pf span.lb{display:block;font-weight:600;font-size:13.5px;margin-bottom:5px}
+.pf input:not([type=checkbox]):not([type=radio]),.pf select{min-height:44px;width:100%}
+.pf small{display:block;color:var(--muted);margin-top:4px}
+.pseg{display:flex;gap:8px;flex-wrap:wrap}
+.pseg label{display:flex;align-items:center;gap:8px;border:1.5px solid var(--line);border-radius:10px;padding:8px 14px;cursor:pointer;min-height:44px;font-weight:600;background:#fff}
+.pseg label:has(input:checked){border-color:var(--brand);background:var(--brand-l);color:var(--brand)}
+.pseg input{width:auto;margin:0}
+.pdays label{min-width:56px;justify-content:center}
+.pf-foot{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+.pf-foot .btn{min-height:46px;padding:8px 20px}
+.pm-how{display:flex;gap:10px;align-items:flex-start;background:var(--brand-l);color:#1e3a5f;border-radius:12px;padding:12px 14px;margin-bottom:var(--sp-4)}
+@media (max-width:760px){.pf{grid-template-columns:1fr}.pm{grid-template-columns:1fr}.pm-a{justify-content:flex-start}}
+</style>
+{% set e = edit.row if edit else None %}{% set ej = edit.j if edit else None %}
+<div class="head"><div><h1>Promotions</h1><p class="sub">Take a percentage or an amount off a product, a category or the whole sale. The till applies a promotion by itself while it is running, and the receipt shows it.</p></div>
+  <div class="actions">{% if can_change and not (new or edit) %}<a class="btn pri" href="{{ url_for('pos.promotions', new=1) }}#form">+ New promotion</a>{% endif %}<a class="btn" href="{{ url_for('pos.register') }}">Open the till</a></div></div>
+<div class="pm-how"><span aria-hidden="true">ⓘ</span><div>Each item gets its one best promotion: they don't add together on an item. An amount off the whole sale comes off once, after the items' own promotions. A promotion with a code only counts when the cashier types that code at the till (<b>Promo code</b>). Staff can still give their own discount on an item at the till; the bigger of the two is used.</div></div>
+
+{% if can_change and (new or edit) %}
+<form method="post" class="card" id="form"><input type="hidden" name="what" value="save">{% if e %}<input type="hidden" name="id" value="{{ e.id }}">{% endif %}
+  <h2 style="margin-top:0">{{ 'Change ' ~ e.name if e else 'New promotion' }}</h2>
+  <div class="pf">
+    <div class="full"><label class="lb" for="pname">Name</label><input type="text" id="pname" name="name" value="{{ e.name if e }}" maxlength="40" required placeholder="e.g. Happy hour, Winter sale, Staff special"><small>Prints on the receipt.</small></div>
+    <div><span class="lb">What comes off</span><div class="pseg">{% for k, n in kinds.items() %}<label><input type="radio" name="kind" value="{{ k }}" {{ 'checked' if (e.kind if e else 'percent') == k }}> {{ n }}</label>{% endfor %}</div></div>
+    <div><label class="lb" for="pvalue">How much</label><input type="text" id="pvalue" name="value" inputmode="decimal" required value="{% if e %}{{ '%g'|format(e.value) if e.kind == 'percent' else '%.2f'|format(e.value / 100) }}{% endif %}" placeholder="e.g. 10"><small id="pvalueHint">Type 10 for 10% off, or 2.50 for {{ 250|money }} off.</small></div>
+    <div><span class="lb">Off what</span><div class="pseg">{% for k, n in scopes.items() %}<label><input type="radio" name="scope" value="{{ k }}" {{ 'checked' if (e.scope if e else 'sale') == k }} data-scope> {{ n }}</label>{% endfor %}</div></div>
+    <div><div data-for="category"><label class="lb" for="pcat">Category</label><select id="pcat" name="category"><option value="">Choose…</option>{% for c in cats %}<option {{ 'selected' if e and e.category == c }}>{{ c }}</option>{% endfor %}</select>{% if not cats %}<small>Your products have no categories yet. Give them one under Products.</small>{% endif %}</div>
+      <div data-for="item"><label class="lb" for="pitem">Product</label><select id="pitem" name="item_id"><option value="">Choose…</option>{% for i in items %}<option value="{{ i.id }}" {{ 'selected' if e and e.item_id == i.id }}>{{ i.name }}{% if i.sku %} ({{ i.sku }}){% endif %}</option>{% endfor %}</select><small>A product with sizes or colours: the promotion covers all of them.</small></div>
+      <div data-for="sale"><span class="lb">&nbsp;</span><small style="margin-top:12px">Every item on the sale.</small></div></div>
+    <div><label class="lb" for="pstart">Starts (leave empty for now)</label><input type="date" id="pstart" name="start_date" value="{{ e.start_date or '' if e }}"></div>
+    <div><label class="lb" for="pend">Ends (leave empty for no end)</label><input type="date" id="pend" name="end_date" value="{{ e.end_date or '' if e }}"></div>
+    <div class="full"><span class="lb">Days (none ticked means every day)</span><div class="pseg pdays">{% for d in day_names %}<label><input type="checkbox" name="days" value="{{ loop.index0 }}" {{ 'checked' if ej and loop.index0 in ej.days }}> {{ d }}</label>{% endfor %}</div></div>
+    <div><label class="lb" for="pfrom">From this time (leave empty for all day)</label><input type="time" id="pfrom" name="time_from" value="{{ e.time_from or '' if e }}"></div>
+    <div><label class="lb" for="pto">Until this time</label><input type="time" id="pto" name="time_to" value="{{ e.time_to or '' if e }}"></div>
+    <div class="full"><label class="lb" for="pcode">Promo code (leave empty to apply by itself)</label><input type="text" id="pcode" name="code" value="{{ e.code or '' if e }}" maxlength="20" style="max-width:280px;text-transform:uppercase" autocomplete="off" placeholder="e.g. WELCOME10"><small>With a code, the promotion only counts when the cashier types the code at the till.</small></div>
+  </div>
+  <div class="pf-foot"><a class="btn" href="{{ url_for('pos.promotions') }}">Cancel</a><button class="btn pri">Save promotion</button></div>
+</form>
+<script>
+(function(){const f=document.getElementById('form');function sync(){const s=f.querySelector('[data-scope]:checked').value;
+  f.querySelectorAll('[data-for]').forEach(d=>{d.hidden=d.dataset.for!==s;});}
+  f.querySelectorAll('[data-scope]').forEach(r=>r.addEventListener('change',sync));sync();})();
+</script>
+{% endif %}
+
+<div class="card"><h2 style="margin-top:0">Your promotions</h2>
+{% if promos %}<div class="pm-list">{% for p in promos %}{% set r = p.row %}
+  <div class="pm{{ ' off' if p.state in ('off', 'ended') }}" data-promo="{{ r.name }}">
+    <div class="pm-t"><b>{{ r.name }}</b><span class="off-amt">{% if r.kind == 'percent' %}{{ '%g'|format(r.value) }}% off{% else %}{{ r.value|int|money }} off{% endif %}</span>
+      {% if p.state == 'on' %}<span class="badge paid">Running now</span>{% elif p.state == 'code' %}<span class="badge paid">Running with its code</span>{% elif p.state == 'later' %}<span class="badge open">Not running right now</span>{% elif p.state == 'ended' %}<span class="badge">Ended</span>{% else %}<span class="badge">Off</span>{% endif %}
+      <small>{{ p.what }}{% if r.scope == 'sale' and r.kind == 'amount' %} (off the sale's total){% endif %} · {{ p.when }}{% if r.code %} · code <span class="pm-code">{{ r.code }}</span>{% else %} · applies by itself{% endif %}</small></div>
+    {% if can_change %}<div class="pm-a"><a class="btn" href="{{ url_for('pos.promotions', edit=r.id) }}#form">Change</a>
+      <form method="post"><input type="hidden" name="id" value="{{ r.id }}"><button class="btn" name="what" value="{{ 'off' if r.active else 'on' }}">{{ 'Turn off' if r.active else 'Turn on' }}</button></form>
+      <form method="post" onsubmit="return confirm('Remove this promotion? Receipts already printed keep it.')"><input type="hidden" name="id" value="{{ r.id }}"><button class="btn danger" name="what" value="delete">Remove</button></form></div>{% endif %}
+  </div>{% endfor %}</div>
+{% else %}<p class="muted" style="margin:0">No promotions yet. {% if can_change %}Make your first one above: for example 10% off everything this weekend, or {{ 100|money }} off coffee from 3 pm to 5 pm.{% else %}An owner or administrator can add them.{% endif %}</p>{% endif %}
+</div>
+<div class="card"><h2 style="margin-top:0">Other ways to take money off</h2>
+  <p class="muted" style="margin:0">At the till, tap an item on the sale to give a one-off discount (%) on it. Discounts over your limit need a manager: set the limit under <a href="{{ url_for('pos.approvals') }}">Manager approvals</a>. Turn item discounts on or off in <a href="{{ url_for('pos.setup') }}">POS setup</a>.</p></div>
+{% endblock %}

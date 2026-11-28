@@ -87,6 +87,16 @@ body{overflow:hidden;user-select:none}
 .g2b{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 /* modals */
 .tables{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+.tables h3{grid-column:1/-1;margin:8px 0 0;font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted)}.tables h3:first-child{margin-top:0}
+.tables button{overflow:hidden;padding:4px;min-width:0}.tables button>span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tables button.long{font-size:15px}.tables button small.seats{font-weight:600;color:var(--muted)}.tables button.busy small.seats{display:none}
+.tnone{grid-column:1/-1;text-align:center;padding:18px 8px;display:flex;flex-direction:column;align-items:center;gap:12px}
+.tnone b{font-size:20px}.tnone span{color:var(--muted)}
+.cl .md.promo{color:var(--green-d);font-weight:700}
+.saved{display:flex;justify-content:space-between;color:var(--green-d);font-weight:700;font-size:14px}
+.saved[hidden]{display:none}
+.codes{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}.codes button{border:1.5px solid var(--green);background:var(--green-l);color:var(--green-d);border-radius:999px;padding:8px 14px;font-weight:700;min-height:44px}
+@media (max-width:520px){.tables{grid-template-columns:repeat(4,1fr)}}
 .tables button{aspect-ratio:1;border-radius:16px;border:2px solid var(--line2);background:#fff;font-size:22px;font-weight:800;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
 .tables button small{font-size:11.5px;font-weight:700}
 .tables button.busy{border-color:#f6c37a;background:var(--warn-bg);color:var(--warn)}
@@ -186,8 +196,11 @@ body{overflow:hidden;user-select:none}
       <div class="extra">
         {% if 'kitchen' in f %}<button class="btn amber" id="kitchen" disabled>Send to kitchen</button>{% endif %}
         <button class="btn" id="nosale" hidden title="Open the cash drawer without a sale">No sale</button>
+        {% if promos|selectattr('code')|list %}<button class="btn" id="promoBtn" title="Type a promo code">Promo code</button>{% endif %}
         <button class="btn danger" id="clear">Clear</button>
       </div>
+      <div class="saved" id="wholeRow" hidden><span id="wholeName"></span><span class="n" id="wholeAmt"></span></div>
+      <div class="saved" id="savedRow" hidden><span>Promotions: you save</span><span class="n" id="savedAmt"></span></div>
       <div class="gst"{% if not tl.has_tax %} style="display:none"{% endif %}><span>Includes {{ tl.word }}</span><span class="n" id="gst">{{ 0|money }}</span></div>
       <div class="ttl"><span>Total</span><span class="n" id="total">{{ 0|money }}</span></div>
       <button class="pay n" id="pay" disabled>Pay</button>
@@ -255,6 +268,7 @@ body{overflow:hidden;user-select:none}
     <button class="btn" id="printRc"><svg class="ic" viewBox="0 0 24 24"><path d="M6 9V3h12v6M6 18H4v-7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v7h-2M7 14h10v7H7z"/></svg>Print receipt</button>
     <button class="btn" id="noRc"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m6 6 12 12"/></svg>No receipt</button>
   </div>
+  <a class="btn" id="viewRc" href="#"><svg class="ic" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>View or email the receipt</a>
   <div style="font-size:13.5px;color:var(--muted)" id="doneNote"></div>
   <div id="lowNote" hidden></div>
 </div></section>
@@ -297,6 +311,11 @@ body{overflow:hidden;user-select:none}
   <div id="spBody" style="margin-top:14px"></div><p class="err" id="spErr"></p>
   <button class="btn go big" id="spGo" style="width:100%">Split the bill</button></div></div>
 <div class="modal" id="mOrders"><div class="box"><h2>{{ 'Open orders' if mode == 'restaurant' else 'Held sales' }}<button class="x" data-close>×</button></h2><div class="olist" id="olist"></div></div></div>
+<div class="modal" id="mPromo"><div class="box"><h2>Promo code<button class="x" data-close>×</button></h2>
+  <div class="codes" id="codeList"></div>
+  <label class="fld"><span>Type the customer's code</span><input id="codeIn" maxlength="20" autocomplete="off" autocapitalize="characters" style="text-transform:uppercase"></label>
+  <p class="err" id="codeErr" style="color:var(--err);font-weight:600;min-height:1.2em;margin:-6px 0 10px"></p>
+  <div style="display:flex;gap:10px"><button class="btn" data-close style="flex:1">Close</button><button class="btn go" id="codeGo" style="flex:1.4">Use this code</button></div></div></div>
 <div class="modal" id="mUnknown"><div class="box"><h2>Barcode not found<button class="x" data-close>×</button></h2>
   <p style="margin:-4px 0 14px">No product has the barcode <b class="n" id="unkCode" style="font-family:ui-monospace,Consolas,monospace"></b>.</p>
   <p id="unkAsk" style="margin:0 0 14px;color:var(--muted)">Ask a manager to add it as a product, then scan it again.</p>
@@ -314,6 +333,7 @@ const MODE='{{ mode }}', F=new Set({{ features|tojson }}), ITEMS={{ items_json|s
 const CUSTOMERS={{ customers|map(attribute='name')|list|tojson }}, CUST_IDS={{ customers|map(attribute='id')|list|tojson }}, WALK_IN={{ walk_in|tojson }};
 const SHIFTS={{ shifts|tojson }}, FLOATS={{ floats|tojson }}, RULES={{ rules|tojson }}, SELF_OK={{ self_ok|tojson }};
 const PINS={{ (tl_lock.pins_on if tl_lock else False)|tojson }}, SC={{ scanner|tojson }}, CAN_ADD={{ can_add_products|tojson }}, NEW_ITEM='{{ url_for('inventory.edit') }}';
+const PROMOS={{ promos|tojson }}, FLOOR={{ floor|tojson }}, CAN_SETUP={{ can_setup|tojson }}, TABLES_URL='{{ url_for('pos.tables_setup') }}';
 const TILL_LOC={{ till_locs|tojson }}, DRAWERS={{ drawers|tojson }}, LOCS={{ locations|tojson }}, MULTI_LOC={{ multi_loc|tojson }};
 const BYID={};ITEMS.forEach(i=>BYID[i.id]=i);const TILES=ITEMS.filter(i=>!i.parent);
 const U={open:'{{ url_for('pos.shift_open') }}',sale:'{{ url_for('pos.sale') }}',order:'{{ url_for('pos.save_order') }}',orders:'{{ url_for('pos.orders') }}',base:'{{ url_for('pos.register') }}',photo:'{{ url_for('pos.photo', iid=0) }}'.replace(/0$/,'')};
@@ -327,7 +347,30 @@ let checkout=null,paid=[],cardAmt=0,cardEdit=false,resumed=null,billPart=null,bi
 const newRef=()=>{const a=new Uint8Array(12);(window.crypto||window.msCrypto).getRandomValues(a);return 'co-'+[...a].map(b=>b.toString(16).padStart(2,'0')).join('');};
 const paidSum=()=>paid.reduce((s,p)=>s+p.amount,0), leftToPay=()=>Math.max(0,total()-paidSum());
 let cart=[],cat=ITEMS.some(i=>i.fav)?'★':'All',orderId=null,otype=MODE==='restaurant'?(otypes[0]||'takeaway'):'retail',table=null,cust=null,method=null,tend=0,editIdx=null,openOrders=[],last=null;
-const lt=l=>Math.round(l.qty*l.price*(1-(l.disc||0)/100)), cartTotal=()=>cart.reduce((s,l)=>s+lt(l),0);
+// ---- promotions (the same rules as riyeser/pos_promos.py; the server's answer is the one that counts)
+let codes=[],wholePromo=null,priceSig=null,payAt=null;
+const p2=n=>String(n).padStart(2,'0'), ymd=d=>d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate()), hhmm=d=>p2(d.getHours())+':'+p2(d.getMinutes());
+function promoOn(p,now,cs){const day=ymd(now),hm=hhmm(now);if(p.start&&day<p.start)return false;if(p.end&&day>p.end)return false;
+  if(p.days&&p.days.length&&!p.days.includes((now.getDay()+6)%7))return false;
+  const f=p.time_from||'',t=p.time_to||'';if(f&&t&&f>t){if(!(hm>=f||hm<t))return false;}else{if(f&&hm<f)return false;if(t&&hm>=t)return false;}
+  if(p.code&&!cs.includes(p.code))return false;return true;}
+function reprice(){const now=payAt||new Date(),live=PROMOS.filter(p=>promoOn(p,now,codes));let sum=0;
+  cart.forEach(l=>{const it=BYID[l.id]||{},base=Math.round(l.qty*l.price);let t=Math.round(l.qty*l.price*(1-(l.disc||0)/100)),best=null;
+    live.forEach(p=>{if(p.kind==='amount'&&p.scope==='sale')return;
+      if(p.scope==='item'&&p.item_id!==l.id&&p.item_id!==(it.parent||-1))return;
+      if(p.scope==='category'&&(!p.category||it.pcat!==p.category))return;
+      const pt=p.kind==='percent'?Math.round(l.qty*l.price*(1-Math.min(Math.max(p.value,0),100)/100)):Math.round(l.qty*Math.max(l.price-Math.trunc(p.value),0));
+      if(!best||pt<best.t)best={t:pt,p};});
+    l._promo=null;if(best&&best.t<t){t=best.t;l._promo={name:best.p.name,saved:base-best.t};}
+    l._t=t;l._own=t;sum+=t;});
+  wholePromo=null;const offers=live.filter(p=>p.kind==='amount'&&p.scope==='sale'&&p.value>0);
+  if(offers.length&&sum>0){const p=offers.reduce((a,b)=>b.value>a.value?b:a),off=Math.min(Math.trunc(p.value),sum);let cum=0,given=0;
+    cart.forEach(l=>{cum+=l._t;const sh=Math.floor(off*cum/sum)-given;given+=sh;l._t-=sh;});wholePromo={name:p.name,saved:off};}}
+function priced(){const sig=cart.map(l=>l.id+'|'+l.qty+'|'+l.price+'|'+(l.disc||0)).join(';')+'#'+codes.join(',')+'#'+hhmm(payAt||new Date());
+  if(sig!==priceSig){reprice();priceSig=sig;}}
+const lt=l=>{priced();return l._t===undefined?Math.round(l.qty*l.price*(1-(l.disc||0)/100)):l._t;}, cartTotal=()=>cart.reduce((s,l)=>s+lt(l),0);
+const own=l=>{priced();return l._own===undefined?lt(l):l._own;};   // before its share of an amount off the whole sale
+const savedTotal=()=>{priced();return cart.reduce((s,l)=>s+(l._promo?l._promo.saved:0),0)+(wholePromo?wholePromo.saved:0);};
 const total=()=>billPart?billPart.amount:cartTotal();
 // stock at this till's location (with more than one location), else the total on hand
 function stockOf(i){if(!i)return null;if(i.kind==='product'){const st=i.kids.map(k=>stockOf(BYID[k]));return st.some(x=>x===null)?null:st.reduce((a,b)=>a+b,0);}
@@ -372,9 +415,12 @@ function drawVar(){const p=vProd,rank=c=>(c.vals||[]).map((v,k)=>String(((p.opti
 function label(){if(MODE!=='restaurant')return orderId?'Held sale #'+orderId:'';return otype==='dine_in'?(table?'Table '+table:'Dine-in'):otype==='takeaway'?'Takeaway'+(orderId?' #'+orderId:''):'';}
 function draw(){
   $('#lines').innerHTML=cart.length?cart.map((l,i)=>`<div class="cl" data-edit="${i}"><span class="qty">${+l.qty.toFixed(3)}<svg class="ic" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span>
-    <div><div class="nm">${esc(l.name)}</div>${l.note?`<div class="md note">${esc(l.note)}</div>`:''}${l.disc?`<div class="md">${l.disc}% off</div>`:''}${l.sent?`<div class="md sent">Sent to kitchen ${esc(String(l.sent).slice(11,16))}</div>`:''}${l.moved_from?`<div class="md mv">Moved from ${esc(l.moved_from)}</div>`:''}</div><span class="pr n">${fmt(lt(l))}</span></div>`).join('')
+    <div><div class="nm">${esc(l.name)}</div>${l.note?`<div class="md note">${esc(l.note)}</div>`:''}${l._promo?`<div class="md promo">${esc(l._promo.name)} −${fmt(l._promo.saved)}</div>`:l.disc?`<div class="md">${l.disc}% off</div>`:''}${l.sent?`<div class="md sent">Sent to kitchen ${esc(String(l.sent).slice(11,16))}</div>`:''}${l.moved_from?`<div class="md mv">Moved from ${esc(l.moved_from)}</div>`:''}</div><span class="pr n">${fmt(own(l))}</span></div>`).join('')
    :`<div class="empty">${MODE==='restaurant'?'Tap menu items to start an order.':'Scan or tap items to start a sale.'}</div>`;
   const t=total();$('#total').textContent=fmt(t);$('#gst').textContent=fmt(gstOf());$('#pay').textContent=cart.length?'Pay '+fmt(t):'Pay';
+  const sv=billPart?0:savedTotal();$('#savedRow').hidden=!sv;$('#savedAmt').textContent=fmt(sv);
+  $('#wholeRow').hidden=!wholePromo||!!billPart;if(wholePromo){$('#wholeName').textContent=wholePromo.name;$('#wholeAmt').textContent='−'+fmt(wholePromo.saved);}
+  if($('#promoBtn'))$('#promoBtn').textContent=codes.length?'Promo code ✓':'Promo code';
   $('#pay').disabled=!cart.length;['#hold','#kitchen'].forEach(s=>{if($(s))$(s).disabled=!cart.length;});
   const lb=label();$('#cTitle').innerHTML='Current sale'+(lb?`<small>${esc(lb)}</small>`:'');
   if($('#tableBtn')){$('#tableBtn').style.display=otype==='dine_in'?'':'none';$('#tableLbl').textContent=table?'Table '+table:'Choose a table';}
@@ -382,11 +428,15 @@ function draw(){
   if($('#tact'))$('#tact').hidden=!(orderId&&cart.length);
   const dr=DRAWERS[till()];$('#nosale').hidden=!(dr&&dr.mode==='printer'&&dr.nosale!==false);keepCart();}
 function keepCart(){try{const k='riyeser.cart.'+till();if(!cart.length||billPart||paid.length)sessionStorage.removeItem(k);
-  else sessionStorage.setItem(k,JSON.stringify({cart,orderId,table,cust,otype,at:Date.now()}));}catch(e){}}
+  else sessionStorage.setItem(k,JSON.stringify({cart:cart.map(({_t,_own,_promo,...l})=>l),orderId,table,cust,otype,codes,at:Date.now()}));}catch(e){}}
 function restoreCart(){try{const v=JSON.parse(sessionStorage.getItem('riyeser.cart.'+till())||'null');
-  if(v&&Date.now()-v.at<12*3600000&&v.cart&&v.cart.length){cart=v.cart.filter(l=>BYID[l.id]);orderId=v.orderId;table=v.table;cust=v.cust;if(v.otype)otype=v.otype;}}catch(e){}}
+  if(v&&Date.now()-v.at<12*3600000&&v.cart&&v.cart.length){cart=v.cart.filter(l=>BYID[l.id]);orderId=v.orderId;table=v.table;cust=v.cust;
+    codes=(v.codes||[]).filter(c=>PROMOS.some(p=>p.code===c));
+    // a sale kept from before the business type was switched (Retail <-> Restaurant) takes this type's usual order type
+    const ok=MODE==='restaurant'?otypes.includes(v.otype):v.otype==='retail';if(v.otype&&ok)otype=v.otype;
+    if(otype!=='dine_in')table=null;}}catch(e){}}
 function setType(t){otype=t;$$('#otype button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));draw();}
-function reset(){cart=[];orderId=null;table=null;cust=null;method=null;tend=0;checkout=null;paid=[];resumed=null;billPart=null;bill=null;orderStatus='open';if(MODE==='restaurant')setType(otypes[0]||'takeaway');else draw();}
+function reset(){cart=[];orderId=null;table=null;cust=null;method=null;tend=0;checkout=null;paid=[];resumed=null;billPart=null;bill=null;orderStatus='open';codes=[];payAt=null;if(MODE==='restaurant')setType(otypes[0]||'takeaway');else draw();}
 // held orders / tables
 async function loadOrders(){try{openOrders=await (await fetch(U.orders)).json();}catch(e){openOrders=[];}
   $$('[data-ocount]').forEach(n=>{n.hidden=!openOrders.length;n.textContent=openOrders.length;});}
@@ -401,7 +451,13 @@ function openOrder(id){const o=openOrders.find(x=>x.id==id);if(!o)return;
   if(MODE==='restaurant'&&otypes.includes(o.order_type))setType(o.order_type);else{otype=o.order_type;draw();}
   if(orderStatus==='billing'&&bill)showBill();}
 function showTables(){const busy={};openOrders.filter(o=>o.order_type==='dine_in').forEach(o=>busy[o.table_no]=o);
-  $('#tables').innerHTML=Array.from({length:20},(_,i)=>String(i+1)).map(t=>`<button data-table="${t}" class="${busy[t]&&busy[t].id!==orderId?'busy':''} ${t===table?'sel':''}">${t}${busy[t]?`<small>${busy[t].status==='billing'?'Paying':fmt(busy[t].total)}</small>`:''}</button>`).join('');
+  // the tables from POS setup › Tables, by area; a table that has an open order but was since removed still shows
+  const known=new Set();FLOOR.forEach(a=>a.tables.forEach(t=>known.add(t.name)));
+  const extra=Object.keys(busy).filter(t=>!known.has(t)).map(t=>({name:t,seats:0}));
+  const groups=FLOOR.concat(extra.length?[{area:FLOOR.length?'Other open tables':'',tables:extra}]:[]);
+  const btn=t=>{const b=busy[t.name];return `<button data-table="${esc(t.name)}" class="${b&&b.id!==orderId?'busy':''} ${t.name===table?'sel':''} ${t.name.length>3?'long':''}"><span>${esc(t.name)}</span>${b?`<small>${b.status==='billing'?'Paying':fmt(b.total)}</small>`:t.seats?`<small class="seats">${t.seats} seat${t.seats===1?'':'s'}</small>`:''}</button>`;};
+  $('#tables').innerHTML=groups.length?groups.map(a=>(a.area?`<h3>${esc(a.area)}</h3>`:'')+a.tables.map(btn).join('')).join('')
+    :`<div class="tnone"><b>No tables yet</b><span>${CAN_SETUP?'Add your tables and areas, then come back to seat customers.':'Ask an owner or manager to add the tables in POS setup.'}</span>${CAN_SETUP?`<a class="btn go" id="addTables" href="${TABLES_URL}">Add tables</a>`:''}</div>`;
   $('#tTitle').textContent=tPick?{move:'Move to which table?',items:'Move the items to which table?',merge:'Merge with which table?'}[tPick]:'Choose a table';
   $('#tHint').hidden=!tPick;$('#tHint').textContent=tPick==='merge'?'Tables with an open order are shown in orange.':tPick?'A table that already has an order is merged with this one.':'';
   show('#mTables',true);}
@@ -417,12 +473,14 @@ async function post(url,body){let r;try{r=await fetch(url,{method:'POST',headers
 // payment
 function openPay(){method=null;tend=0;cardEdit=false;$$('#methods button').forEach(b=>b.classList.remove('on'));$('#cashArea').hidden=true;$('#cardArea').hidden=true;$('#payErr').textContent='';
   if(!checkout)checkout=newRef();
+  if(!payAt)payAt=new Date();
   const t=total();$('#due').textContent=fmt(t);$('#dueGst').textContent=fmt(gstOf());cardAmt=leftToPay();
   const lb=billPart?label()+' · '+billPart.label:label();$('#payTag').textContent=lb;$('#payTag').style.display=lb?'':'none';
   if(billPart){const pl=billPart.lines,mine=pl?cart.filter(l=>pl[l.uid]>0):[];
     $('#sumlines').innerHTML=`<div class="sl"><span class="q">${billPart.n}</span><div><b>${esc(billPart.label)}'s part</b><small>${bill.parts.length} parts · whole bill ${fmt(bill.total)}</small></div><span class="n">${fmt(billPart.amount)}</span></div>`
       +mine.map(l=>`<div class="sl"><span class="q">${+(+pl[l.uid]).toFixed(3)}</span><div><b>${esc(l.name)}</b></div><span class="n"></span></div>`).join('');}
-  else $('#sumlines').innerHTML=cart.map(l=>`<div class="sl"><span class="q">${+l.qty.toFixed(3)}</span><div><b>${esc(l.name)}</b>${l.note?`<small>${esc(l.note)}</small>`:''}${l.disc?`<small>${l.disc}% off</small>`:''}</div><span class="n">${fmt(lt(l))}</span></div>`).join('');
+  else $('#sumlines').innerHTML=cart.map(l=>`<div class="sl"><span class="q">${+l.qty.toFixed(3)}</span><div><b>${esc(l.name)}</b>${l.note?`<small>${esc(l.note)}</small>`:''}${l._promo?`<small>${esc(l._promo.name)} −${fmt(l._promo.saved)}</small>`:l.disc?`<small>${l.disc}% off</small>`:''}</div><span class="n">${fmt(own(l))}</span></div>`).join('')
+    +(wholePromo?`<div class="sl"><span class="q"></span><div><b>${esc(wholePromo.name)}</b><small>Off the whole sale</small></div><span class="n">−${fmt(wholePromo.saved)}</span></div>`:'');
   $('#dueGst').parentNode.style.display=billPart?'none':'';
   const r0=leftToPay(),q=[r0,Math.ceil(r0/500)*500,Math.ceil(r0/1000)*1000,Math.ceil(r0/2000)*2000,Math.ceil(r0/5000)*5000,Math.ceil(r0/10000)*10000].filter((v,i,a)=>v>0&&a.indexOf(v)===i).slice(0,4);
   $('#quick').innerHTML=q.map((v,i)=>`<button data-cash="${v}">${i===0?'Exact':fmt(v).replace('.00','')}</button>`).join('');
@@ -458,8 +516,9 @@ async function payCard(){$('#payErr').textContent='';const amt=cardAmt,t=till();
 async function complete(){$('#complete').disabled=true;
   const tl=till(),left=leftToPay();
   const tenders=paid.map(p=>({method:'card',amount:p.amount,txn_id:p.txn_id}));if(left>0||(method==='cash'&&tend>0&&!paid.length))tenders.push({method:'cash',tendered:tend});
+  const at=payAt||new Date();
   const body={order_id:orderId,order_type:otype,table_no:table,customer_id:cust,method:paid.length?'card':method,tenders,checkout_ref:checkout,till_id:tl,
-    lines:cart.map(l=>({item_id:l.id,qty:l.qty,discount_pct:l.disc,note:l.note}))};
+    lines:cart.map(l=>({item_id:l.id,qty:l.qty,discount_pct:l.disc,note:l.note})),promo_codes:codes,promo_at:ymd(at)+' '+hhmm(at),expect_total:billPart?null:total()};
   if(billPart)return completePart(tenders);
   const top=Math.max(0,...cart.map(l=>l.disc||0));
   if(RULES.discount&&top>RULES.discount_limit&&!SELF_OK){
@@ -474,7 +533,9 @@ async function complete(){$('#complete').disabled=true;
     else{const why=prompt(d.error);if(!why)break;body[d.reason_key]=why;}
     r=await fetch(U.sale,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     d=await r.json().catch(()=>({ok:false,error:'Something went wrong. The sale was not saved.'}));}
-  if(!d.ok){$('#payErr').textContent=d.error;updPay();return;}
+  if(!d.ok){$('#payErr').textContent=d.error;updPay();
+    if(d.reprice&&!paid.some(p=>p.txn_id)){keepCart();setTimeout(()=>location.reload(),3500);}  // fetch the prices and promotions as they are now
+    return;}
   last=d;cart.forEach(l=>takeStock(l.id,l.qty));
   const cardTot=(d.cards||[]).reduce((s,c)=>s+c.amount,0)||(d.method==='card'?d.total:0);
   $('#give').innerHTML=d.method==='card'?`<span>Paid by card</span><span class="n">${fmt(d.total)}</span>`:`<span>Give change</span><span class="n">${fmt(d.change)}</span>`;
@@ -482,7 +543,7 @@ async function complete(){$('#complete').disabled=true;
   $('#doneCard').innerHTML=(d.cards||[]).map(c=>`${esc(c.scheme||'Card')} ${c.last4?'••'+esc(c.last4):''}${c.auth?' · auth '+esc(c.auth):''} · ${fmt(c.amount)}`).join('<br>')
     +(d.method==='split'?`<br>Card ${fmt(cardTot)} + cash ${fmt(d.total-cardTot)}`:'')+(cardTot&&!d.drawer?'<br>No cash: the drawer stays shut.':'');
   if(d.drawer)document.dispatchEvent(new CustomEvent('riyeser:open-drawer',{detail:{cashout:d.cashout||0,change:d.change||0}}));
-  drawerNote(d);$('#newSale').textContent='New sale';
+  drawerNote(d);$('#newSale').textContent='New sale';$('#viewRc').href=d.view_url+'&till='+encodeURIComponent(tl||'');$('#viewRc').hidden=false;
   $('#doneNote').textContent='Saved to Accounting · stock updated';afterSale();
   const ln=$('#lowNote');if(ln){ln.hidden=!(d.low_stock&&d.low_stock.length);ln.textContent=ln.hidden?'':'Low on stock: '+d.low_stock.join(', ');}
   show('#pPay',false);show('#pDone',true);reset();loadOrders();drawGrid();}
@@ -498,7 +559,7 @@ async function completePart(tenders){
   let d=await post(U.base+'bill/'+bill.id+'/pay',body);
   if(!d.ok&&d.confirm_key&&confirm(d.error)){body[d.confirm_key]=true;d=await post(U.base+'bill/'+bill.id+'/pay',body);}
   if(!d.ok){$('#payErr').textContent=d.error;updPay();return;}
-  last={receipt_url:d.receipt_url,sale_id:d.sale_id,part_id:d.part_id};bill=d.bill;
+  last={receipt_url:d.receipt_url,sale_id:d.sale_id,part_id:d.part_id};bill=d.bill;$('#viewRc').hidden=!d.view_url;if(d.view_url)$('#viewRc').href=d.view_url;
   $('#give').innerHTML=d.method==='card'?`<span>Paid by card</span><span class="n">${fmt(d.total)}</span>`:`<span>Give change</span><span class="n">${fmt(d.change)}</span>`;
   $('#giveCo').hidden=!d.cashout;$('#giveCo').innerHTML=d.cashout?`<span>Give cash out</span><span class="n">${fmt(d.cashout)}</span>`:'';
   $('#doneCard').innerHTML=(d.cards||[]).map(c=>`${esc(c.scheme||'Card')} ${c.last4?'••'+esc(c.last4):''}${c.auth?' · auth '+esc(c.auth):''} · ${fmt(c.amount)}`).join('<br>');
@@ -517,7 +578,7 @@ function payPart(id){const p=bill.parts.find(x=>x.id===id);if(!p||p.paid)return;
 // events
 document.addEventListener('click',async e=>{const b=e.target.closest('button,[data-edit],[data-sl]');if(!b)return;
   if(b.dataset.close!==undefined){b.closest('.modal').classList.remove('show');return;}
-  if(b.dataset.back!==undefined){show('#pPay',false);if(billPart){billPart=null;paid=[];showBill();}return;}
+  if(b.dataset.back!==undefined){show('#pPay',false);payAt=null;if(billPart){billPart=null;paid=[];showBill();}else draw();return;}
   if(b.dataset.vo!==undefined){const k=+b.dataset.vo;vSel[k]=vSel[k]===b.dataset.vv?null:b.dataset.vv;drawVar();return;}
   if(b.dataset.vid){const c=BYID[b.dataset.vid];show('#mVar',false);add(c.id);toast(c.name+' added');return;}
   if(b.dataset.ta){tableAction(b.dataset.ta);return;}
@@ -594,7 +655,7 @@ function drawSplit(){const t=cartTotal();$('#spErr').textContent='';let h='';
       <p style="margin:8px 0 0;color:var(--muted)">Bill ${fmt(t)}. The last guest pays what's left.</p>`;}
   $('#spBody').innerHTML=h;$('#spMinus').onclick=()=>{spN=Math.max(2,spN-1);spGuest=Math.min(spGuest,spN-1);drawSplit();};$('#spPlus').onclick=()=>{spN=Math.min(30,spN+1);drawSplit();};
   $$('[data-amt]').forEach(i=>i.addEventListener('change',()=>{spAmts[+i.dataset.amt]=Math.round(parseFloat(i.value||'0')*100)||0;drawSplit();}));}
-$('#spGo').onclick=async()=>{if($('#spGo').disabled)return;const body={mode:spMode,till_id:till(),op_ref:newRef()};
+$('#spGo').onclick=async()=>{if($('#spGo').disabled)return;const body={mode:spMode,till_id:till(),op_ref:newRef(),promo_codes:codes};
   if(spMode==='even')body.guests=spN;
   else if(spMode==='items'){body.guests=Array.from({length:spN},(_,i)=>{const g={};cart.forEach(l=>{const q=(spAssign[l.uid]||[])[i]||0;if(q>0)g[l.uid]=q;});return g;});
     const miss=cart.filter(l=>Math.abs((spAssign[l.uid]||[]).reduce((a,b)=>a+b,0)-l.qty)>1e-6);if(miss.length){$('#spErr').textContent='Give every item to a guest first: '+miss.map(l=>l.name).join(', ')+'.';return;}}
@@ -655,6 +716,17 @@ if($('#kitchen'))$('#kitchen').onclick=async()=>{if(otype==='dine_in'&&!table){a
   toast(d.docket_error?'Sent. A docket printer had a problem: '+d.docket_error:(d.printed&&d.printed.length)?'Sent to kitchen · printed on '+d.printed.join(', '):d.docket_url?'Sent to kitchen':'Sent to the kitchen screen');loadOrders();
   if(otype==='dine_in')reset();else draw();};
 if($('#tableBtn'))$('#tableBtn').onclick=async()=>{await loadOrders();showTables();};
+// ---- promo codes: a promotion with a code only counts once the cashier has typed it
+function drawCodes(){$('#codeList').innerHTML=codes.map(c=>`<button type="button" data-uncode="${esc(c)}" aria-label="Remove code ${esc(c)}">${esc(c)} ×</button>`).join('');}
+if($('#promoBtn')){$('#promoBtn').onclick=()=>{$('#codeIn').value='';$('#codeErr').textContent='';drawCodes();show('#mPromo',true);setTimeout(()=>$('#codeIn').focus(),50);};
+  const useCode=()=>{const c=$('#codeIn').value.replace(/\s+/g,'').toUpperCase();if(!c)return;const p=PROMOS.find(x=>x.code===c);
+    if(!p){$('#codeErr').textContent='No promotion uses that code.';return;}
+    if(!promoOn(p,new Date(),[c])){$('#codeErr').textContent=p.name+' isn\'t running right now.';return;}
+    if(!codes.includes(c))codes.push(c);show('#mPromo',false);draw();toast(p.name+' added');};
+  $('#codeGo').onclick=useCode;$('#codeIn').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();useCode();}});
+  $('#codeList').addEventListener('click',e=>{const b=e.target.closest('[data-uncode]');if(!b)return;codes=codes.filter(c=>c!==b.dataset.uncode);drawCodes();draw();});}
+// a promotion that starts or ends while the till is open (a happy hour): the sale on screen follows the clock
+setInterval(()=>{if(!$$('.panel.show').length&&cart.length)draw();},20000);
 if($('#custBtn')){const dc=()=>{const q=$('#cq').value.trim().toLowerCase();
   $('#clist').innerHTML=`<button data-cust=""><b>${esc(WALK_IN)}</b></button>`+CUSTOMERS.map((n,i)=>n!==WALK_IN&&(!q||n.toLowerCase().includes(q))?`<button data-cust="${CUST_IDS[i]}"><b>${esc(n)}</b></button>`:'').join('');};
   $('#custBtn').onclick=()=>{$('#cq').value='';dc();show('#mCust',true);$('#cq').focus();};$('#cq').addEventListener('input',dc);}

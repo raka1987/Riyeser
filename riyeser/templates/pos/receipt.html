@@ -12,11 +12,17 @@ table{width:100%;border-collapse:collapse}td{padding:2px 0;vertical-align:top}td
 {% if name %}<h1>{{ name }}</h1>{% endif %}<div class="c">{{ header|join('<br>'|safe) }}</div>
 <hr><div class="c"><b>{{ tl.invoice|upper }}</b><br>{{ s.number }} · {{ s.created_at }}{% if s.voided %}<br><b>*** VOIDED ***</b>{% endif %}</div><hr>
 <table>{% for l in lines %}<tr><td colspan="2">{{ l.description }}</td></tr>
-<tr><td>&nbsp; {{ '%g'|format(l.qty) }} x {{ l.unit_price|money }}{% if l.discount_pct %} -{{ '%g'|format(l.discount_pct) }}%{% endif %}</td><td class="n">{{ (l.net_amount + l.tax_amount)|money }}</td></tr>{% endfor %}</table>
+{#- An item with a promotion shows at its full price, then what the promotion took off (by name), so the receipt
+    adds up to the total. A cashier's own discount shows as its % with the price already reduced, as before. -#}
+{% set back = pr.back.get(l.id, 0) if pr is defined else 0 %}
+<tr><td>&nbsp; {{ '%g'|format(l.qty) }} x {{ l.unit_price|money }}{% if l.discount_pct and not back %} -{{ '%g'|format(l.discount_pct) }}%{% endif %}</td><td class="n">{{ (l.net_amount + l.tax_amount + back)|money }}</td></tr>
+{% if pr is defined %}{% for pn, pa in pr.lines.get(l.id, []) %}<tr><td>&nbsp; {{ pn }}</td><td class="n">-{{ pa|money }}</td></tr>{% endfor %}{% endif %}{% endfor %}</table>
+{% if pr is defined and pr.whole %}<hr><table>{% for pn, pa in pr.whole %}<tr><td>{{ pn }}</td><td class="n">-{{ pa|money }}</td></tr>{% endfor %}</table>{% endif %}
 <hr><table><tr class="t"><td>TOTAL</td><td class="n">{{ s.total|money }}</td></tr>
 {% if parts %}<tr><td colspan="2">&nbsp;</td></tr><tr><td colspan="2"><b>Split bill ({{ parts|length }} parts)</b></td></tr>
 {% for p in parts %}<tr{% if part and p.id == part.id %} style="font-weight:bold"{% endif %}><td>&nbsp; {{ p.label }}{{ ' (this receipt)' if part and p.id == part.id }}</td><td class="n">{{ p.amount|money }} {{ 'paid' if p.paid_at else 'to pay' }}</td></tr>{% endfor %}
 {% if part %}<tr class="t"><td>{{ part.label|upper }} PAID</td><td class="n">{{ part.amount|money }}</td></tr>{% endif %}{% endif %}
+{% if pr is defined and pr.saved %}<tr><td>You saved</td><td class="n">{{ pr.saved|money }}</td></tr>{% endif %}
 {% if tl.has_tax %}<tr><td>{{ tl.tax }} included</td><td class="n">{{ s.tax_total|money }}</td></tr>{% endif %}
 {% for t in tenders %}{% if t.method == 'cash' %}<tr><td>Cash</td><td class="n">{{ t.tendered|money }}</td></tr>
 <tr><td>Change</td><td class="n">{{ t.change_given|money }}</td></tr>

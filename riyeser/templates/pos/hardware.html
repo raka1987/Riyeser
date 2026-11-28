@@ -80,10 +80,11 @@
   {{ problem('receipt') }}
   <fieldset {{ 'disabled' if not can_change }} style="border:0;padding:0;margin:0;min-width:0"><div class="hw-f">
     <div class="full"><label class="lb" for="rp">Printer</label>{{ printer_select('receipt_printer', t.receipt_printer, 'Ask each time (Windows print box)', 'rp') }}</div>
-    <div><span class="lb" style="display:block;font-weight:600;font-size:13.5px;margin-bottom:5px">Paper</span><p style="margin:8px 0 0">{{ lay_t.mm }} mm · {{ lay_t.cpl }} characters a line{% if not wizard %} · <a href="{{ url_for('pos.hardware', till=t.id, adj='till:' ~ t.id) }}#adjust">Adjust print layout</a>{% endif %}</p></div>
+    <div><span class="lb" style="display:block;font-weight:600;font-size:13.5px;margin-bottom:5px">Paper</span><p style="margin:8px 0 0">{{ lay_t.mm }} mm · {{ lay_t.cpl }} characters a line{% if not wizard %} · <a href="{{ url_for('pos.hardware', till=t.id, adj='till:' ~ t.id) }}#adjust">Change paper width (58 or 80 mm), margins and logo size</a>{% endif %}</p></div>
     <div><span class="lb" style="display:block;font-weight:600;font-size:13.5px;margin-bottom:5px">Copies</span><div class="hw-seg">{% for n in (1, 2) %}<label><input type="radio" name="copies" value="{{ n }}" {{ 'checked' if (t.receipt_copies or 1) == n }}> {{ n }}</label>{% endfor %}</div></div>
     <div class="full"><label class="lb" for="pa">Print a receipt after a sale</label><select name="print_after" id="pa">{% for k, n in print_after.items() %}<option value="{{ k }}" {{ 'selected' if (t.print_after or 'ask') == k }}>{{ n }}</option>{% endfor %}</select></div>
   </div></fieldset>
+  {% if not t.receipt_printer %}<div class="hw-problem" id="noPrinterNote" style="background:#fff4e5;color:#7a3a05;border-radius:10px;padding:10px 12px;margin-top:12px"><b>No receipt printer is chosen for {{ t.name }} yet.</b> Receipts open the Windows print box, and on an office (A4) printer they come out as a narrow strip at the top of the page. Choose your receipt printer above so receipts print on receipt paper, without the print box.</div>{% endif %}
   <div class="hw-foot">{{ save('Save receipt printer') }}<button type="button" class="btn" data-testprint {{ 'disabled' if not can_change }}>Test print</button><span class="hw-res" id="tpRes" role="status"></span></div>
 </form>
 {% endif %}

@@ -171,9 +171,19 @@ def receipt_data(db, sid, part=None):
     rs = PP.receipt_settings(db)
     name, head, foot = PP.receipt_brand(db, co, rs, tl)
     from ..countries import money_format
-    return dict(company=name, header=head, money_fmt=money_format(co),
+    from .. import pos_promos
+    pr = pos_promos.on_document(db, s["document_id"])   # items at their full price, then what each promotion took off
+    promos = {}
+    for rows in pr["lines"].values():
+        for pname, amt in rows:
+            promos[pname] = promos.get(pname, 0) + amt
+    for pname, amt in pr["whole"]:
+        promos[pname] = promos.get(pname, 0) + amt
+    back = pr["back"]
+    return dict(promos=list(promos.items()), saved=pr["saved"], company=name, header=head, money_fmt=money_format(co),
                 number=s["number"], date=s["date"], label=label,
-                lines=[(l["qty"], l["description"], l["net_amount"] + l["tax_amount"]) for l in lines],
+                lines=[(l["qty"], l["description"], l["net_amount"] + l["tax_amount"] + back.get(l["id"], 0))
+                       for l in lines],
                 total=total, tax=0 if part or not tax_name else s["tax_total"], tax_name=tax_name,
                 tenders=[(METHOD_LABELS.get(t["method"], t["method"]), t["amount"]) for t in tenders],
                 change=sum(t["change_given"] for t in tenders),

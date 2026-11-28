@@ -70,5 +70,19 @@
     e.preventDefault();
     view(a.href, (a.textContent || '').trim());
   }, true);
-  window.RiyeserInApp = { print, view };
+  // A form that would open its answer in a new window (target="_blank") stays in this window when it goes to one of
+  // Riyeser's own pages.
+  document.addEventListener('submit', e => {
+    const f = e.target; if (!f || !f.getAttribute) return;
+    const tg = (f.getAttribute('target') || '').toLowerCase();
+    if (!tg || tg === '_self' || tg === '_top' || tg === '_parent') return;
+    if (internal(f.getAttribute('action') || location.href)) f.removeAttribute('target');
+  }, true);
+  // window.open() for one of Riyeser's own pages shows it in the in-app viewer instead of a new (browser) window.
+  const open0 = window.open;
+  window.open = function (url, name, features) {
+    if (url && internal(String(url))) { view(new URL(String(url), location.href).href); return null; }
+    return open0 ? open0.call(window, url, name, features) : null;
+  };
+  window.RiyeserInApp = { print, view, internal };
 })();
