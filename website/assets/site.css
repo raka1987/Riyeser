@@ -1486,3 +1486,111 @@ section.endband-sec { padding-top: 8px; padding-bottom: 0; }
 .ctry-set p { margin: 0 0 14px; }
 .ctry-set ul.ticks { margin: 8px 0 18px; }
 .ctry-set ul.ticks li { margin-bottom: 6px; }
+
+/* ---------- header: "Start free" (create an account), Download as the quieter button ---------- */
+.nav .right .hstart { padding-left: 20px; padding-right: 20px; }
+.nav .right .hdl { min-height: 44px; }
+@media (max-width: 1259px) and (min-width: 1001px) { .nav .right .hdl .dlt { display: none; } .nav .right .hdl { padding: 0; width: 44px; height: 44px; } }
+@media (max-width: 760px) {
+  .nav .right { gap: 10px; } .nav .right .btn.hstart { display: inline-flex; min-height: 44px; padding: 10px 16px; font-size: 15px; box-shadow: none; }
+  .nav .right + .menu { margin-left: 0; }
+}
+@media (max-width: 359px) { .nav .right .btn.hstart { padding: 10px 12px; } }
+
+/* ---------- program pages: the owner's product layout (split hero, real screen on a laptop, a photo behind) ---------- */
+.ph2, section.ph2 { padding: 0; }
+.ph2 { background: linear-gradient(100deg, var(--soft) 0%, var(--pale) 100%); border-bottom: 1px solid var(--line); overflow: hidden; }
+.ph2 > .c { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr); gap: 48px; align-items: center; padding-top: 56px; padding-bottom: 64px; }
+.ph-who { display: flex; align-items: center; gap: 12px; margin: 0 0 18px; font-weight: 800; color: var(--ink); font-size: 18px; font-family: var(--display); }
+.ph-who img { width: 48px; height: 48px; border-radius: 13px; box-shadow: 0 8px 18px -10px rgba(10, 30, 80, .55); }
+.ph2 h1 { font-size: clamp(34px, 3.9vw, 52px); letter-spacing: -1.4px; line-height: 1.06; margin: 0 0 18px; text-wrap: balance; }
+.ph2 h1 span { display: block; color: var(--blue); }
+.ph2 .lead { font-size: 18.5px; line-height: 1.55; color: var(--text); max-width: 560px; margin: 0 0 26px; }
+.ph2 .ctas { gap: 14px; }
+.ph2 .h4ticks { margin-top: 22px; }
+.ph-fine { margin: 18px 0 0; font-size: 14px; color: var(--muted); }
+.ph-fine a { color: var(--blue-ink); font-weight: 700; text-decoration: underline; text-underline-offset: 3px; display: inline-block; padding: 12px 0; margin: -12px 0; }
+.ph-vis { position: relative; padding: 34px 0 30px; min-width: 0; }
+.ph-photo, .ph-blob { position: absolute; right: 0; top: 0; width: 74%; height: 78%; border-radius: 24px; object-fit: cover; object-position: 50% 35%; box-shadow: var(--shadow); }
+.ph-blob { background: radial-gradient(circle at 70% 20%, rgba(255, 255, 255, .75), transparent 55%), linear-gradient(140deg, var(--blue-soft), #b9d2ff); box-shadow: none; }
+.ph-lap { position: relative; z-index: 1; width: 84%; margin-top: 17%; }
+.ph-vis:not(.has-photo) .ph-lap { margin-top: 8%; }
+.ph-scr { background: #0d1630; border-radius: 14px 14px 4px 4px; padding: 10px 10px 12px; box-shadow: 0 40px 70px -30px rgba(10, 30, 80, .6); }
+.ph-scr img { width: 100%; aspect-ratio: 16 / 10; object-fit: contain; object-position: 50% 0; background: #f5f7fb; border-radius: 5px; }
+.ph-base { height: 14px; margin: 0 -6%; background: linear-gradient(#dde2ec, #b6bfce); border-radius: 0 0 16px 16px; position: relative; }
+.ph-base::before { content: ""; position: absolute; left: 50%; top: 0; width: 16%; height: 5px; transform: translateX(-50%); background: #a5aebf; border-radius: 0 0 7px 7px; }
+/* the band under the hero: the price card and what's included side by side */
+.pband .pb-grid { display: grid; grid-template-columns: minmax(0, 380px) minmax(0, 1fr); gap: 24px; align-items: start; }
+.pband .hprice { max-width: none; margin: 0; padding: 28px; }
+.pband .hprice .buybtns { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+.pband .inclcard { padding: 28px 32px; }
+.pband .inclcard .ih { padding-bottom: 12px; border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+.pband .inclcard .edlist { columns: 2 240px; column-gap: 36px; margin: 0; }
+.pband .pnote { margin-top: 20px; }
+.pband .pb-more { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 18px; }
+.pband .pb-more .incd { margin: 0; }
+.pband .pb-more .incd .edlist { columns: 1; }
+.kf { list-style: none; margin: 0 0 24px; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; }
+.kf li { display: flex; flex-direction: column; gap: 6px; padding: 20px 18px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow-sm); }
+.kf-ic { width: 44px; height: 44px; border-radius: 12px; background: var(--pale); color: var(--blue); display: grid; place-items: center; margin-bottom: 6px; }
+.kf-ic svg { width: 24px; height: 24px; }
+.kf b { color: var(--ink); font-size: 16.5px; line-height: 1.3; }
+.kf b .st { margin-left: 4px; vertical-align: 2px; font-size: 11.5px; padding: 1px 8px; }
+.kf small { color: var(--muted); font-size: 14px; line-height: 1.45; }
+@media (max-width: 1100px) { .kf { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 980px) {
+  .ph2 > .c { grid-template-columns: 1fr; gap: 28px; padding-top: 40px; padding-bottom: 48px; }
+  .ph-vis { max-width: 640px; }
+  .pband .pb-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .ph2 > .c { padding-top: 28px; padding-bottom: 40px; }
+  .ph2 .lead { font-size: 17px; }
+  .ph2 .ctas .btn { flex: 1 1 100%; }
+  .ph2 .h4ticks { flex-direction: column; gap: 8px; }
+  .ph-vis { padding: 18px 0 16px; }
+  .ph-photo, .ph-blob { width: 78%; height: 80%; border-radius: 18px; }
+  .ph-lap { width: 92%; }
+  .ph-scr { padding: 6px 6px 8px; border-radius: 10px 10px 3px 3px; }
+  .ph-base { height: 9px; }
+  .pband .hprice, .pband .inclcard { padding: 22px 18px; }
+  .pband .pb-more { grid-template-columns: 1fr; }
+  .kf { grid-template-columns: 1fr; }
+  .kf li { display: grid; grid-template-columns: 44px minmax(0, 1fr); column-gap: 14px; row-gap: 2px; padding: 16px; }
+  .kf-ic { grid-row: span 2; margin: 0; }
+}
+
+/* ---------- home: "Pricing at a glance", one compact row of programs and prices ---------- */
+.pglance .c { padding-top: 48px; padding-bottom: 48px; }
+.pg-head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px 40px; align-items: end; margin-bottom: 22px; }
+.pg-head .h2 { margin: 0; }
+.pg-head .sub { margin: 0; color: var(--muted); }
+.pg-head .sub .more { display: inline-block; padding: 10px 0; margin: -10px 0; white-space: nowrap; }
+.pglance .ghead { text-align: left; margin: 16px 0 8px; font-size: 13px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.pglance .frow { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 10px; background: none; border: 0; }
+.pglance .frow a { display: inline-flex; flex-direction: row; align-items: center; gap: 10px; width: auto; min-height: 52px; padding: 6px 14px 6px 6px; text-align: left; font-size: 15px; font-weight: 700;
+  background: var(--card); border: 1px solid var(--line); border-radius: 14px; transition: border-color .15s, transform .15s; }
+.pglance .frow a:hover { border-color: var(--blue); transform: translateY(-1px); }
+.pglance .frow a:hover img { transform: none; }
+.pglance .frow img { width: 38px; height: 38px; border-radius: 10px; box-shadow: none; }
+.pglance .frow .fname { white-space: nowrap; }
+.pglance .frow .fprice { margin: 0; font-size: 13.5px; font-weight: 700; color: var(--blue-ink); white-space: nowrap; }
+.pglance .frow .fprice.free { color: #157a3c; }
+.pglance .frow .fprice.with { color: #8a5a00; }
+.pglance .cn-teaser { margin-top: 26px; }
+@media (max-width: 900px) { .pg-head { grid-template-columns: 1fr; } }
+@media (max-width: 640px) {
+  .pglance .c { padding-top: 36px; padding-bottom: 36px; }
+  .pglance .frow { display: grid; grid-template-columns: 1fr; gap: 0; background: var(--card); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+  .pglance .frow a { display: flex; width: 100%; min-height: 52px; border: 0; border-radius: 0; padding: 6px 14px 6px 8px; }
+  .pglance .frow a + a { border-top: 1px solid var(--line); }
+  .pglance .frow .fprice { margin-left: auto; }
+}
+.ph-scr.cover img { object-fit: cover; object-position: 0 0; }
+/* tap targets: at least 44 px (header Sign in, the price card buttons, "Everything in…") */
+@media (min-width: 1101px) { .nav .right .signin { display: inline-flex; align-items: center; min-height: 44px; } }
+.pband .btn.sm { min-height: 44px; }
+.pband .pb-more .incd summary { min-height: 44px; display: inline-flex; align-items: center; }
+/* tablets: Downloads is in the menu bar, so the header keeps only "Start free" */
+@media (max-width: 1000px) and (min-width: 761px) { .nav .right .hdl { display: none; } .nav .right .hstart { padding: 10px 16px; min-height: 44px; } }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .ph-blob { background: radial-gradient(circle at 70% 20%, rgba(255, 255, 255, .08), transparent 55%), linear-gradient(140deg, #14295a, #1b3a7a); } }

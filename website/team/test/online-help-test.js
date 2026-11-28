@@ -12,7 +12,7 @@ const fs = require('fs'); const path = require('path');
   for (const id of ['how', 'which-pc', 'setup', 'paste', 'checklist', 'test', 'panel', 'activity', 'problem', 'nothing-arrives']) assert.ok(items[id], `answer ${id}`);
   const how = items.how.a;
   assert.match(how, /<svg[^>]*role="img"/); assert.match(how, /<title id="hflow-t">/);
-  for (const w of ['Your website', 'Riyeser Online', 'Your sync PC', 'Your programs', 'prices, stock, free times']) assert.ok(how.includes(w), `diagram: ${w}`);
+  for (const w of ['Your website', 'Riyeser Online', 'Your sync PC', 'Your programs', 'prices, stock, available times']) assert.ok(how.includes(w), `diagram: ${w}`);
   const setup = items.setup.a;
   assert.strictEqual((setup.match(/<li>/g) || []).length, 5, 'five steps');
   for (const w of ['Choose what you want', 'Make the key', 'Management → Connections', 'Copy the code into your website', 'Send a test', 'Done ✓']) assert.ok(setup.includes(w), `setup: ${w}`);

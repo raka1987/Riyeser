@@ -28,7 +28,7 @@ const BENEFITS = [
 ];
 const TYPES = [
   ['trades', 'Trades & services', 'Quote requests', 'Your contact form sends quote requests straight in, with the customer\'s details and a reminder to call back. With the API, your website can also record a quote accepted or an invoice paid online (taken by your own payment provider).', ['invoices', 'accounting-basics']],
-  ['salon', 'Salons, clinics & studios', 'Online bookings', 'Clients pick a service, a person and a free time. It lands in your Bookings calendar for you to confirm, and on the client\'s page.', ['bookings']],
+  ['salon', 'Salons, clinics & studios', 'Online bookings', 'Clients pick a service, a person and an available time. It lands in your Bookings calendar for you to confirm, and on the client\'s page.', ['bookings']],
   ['cafe', 'Cafés & restaurants', 'Tables & orders', 'Take table bookings with the booking form, and pick-up or catering orders with an order button. Order requests wait for you to confirm.', ['bookings', 'pos']],
   ['shop', 'Shops & online stores', 'Orders & stock', 'Online shop orders become sales in Riyeser POS, or invoices in Accounting, and your shop shows your prices and what\'s in stock.', ['pos', 'accounting-basics']],
 ];
@@ -38,24 +38,24 @@ const APPNAME = { invoices: 'Riyeser Invoices', 'accounting-basics': 'Riyeser Ac
 function flowWide(up) {
   const box = (x, w, title, lines, cls = '') => `<rect class="fn${cls}" x="${x}" y="40" width="${w}" height="150" rx="16"/><text class="ft" x="${x + w / 2}" y="76">${esc(title)}</text>${lines.map((l, i) => `<text class="fs" x="${x + w / 2}" y="${104 + i * 22}">${esc(l)}</text>`).join('')}`;
   const apps = ['bookings', 'pos', 'invoices', 'accounting-basics'].map((a, i) => `<image href="${up}assets/apps/${a}.png" x="${772 + i * 40}" y="150" width="30" height="30"/>`).join('');
-  return `<svg class="cn-flow wide" viewBox="0 0 1000 250" role="img" aria-labelledby="cnf-t"><title id="cnf-t">Your website sends bookings, orders, quote requests and payments to Riyeser Online. Riyeser Central on your PC collects them every minute and files them in your programs. Free times, prices, stock and confirmations go back to your website.</title>
+  return `<svg class="cn-flow wide" viewBox="0 0 1000 250" role="img" aria-labelledby="cnf-t"><title id="cnf-t">Your website sends bookings, orders, quote requests and payments to Riyeser Online. Riyeser Central on your PC collects them every minute and files them in your programs. Available times, prices, stock and confirmations go back to your website.</title>
 <defs><marker id="cnfa" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="fh"/></marker><marker id="cnfb" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="fhb"/></marker></defs>
 ${box(5, 290, 'Your website', ['Booking form · Enquiry form', 'Order button · Online shop', 'Your developer (API)'])}
 ${box(355, 290, 'Riyeser Online', ['A secure post box for your business', 'Waits safely if every PC is off'], ' mid')}
 ${box(705, 290, 'Your Riyeser programs', ['Bookings · POS · Invoices', 'Accounting · Customers · Today'])}${apps}
 <path class="fl" d="M297 92H351" marker-end="url(#cnfa)"/><path class="fl" d="M647 92H701" marker-end="url(#cnfa)"/><path class="fl back" d="M703 150H651" marker-end="url(#cnfb)"/><path class="fl back" d="M353 150H301" marker-end="url(#cnfb)"/>
-<text class="fa" x="500" y="24">bookings · orders · quote requests · payments →</text><text class="fa back" x="500" y="232">← free times · prices · stock · “confirmed” and “ready”</text></svg>`;
+<text class="fa" x="500" y="24">bookings · orders · quote requests · payments →</text><text class="fa back" x="500" y="232">← available times · prices · stock · “confirmed” and “ready”</text></svg>`;
 }
 function flowTall(up) {
   const box = (y, h, title, lines, cls = '') => `<rect class="fn${cls}" x="40" y="${y}" width="280" height="${h}" rx="16"/><text class="ft" x="180" y="${y + 32}">${esc(title)}</text>${lines.map((l, i) => `<text class="fs" x="180" y="${y + 58 + i * 21}">${esc(l)}</text>`).join('')}`;
   const apps = ['bookings', 'pos', 'invoices', 'accounting-basics'].map((a, i) => `<image href="${up}assets/apps/${a}.png" x="${112 + i * 36}" y="476" width="28" height="28"/>`).join('');
-  return `<svg class="cn-flow tall" viewBox="0 0 360 530" role="img" aria-labelledby="cnf-t2"><title id="cnf-t2">Your website sends bookings, orders, quote requests and payments to Riyeser Online. Riyeser Central on your PC collects them every minute and files them in your programs. Free times, prices, stock and confirmations go back to your website.</title>
+  return `<svg class="cn-flow tall" viewBox="0 0 360 530" role="img" aria-labelledby="cnf-t2"><title id="cnf-t2">Your website sends bookings, orders, quote requests and payments to Riyeser Online. Riyeser Central on your PC collects them every minute and files them in your programs. Available times, prices, stock and confirmations go back to your website.</title>
 ${box(10, 112, 'Your website', ['Booking form · Enquiry form', 'Order button · Online shop'])}
 ${box(200, 104, 'Riyeser Online', ['A secure post box', 'Waits safely if every PC is off'], ' mid')}
 ${box(382, 136, 'Your Riyeser programs', ['Bookings · POS · Invoices', 'Accounting · Customers · Today'])}${apps}
 <defs><marker id="cnfc" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="fh"/></marker><marker id="cnfd" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="fhb"/></marker></defs>
 <path class="fl" d="M160 124V196" marker-end="url(#cnfc)"/><path class="fl" d="M160 306V378" marker-end="url(#cnfc)"/><path class="fl back" d="M200 378V310" marker-end="url(#cnfd)"/><path class="fl back" d="M200 196V128" marker-end="url(#cnfd)"/>
-<text class="fa l" x="150" y="156">bookings,</text><text class="fa l" x="150" y="174">orders,</text><text class="fa l" x="150" y="192">quotes</text><text class="fa back r" x="210" y="156">free times,</text><text class="fa back r" x="210" y="174">prices,</text><text class="fa back r" x="210" y="192">stock</text></svg>`;
+<text class="fa l" x="150" y="156">bookings,</text><text class="fa l" x="150" y="174">orders,</text><text class="fa l" x="150" y="192">quotes</text><text class="fa back r" x="210" y="156">available times,</text><text class="fa back r" x="210" y="174">prices,</text><text class="fa back r" x="210" y="192">stock</text></svg>`;
 }
 
 // The pretend Riyeser Bookings window: a day with two staff columns; the script fills it in.
@@ -87,7 +87,7 @@ export function connectSection(up) {
     ${bookingsMock(up)}
   </div>
   <p class="cn-note"><span class="cn-live">Live demo</span><span class="cn-say" aria-live="polite">Book a time on the sample website and watch it land in Riyeser Bookings.</span></p>
-  <p class="cn-fine">A made-up salon. Nothing is sent. On your website the same form shows your own services, staff and free times.</p>
+  <p class="cn-fine">A sample salon. Nothing is sent. On your website the same form shows your own services, staff and available times.</p>
 </div></div>
 <div class="c cn-more">
   <div class="cn-flowbox">${flowWide(up)}${flowTall(up)}
@@ -143,5 +143,5 @@ if('IntersectionObserver' in window){var io=new IntersectionObserver(function(es
 })();</script>`;
 }
 
-/** The one-line pointer to the section, under "Find your program". */
+/** The one-line pointer to the section, under "Find the right software for your business". */
 export const connectTeaser = () => `<a class="cn-teaser" href="#connect"><span class="cn-ic">${ic(I.globe)}</span><span><b>Have a website?</b> Bookings, orders and quote requests from it land straight in Riyeser.</span><span class="more">See how ${ARR}</span></a>`;

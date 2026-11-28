@@ -4736,7 +4736,7 @@
       ['availability:read', 'See free booking times', 'Services, staff and open times you publish'], ['catalog:read', 'See products and services', 'Names, descriptions and categories'],
       ['prices:read', 'See prices', 'Prices of active items'], ['stock:read', 'See stock levels', 'How many are in stock']],
     WIDGET: ['availability:read', 'bookings:write', 'enquiries:write'],
-    PRESETS: [['widget', 'Website booking widget', 'For the booking form or enquiry form on your website. Safe to put in a web page: it can only see free times and send bookings and enquiries, only from the websites you list.'],
+    PRESETS: [['widget', 'Website booking widget', 'For the booking form or enquiry form on your website. Safe to put in a web page: it can only see available times and send bookings and enquiries, only from the websites you list.'],
       ['shop', 'Online shop orders', 'For your online shop\'s server: send orders and customers, read products, prices and stock. Keep it secret.'],
       ['custom', 'Custom / developer', 'Choose exactly what it may do. For your web developer. Keep it secret.']],
     SHOP: ['orders:write', 'customers:write', 'catalog:read', 'prices:read', 'stock:read'],
@@ -4798,7 +4798,7 @@
     const how = isOwner() ? '<button class="btn sm" data-cnplan>See your plan</button>' : '<span class="muted small">Ask the owner to add it.</span>';
     if (a.any === false) out.push(`<div class="lo-warn cn-plan" data-plan="any"><b>Online connections need a Riyeser program on its free trial or paid.</b> Until then your website's requests are refused (plan_required). ${how}</div>`);
     else {
-      if (a.bookings === false) out.push(`<div class="lo-warn cn-plan" data-plan="bookings"><b>Online bookings and free times need Riyeser Bookings</b> (on its free trial or paid). The booking widget says "not available" until then. ${how}</div>`);
+      if (a.bookings === false) out.push(`<div class="lo-warn cn-plan" data-plan="bookings"><b>Online bookings and available times need Riyeser Bookings</b> (on its free trial or paid). The booking widget says "not available" until then. ${how}</div>`);
       if (a.orders === false) out.push(`<div class="lo-warn cn-plan" data-plan="orders"><b>Online orders and stock need Riyeser POS or Riyeser Accounting</b> (on its free trial or paid). ${how}</div>`);
     }
     return out.join('');
@@ -4829,7 +4829,7 @@
   }
   // "Connect your website": five steps, a checklist ticked from what really happened (api_status / api_overview),
   // and Send a test (api_send_test: a test through the real post box; a linked PC files it as a test within a minute).
-  const CN_GUIDE = [['booking', 'A booking form', 'Customers pick a service and a free time. Needs Riyeser Bookings.'], ['enquiry', 'An enquiry form', 'Questions and quote requests from your website.'],
+  const CN_GUIDE = [['booking', 'A booking form', 'Customers pick a service and an available time. Needs Riyeser Bookings.'], ['enquiry', 'An enquiry form', 'Questions and quote requests from your website.'],
     ['order', 'An order button', '“Order” buttons on your products: you confirm each one.'], ['shop', 'An online shop', 'Your shop sends paid orders and reads prices and stock.'],
     ['developer', 'Something my developer builds', 'The full API: send them the developer docs.']];
   const CN_BUILDERS = [['WordPress', 'Edit the page, add a <b>Custom HTML</b> block, paste, then <b>Update</b>.'], ['Wix', '<b>Add Elements → Embed Code → Embed HTML</b>, choose <b>Code</b>, paste, <b>Update</b>, publish.'],
@@ -4839,7 +4839,7 @@
     const o = S.cn.ov || {}; const s = S.cn.status || null; const p = (s && s.published) || o.published || {};
     return [['key', 'A key made (API keys)', !!(o.keys && o.keys.active)], ['request', 'Your website has talked to Riyeser Online', !!((s && s.last_request_at) || o.requests_24h)],
       ['sync', 'A PC brings items in (Riyeser Central on the PC with the company file)', !!(s && s.sync_pc)], ['item', 'The first item filed on that PC', !!((s && s.inbox && s.inbox.done_total) || (o.inbox && o.inbox.done_7d))],
-      ['publish', 'Prices and free times published for your website', !!(p.catalog_at || p.availability_at)]];
+      ['publish', 'Prices and available times published for your website', !!(p.catalog_at || p.availability_at)]];
   }
   function cnGuide(open) {
     const c = S.cn; const g = c.guide || (c.guide = { pick: 'booking', test: null });
@@ -4851,7 +4851,7 @@
         : `<div class="cn-gprog" role="status"><b>Sent.</b> It's in your <button class="linkbtn" data-tab="inbox">post box</button>${t.status === 'taken' ? `; ${esc(t.pc || 'a PC')} is filing it now` : '; the sync PC brings it in within a minute'}…</div>`;
     return `<details class="lo-card cn-guide" id="cnguide"${(g.open ?? (open || !all)) ? ' open' : ''}><summary><h2>Connect your website</h2><span class="muted small">${all ? 'All done ✓' : `${cl.filter((x) => x[2]).length} of ${cl.length} done`}</span></summary>
       <div class="cn-gtop"><ul class="cn-gcheck" aria-label="Checklist">${cl.map(([id, l, ok]) => `<li class="${ok ? 'on' : ''}" data-check="${id}"><span class="tk" aria-hidden="true">${ok ? '✓' : ''}</span>${esc(l)}</li>`).join('')}</ul>
-        <p class="muted small">Your website sends to your Riyeser Online post box → Riyeser Central on your sync PC collects it every minute → it's filed in Bookings, POS or Accounting. Prices, stock and free times go back the other way. <a href="/help/online.html">How it works</a></p></div>
+        <p class="muted small">Your website sends to your Riyeser Online post box → Riyeser Central on your sync PC collects it every minute → it's filed in Bookings, POS or Accounting. Prices, stock and available times go back the other way. <a href="/help/online.html">How it works</a></p></div>
       <ol class="cn-gsteps">
         ${step(1, 'Choose what you want', `<div class="cn-opts cn-gopts" role="radiogroup" aria-label="What you want">${CN_GUIDE.map(([v, l, d]) => `<label class="opt"><input type="radio" name="cngpick" value="${v}"${g.pick === v ? ' checked' : ''}> <b>${l}</b><small>${d}</small></label>`).join('')}</div>`, false)}
         ${step(2, 'Make the key', `<p>${widget ? 'A <b>Website booking widget</b> key, with your website\'s address.' : g.pick === 'shop' ? 'An <b>Online shop orders</b> key. It\'s secret: only for your shop\'s settings.' : 'A <b>Custom / developer</b> key with only what they need.'} Make a <b>Test</b> key first to try it safely.</p><button class="btn p sm" data-cnnew="${widget ? 'widget' : g.pick === 'shop' ? 'shop' : 'custom'}">+ New key</button>`, cl[0][2])}
@@ -4980,9 +4980,9 @@
       : '<span class="lo-pill" data-st="off">Off</span> <span class="muted small">Customers can\'t see it until you switch it on.</span>';
     const notes = [];
     if (!b.allowed) notes.push(`<p class="bp-note" data-note="plan">Your booking page needs <b>Riyeser Bookings</b> (on its free trial or paid). Until then it says you aren't taking online bookings. ${isOwner() ? '<button class="linkbtn" data-cnplan>See your plan</button>' : 'Ask the owner to add it.'}</p>`);
-    else if (!pub.services) notes.push('<p class="bp-note" data-note="services">No services published yet. Add services with a duration in Riyeser Bookings: Riyeser Central on your PC publishes them, with your free times, within a minute.</p>');
+    else if (!pub.services) notes.push('<p class="bp-note" data-note="services">No services published yet. Add services with a duration in Riyeser Bookings: Riyeser Central on your PC publishes them, with your available times, within a minute.</p>');
     const tx = bpShareTexts(url);
-    return `<section class="lo-card bp-main" id="bpcard"><div class="bp-head"><div><h2>Your booking page</h2><p class="muted">A page on riyeser.com where customers book with you. Your services, staff and free times come straight from Riyeser Bookings, and bookings arrive there for you to confirm. Nothing to paste into a website.</p></div>
+    return `<section class="lo-card bp-main" id="bpcard"><div class="bp-head"><div><h2>Your booking page</h2><p class="muted">A page on riyeser.com where customers book with you. Your services, staff and available times come straight from Riyeser Bookings, and bookings arrive there for you to confirm. Nothing to paste into a website.</p></div>
         <label class="bp-switch"><input type="checkbox" role="switch" id="bpon"${on ? ' checked' : ''}${c.bpBusy ? ' disabled' : ''} aria-describedby="bpstate"><span class="bp-track" aria-hidden="true"></span><span>Take bookings on my page</span></label></div>
       <p class="bp-state" id="bpstate">${status}${on && b.bookings_7d ? ` <span class="muted small">· ${b.bookings_7d} booking${b.bookings_7d === 1 ? '' : 's'} from it this week</span>` : ''}</p>${notes.join('')}</section>
     <section class="lo-card" id="bpaddr"><h2>Address</h2><p class="muted small">Letters, numbers and dashes. Changing it later breaks links and QR codes you've already shared.</p>

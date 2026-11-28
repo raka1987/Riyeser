@@ -141,7 +141,7 @@ const site = (req, res) => { const u = new URL(req.url, 'http://x'); const a = `
 
     // 3. no free time
     const p3 = await open(SHOP + '/book'); await W(p3).locator('[data-svc=FULL]').click(); await W(p3).locator('[data-staff=""]').click();
-    await until(p3, /No free times between/); await W(p3).locator('[data-a=next]').click(); await until(p3, /No free times between/);
+    await until(p3, /No available times between/); await W(p3).locator('[data-a=next]').click(); await until(p3, /No available times between/);
     assert.ok(await W(p3).locator('[data-a=prev]').count(), 'Earlier after Next week'); await p3.screenshot({ path: out + '/widget-7-no-time.png' }); console.log('no free time: ok');
 
     // 5c. plan; 5d. a website that isn't on the key

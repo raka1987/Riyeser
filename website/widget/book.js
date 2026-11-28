@@ -158,9 +158,9 @@
         if (!S.day || !days[S.day]) S.day = order[0] || null;
         var tz = S.avail.timezone; var mine = ''; try { mine = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (e) { /* */ }
         h = summary() + '<h3 tabindex="-1">When?</h3>' + note(S.msg, true)
-          + (S.slots === null ? '<p class="mu">Finding free times…</p>' : !order.length ? '<p class="note" role="status" data-none="1">No free times between ' + esc(dayLabel(parts(S.from + 'T00:00'))) + ' and ' + esc(dayLabel(parts(addDays(S.from, 6) + 'T00:00'))) + '. Try the next week.</p>'
+          + (S.slots === null ? '<p class="mu">Finding available times…</p>' : !order.length ? '<p class="note" role="status" data-none="1">No available times between ' + esc(dayLabel(parts(S.from + 'T00:00'))) + ' and ' + esc(dayLabel(parts(addDays(S.from, 6) + 'T00:00'))) + '. Try the next week.</p>'
           : '<div class="days" role="group" aria-label="Days">' + order.map(function (d) { return '<button type="button" class="o" data-day="' + d + '" aria-pressed="' + (S.day === d) + '">' + esc(dayLabel(parts(d + 'T00:00'))) + '</button>'; }).join('') + '</div>'
-            + '<div class="times" role="group" aria-label="Free times on ' + esc(longDay(parts(S.day + 'T00:00'))) + '">' + days[S.day].map(function (x, i) { return '<button type="button" class="o" data-slot="' + i + '" aria-pressed="' + (S.slot === x) + '">' + esc(timeLabel(parts(x.local_start))) + '</button>'; }).join('') + '</div>'
+            + '<div class="times" role="group" aria-label="Available times on ' + esc(longDay(parts(S.day + 'T00:00'))) + '">' + days[S.day].map(function (x, i) { return '<button type="button" class="o" data-slot="' + i + '" aria-pressed="' + (S.slot === x) + '">' + esc(timeLabel(parts(x.local_start))) + '</button>'; }).join('') + '</div>'
             + (tz && mine && tz !== mine ? '<p class="mu">Times are in ' + esc(tz.replace(/_/g, ' ')) + ' time.</p>' : ''))
           + '<div class="row"><button type="button" class="btn s" data-a="back">Back</button>' + (S.from > today(tz) ? '<button type="button" class="btn s" data-a="prev">Earlier</button>' : '') + '<button type="button" class="btn s" data-a="next">Next week</button></div>';
       } else if (S.step === 'details') {
@@ -238,7 +238,7 @@
     }
     function loadSlots(keepMsg) {
       S.slots = null; S.slot = null; if (!keepMsg) S.msg = ''; draw(true);
-      api.slots({ service: S.service, from: S.from, days: 7, staff: S.staff || null }).then(function (r) { S.slots = r.slots || []; S.day = null; draw(); say(S.slots.length ? S.slots.length + ' free times' : 'No free times this week'); },
+      api.slots({ service: S.service, from: S.from, days: 7, staff: S.staff || null }).then(function (r) { S.slots = r.slots || []; S.day = null; draw(); say(S.slots.length ? S.slots.length + ' available times' : 'No available times this week'); },
         function (e) { S.slots = []; S.msg = plain(e, 'booking'); draw(); say(S.msg); });
     }
     function start() {

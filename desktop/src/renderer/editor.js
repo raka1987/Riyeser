@@ -1411,13 +1411,13 @@ const tools = {
   },
   async compress() {
     if (!st.doc) return;
-    const r = await dialog(`<h2 style="margin-top:0">Make the PDF smaller</h2>
+    const r = await dialog(`<h2 style="margin-top:0">Compress PDF</h2>
       <p class="small muted">Pages are turned into pictures at a lower quality. Great for emailing scans and photos. The text won't be selectable afterwards (you can run <b>Recognise text</b> again).</p>
       <div class="dlgrow"><label>Quality</label><select id="cq"><option value="150|0.72">Balanced (recommended)</option><option value="110|0.6">Smallest (for email)</option><option value="200|0.82">High quality</option></select></div>
-      <div class="row" style="margin-top:14px"><span class="spacer"></span><button data-dlg="cancel">Cancel</button><button class="primary" data-dlg="ok">Make smaller</button></div>`);
+      <div class="row" style="margin-top:14px"><span class="spacer"></span><button data-dlg="cancel">Cancel</button><button class="primary" data-dlg="ok">Compress PDF</button></div>`);
     if (r !== 'ok') return;
     const [dpi, q] = $('#cq').value.split('|').map(Number);
-    toast('Making it smaller…');
+    toast('Compressing the PDF…');
     const full = await buildPdf();
     const small = await flattenPages(full, st.order.map((_, i) => i), { dpi, quality: q });
     const kb = (b) => (b.length > 1e6 ? `${(b.length / 1e6).toFixed(1)} MB` : `${Math.round(b.length / 1e3)} KB`);

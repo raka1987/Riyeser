@@ -119,7 +119,7 @@ async function api(route) {
     await pg.click('[data-staff=""]'); await pg.waitForSelector('.times [data-slot]');
     const firstDay = await pg.$eval('.days [aria-pressed=true]', (e) => e.dataset.day);
     check(firstDay === day(1), 'the first day with free times is chosen (' + firstDay + ')');
-    check(await pg.$eval('.days [data-day="' + day(0) + '"]', (e) => e.disabled && /no free times/.test(e.getAttribute('aria-label'))), 'a day with no free times can\'t be chosen and says so');
+    check(await pg.$eval('.days [data-day="' + day(0) + '"]', (e) => e.disabled && /no available times/.test(e.getAttribute('aria-label'))), 'a day with no free times can\'t be chosen and says so');
     await pg.click('.days [data-day="' + day(2) + '"]'); await pg.click('.times [data-slot="2"]');
     await pg.waitForSelector('#f-name');
     check(await pg.evaluate(() => document.activeElement.id) === 'f-name', 'choosing a time goes to the details (focus on name)');

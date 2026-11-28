@@ -186,18 +186,18 @@
       h += step('s-day', n++, 'Choose a day', '<p class="hint">Choose a service first.</p>', { later: true });
       h += step('s-time', n++, 'Choose a time', '', { later: true });
     } else if (S.slots === null) {
-      h += step('s-day', n++, 'Choose a day', '<div class="days" aria-hidden="true">' + [0, 1, 2, 3, 4, 5].map(function () { return '<div class="sk" style="width:74px;height:62px;flex:none"></div>'; }).join('') + '</div><p class="hint" role="status">Finding free times…</p>');
+      h += step('s-day', n++, 'Choose a day', '<div class="days" aria-hidden="true">' + [0, 1, 2, 3, 4, 5].map(function () { return '<div class="sk" style="width:74px;height:62px;flex:none"></div>'; }).join('') + '</div><p class="hint" role="status">Finding available times…</p>');
       h += step('s-time', n++, 'Choose a time', '', { later: true });
     } else {
       var dl = dayList(); var any = dl.days.some(function (d) { return dl.by[d]; }); var t0 = today(tz());
       var nav = '<div class="daynav">' + (S.from > t0 ? '<button type="button" class="btn sm" data-a="prev">← Earlier</button>' : '') + '<button type="button" class="btn sm" data-a="next">Later dates →</button></div>';
       h += step('s-day', n++, 'Choose a day', (S.msg && !S.slot ? '<p class="note bad" role="alert">' + esc(S.msg) + '</p>' : '')
         + (any ? '<div class="days" role="group" aria-labelledby="s-day-h">' + dl.days.map(function (d) { var c = (dl.by[d] || []).length;
-          return '<button type="button" class="opt" data-day="' + d + '" aria-pressed="' + (S.day === d) + '"' + (c ? '' : ' disabled') + ' aria-label="' + esc(longDay(d)) + (c ? ', ' + c + ' free time' + (c === 1 ? '' : 's') : ', no free times') + '"><b>' + esc(d === t0 ? 'Today' : wday(d)) + '</b><span>' + esc(dnum(d)) + '</span><small>' + esc(c ? mon(d) : (S.p.hours || []).length && !hoursFor(d) ? 'Closed' : 'Full') + '</small></button>'; }).join('') + '</div>' + nav
-          : '<p class="note" role="status" data-none="1">No free times from ' + esc(longDay(dl.days[0])) + ' to ' + esc(longDay(dl.days[6])) + '. Try later dates' + (p.phone ? ', or call ' + esc(p.phone) : '') + '.</p>' + nav),
+          return '<button type="button" class="opt" data-day="' + d + '" aria-pressed="' + (S.day === d) + '"' + (c ? '' : ' disabled') + ' aria-label="' + esc(longDay(d)) + (c ? ', ' + c + ' available time' + (c === 1 ? '' : 's') : ', no available times') + '"><b>' + esc(d === t0 ? 'Today' : wday(d)) + '</b><span>' + esc(dnum(d)) + '</span><small>' + esc(c ? mon(d) : (S.p.hours || []).length && !hoursFor(d) ? 'Closed' : 'Full') + '</small></button>'; }).join('') + '</div>' + nav
+          : '<p class="note" role="status" data-none="1">No available times from ' + esc(longDay(dl.days[0])) + ' to ' + esc(longDay(dl.days[6])) + '. Try later dates' + (p.phone ? ', or call ' + esc(p.phone) : '') + '.</p>' + nav),
         { done: !!S.day && any, chosen: S.day && any ? longDay(S.day) : '' });
       var mine = ''; try { mine = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (e) { /* */ }
-      h += step('s-time', n++, 'Choose a time', S.day && dl.by[S.day] ? '<div class="times" role="group" aria-label="Free times on ' + esc(longDay(S.day)) + '">' + dl.by[S.day].map(function (x, i) { return '<button type="button" class="opt" data-slot="' + i + '" aria-pressed="' + (!!S.slot && S.slot.start === x.start) + '">' + esc(timeLabel(x.local_start)) + '</button>'; }).join('') + '</div>'
+      h += step('s-time', n++, 'Choose a time', S.day && dl.by[S.day] ? '<div class="times" role="group" aria-label="Available times on ' + esc(longDay(S.day)) + '">' + dl.by[S.day].map(function (x, i) { return '<button type="button" class="opt" data-slot="' + i + '" aria-pressed="' + (!!S.slot && S.slot.start === x.start) + '">' + esc(timeLabel(x.local_start)) + '</button>'; }).join('') + '</div>'
         + (mine && mine !== tz() ? '<p class="hint">Times are in ' + esc(tz().replace(/_/g, ' ')) + ' time.</p>' : '') : '<p class="hint">Choose a day first.</p>', { done: !!S.slot, later: !S.day, chosen: S.slot ? timeLabel(S.slot.local_start) : '' });
     }
     h += step('s-you', n++, 'Your details', S.slot ? details() : '<p class="hint">Choose a time first.</p>', { later: !S.slot });
@@ -243,7 +243,7 @@
       + (p.phone ? '<div><dt>Phone</dt><dd><a href="tel:' + esc(String(p.phone).replace(/[^0-9+]/g, '')) + '">' + esc(p.phone) + '</a></dd></div>' : '')
       + (list ? '<div><dt>Opening hours</dt><dd><ul class="hours">' + list + '</ul></dd></div>' : '');
     return '<aside class="side" aria-label="About ' + esc(p.name) + '">' + (rows ? '<section class="card about"><h2>' + esc(p.name) + '</h2><dl>' + rows + '</dl></section>' : '')
-      + '<section class="card trust"><span>Free times come straight from ' + esc(p.name) + '\'s calendar. You\'ll get a confirmation by text or email.</span><span>No account needed. No cookies or tracking.</span></section></aside>';
+      + '<section class="card trust"><span>Available times come straight from ' + esc(p.name) + '\'s calendar. You\'ll get a confirmation by text or email.</span><span>No account needed. No cookies or tracking.</span></section></aside>';
   }
   function foot() { return '<footer class="foot">Online booking by <a href="' + BASE + '">Riyeser</a> · <a href="' + BASE + 'terms.html">Terms</a></footer>'; }
 
@@ -310,7 +310,7 @@
   function loadSlots(focus, keepMsg) {
     S.slots = null; S.slot = null; S.day = null; if (!keepMsg) S.msg = ''; draw();
     api.slots({ service: S.svc, from: S.from, days: 7, staff: S.staff || null }).then(function (r) {
-      S.slots = r.slots || []; draw(focus); say(S.slots.length ? S.slots.length + ' free times' : 'No free times on these days');
+      S.slots = r.slots || []; draw(focus); say(S.slots.length ? S.slots.length + ' available times' : 'No available times on these days');
     }, function (e) { S.slots = []; S.msg = plain(e); draw(focus); say(S.msg); });
   }
   function wire() {
