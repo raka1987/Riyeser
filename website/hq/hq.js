@@ -163,11 +163,14 @@
     return {
       async session() { return ok(await sb.auth.getSession()).session; },
       async signIn(email, password) { ok(await sb.auth.signInWithPassword({ email, password })); },
-      async signOut() { await sb.auth.signOut(); },
+      // 'local' = this browser only; 'global' = every device this account is signed in on (Supabase ends all its sessions)
+      async signOut(scope) { await sb.auth.signOut({ scope: scope === 'global' ? 'global' : 'local' }); },
       async aal() { return ok(await sb.auth.mfa.getAuthenticatorAssuranceLevel()); },
       async factors() { const f = ok(await sb.auth.mfa.listFactors()); return (f.totp || []).filter((x) => x.status === 'verified'); },
       async verify(factorId, code) { ok(await sb.auth.mfa.challengeAndVerify({ factorId, code })); },
-      me: () => rpc('hq_me'), overview: () => rpc('hq_overview'),
+      me: () => rpc('hq_me'),
+      // with include_test (newer team-chat.sql: test, demo and internal accounts left out unless asked); older databases count everything
+      async overview(inc) { try { return await rpc('hq_overview', { include_test: !!inc }); } catch (e) { if (!missing(e)) throw e; return rpc('hq_overview'); } },
       async companies(search, status) {
         try { return await rpc('hq_business_list', { search: search || '', status_filter: status || 'all' }); }
         catch (e) { if (!missing(e)) throw e; return rpc('hq_companies', { search: search || '' }); }
@@ -266,7 +269,8 @@
         catch (e) { if (!missing(e) || n.kind === 'call' || n.follow_up || n.pinned) throw e; return rpc('hq_add_note', { ws, body: n.body }); }
       },
       notePin: (id, pin) => rpc('hq_note_pin', { note_id: id, pin }), followUpDone: (id) => rpc('hq_follow_up_done', { note_id: id }),
-      myFollowUps: () => rpc('hq_my_follow_ups'), reports: (from, to) => rpc('hq_reports', { from_day: from, to_day: to }), attention: () => rpc('hq_attention'),
+      myFollowUps: () => rpc('hq_my_follow_ups'), reports: (from, to) => rpc('hq_reports', { from_day: from, to_day: to }),
+      async attention(inc) { try { return await rpc('hq_attention', { include_test: !!inc }); } catch (e) { if (!missing(e)) throw e; return rpc('hq_attention'); } },
       traffic: (from, to) => rpc('hq_traffic', { from_day: from, to_day: to }),
       // HQ V2 first slice (each answers "missing" on a database without the latest team-chat.sql)
       touch: () => rpc('hq_touch'), kpis: (includeTest) => rpc('hq_kpis', { include_test: !!includeTest }), opsRuns: () => rpc('hq_ops_runs'),
@@ -512,11 +516,11 @@
       : k.status === 'closed' ? 'That account is closed. Keep an open one.' : k.duplicate_of === ws ? 'That account is linked as a duplicate of this one.' : null);
     const rowOf = (f) => ({ ...f, decided_by_name: nameOf(f.decided_by) || f.decided_by_name, second_approver_name: nameOf(f.second_approver), waiting_second: !!(f.needs_second && !f.second_approver && ['approved', 'partly_approved'].includes(f.status)) });
     return {
-      async session() { return { user: { email: 'sam@riyeser.test' } }; }, async signIn() {}, async signOut() { location.href = '/hq/'; },
+      async session() { return { user: { email: 'sam@riyeser.test' } }; }, async signIn() {}, async signOut() {},
       async aal() { return { currentLevel: 'aal2', nextLevel: 'aal2' }; }, async factors() { return [{ id: 'f' }]; }, async verify() {},
       async me() { const s = me(); return { role: s.role, name: s.display_name, active: true, two_step: true, perms: permsOf(s), id: s.user_id }; },
       asStaff(id) { actor = id; }, staffList: () => staff.slice(),
-      async overview() { return { companies: cos.length, companies_7d: 1, companies_30d: 2, people: 24, pcs: 10, pcs_active_7d: 8, pcs_active_30d: 10, requests_waiting: 1, calls_paid: 1, calls_trial: 3,
+      async overview(inc) { return { include_test: !!inc, companies: cos.filter((c) => inc || !c.account_kind || c.account_kind === 'customer').length, companies_7d: 1, companies_30d: 2, people: 24, pcs: 10, pcs_active_7d: 8, pcs_active_30d: 10, requests_waiting: 1, calls_paid: 1, calls_trial: 3,
         trials_ending: [{ id: 'w1', name: 'Sample Plumbing', company_code: 'RIY-7K3M-Q2', days_left: 10 }],
         versions: [{ version: '1.6.4', pcs: 6 }, { version: '1.6.3', pcs: 3 }, { version: '1.5.1', pcs: 1 }],
         countries: [{ country: 'Fiji', companies: 5 }, { country: 'Australia', companies: 1 }, { country: 'New Zealand', companies: 1 }],
@@ -976,9 +980,9 @@
         if (P.includes('support.view')) tickets.filter((x) => ['new', 'investigating', 'waiting_us'].includes(x.status) && x.workspace_id && (!x.assignee || x.assignee === actor || (!x.first_reply_at && hours(x.created_at) > od)))
           .forEach((x) => add(1, 'complaint', x.workspace_id, !x.first_reply_at && hours(x.created_at) > od ? 'Overdue complaint' : 'Open complaint', x.subject, nameOf(x.assignee) || 'Unassigned', 'Reply', x.id, x.created_at));
         if (P.includes('offers.approve')) offers.filter((o) => o.status === 'waiting').forEach((o) => add(2, 'approval', o.workspace_id, 'Approval needed', `${o.days} free days · ${o.modules.map(modName).join(', ')}`, o.requested_by_name, 'Approve', o.id, o.created_at));
-        if (P.includes('refunds.approve')) refunds.filter((f) => ['submitted', 'reviewing'].includes(f.status)).forEach((f) => add(3, 'refund', f.workspace_id, 'Refund waiting', `${f.currency} ${f.amount} · ${f.for_what}`, 'Finance', 'Review', f.id, f.created_at));
-        if (P.includes('licences.view')) bOrders.filter((o) => ['payment_failed', 'suspended'].includes(o.status)).forEach((o) => add(2, 'payment', o.workspace_id, o.status === 'suspended' ? 'Payments stopped' : 'Payment failed', `${o.ref} · ${money(o.amount)}${o.grace_until ? ` · works until ${day(o.grace_until)}` : ''}`, 'Finance', 'Review', o.ref, o.updated_at || o.created_at));
-        if (P.includes('licences.view')) bOrders.filter((o) => o.method === 'bank' && o.status === 'pending').forEach((o) => add(3, 'invoice', o.workspace_id, o.due_date < iso(Date.now()) ? 'Invoice overdue' : 'Invoice unpaid', `${o.ref} · ${money(o.total)} · due ${day(o.due_date)}`, 'Finance', 'Mark paid', o.ref, o.created_at));
+        if (P.includes('refunds.approve')) refunds.filter((f) => ['submitted', 'reviewing'].includes(f.status)).forEach((f) => add(3, 'refund', f.workspace_id, 'Refund waiting', `${f.currency} ${f.amount} · ${f.for_what}`, null, 'Review', f.id, f.created_at));
+        if (P.includes('licences.view')) bOrders.filter((o) => ['payment_failed', 'suspended'].includes(o.status)).forEach((o) => add(2, 'payment', o.workspace_id, o.status === 'suspended' ? 'Payments stopped' : 'Payment failed', `${o.ref} · ${money(o.amount)}${o.grace_until ? ` · works until ${day(o.grace_until)}` : ''}`, null, 'Review', o.ref, o.updated_at || o.created_at));
+        if (P.includes('licences.view')) bOrders.filter((o) => o.method === 'bank' && o.status === 'pending').forEach((o) => add(3, 'invoice', o.workspace_id, o.due_date < iso(Date.now()) ? 'Invoice overdue' : 'Invoice unpaid', `${o.ref} · ${money(o.total)} · due ${day(o.due_date)}`, null, 'Mark paid', o.ref, o.created_at));
         myFollowUps().filter((f) => f.due).forEach((f) => add(4, 'follow_up', f.workspace_id, 'Follow-up due', f.body, me().display_name, 'Follow up', String(f.id), f.follow_up));
         const ending = []; cos.filter((c) => c.status === 'active').forEach((c) => { const l = demoLicence(c.id); const e = Object.entries(l.modules).filter(([, v]) => ['trial', 'active'].includes(v.status) && v.days_left != null && v.days_left <= 7);
           if (e.length) { const d = Math.min(...e.map(([, v]) => v.days_left)); ending.push(c.id); add(5, 'renewal', c.id, e.some(([, v]) => v.status === 'active') ? 'Renewal due' : 'Trial ending', `${d === 0 ? 'Ends today' : `Ends in ${d} day${d === 1 ? '' : 's'}`} · ${e.length === 7 ? 'every program' : e.map(([m]) => modName(m)).join(', ')}`, null, 'Extend', null, addDays(today(), d)); } });
@@ -990,15 +994,16 @@
         return { id: c.id, name: c.name, company_code: c.company_code, country: c.country, kind: c.kind, created_at: c.created_at, status: c.status, hq_owner_name: nameOf(c.hq_owner), owner_name: c.owner_name, owner_email: c.owner_email,
           email_verified: i % 7 !== 3, on_trial: Object.values(l.modules).some((v) => ['trial', 'active'].includes(v.status)), pc_linked: c.pcs > 0, program_used: pcs.some((d) => (d.programs || []).some((x) => x.id !== 'central')),
           paying: Object.values(l.modules).some((v) => v.status === 'active'), installed: [...new Set(pcs.flatMap((d) => (d.programs || []).map((x) => x.id)))], people: c.people, next_follow_up: nextFu(c.id) }; }); },
-      async attention() { const P = permsOf(me()); const od = settings['support.overdue_hours']; const open = tickets.filter((x) => x.status !== 'done');
+      async attention(inc) { const P = permsOf(me()); const od = settings['support.overdue_hours']; const kindOf = (ws) => (cos.find((c) => c.id === ws) || {}).account_kind;
+        const real = (ws) => inc || !ws || !kindOf(ws) || kindOf(ws) === 'customer'; const open = tickets.filter((x) => x.status !== 'done' && real(x.workspace_id));
         const sup = P.includes('support.view'); const L = (c) => demoLicence(c.id);
         return { unassigned: sup ? open.filter((x) => !x.assignee).length : null, overdue: sup ? open.filter((x) => !x.first_reply_at && hours(x.created_at) > od).length : null,
           updates_overdue: sup ? open.filter((x) => x.next_update_due && new Date(x.next_update_due) < new Date()).length : null,
           mine: sup ? open.filter((x) => ['new', 'investigating', 'waiting_us'].includes(x.status) && x.assignee === actor).length : null,
-          approvals: P.includes('offers.approve') || P.includes('refunds.approve') ? offers.filter((o) => o.status === 'waiting').length + refunds.map(rowOf).filter((f) => f.waiting_second).length : null,
-          refunds_waiting: P.includes('refunds.view') ? refunds.filter((f) => ['submitted', 'reviewing'].includes(f.status)).length : null,
+          approvals: P.includes('offers.approve') || P.includes('refunds.approve') ? offers.filter((o) => o.status === 'waiting' && real(o.workspace_id)).length + refunds.filter((f) => real(f.workspace_id)).map(rowOf).filter((f) => f.waiting_second).length : null,
+          refunds_waiting: P.includes('refunds.view') ? refunds.filter((f) => ['submitted', 'reviewing'].includes(f.status) && real(f.workspace_id)).length : null,
           emails_failed: P.includes('emails.view') ? emails.filter((e) => ['failed', 'held'].includes(e.status)).length : null,
-          trials_3d: cos.filter((c) => c.status === 'active' && !Object.values(L(c).modules).some((v) => v.status === 'active')).map((c) => { const tr = Object.entries(L(c).modules).filter(([, v]) => v.status === 'trial' && v.days_left <= 3);
+          trials_3d: cos.filter((c) => c.status === 'active' && real(c.id) && !Object.values(L(c).modules).some((v) => v.status === 'active')).map((c) => { const tr = Object.entries(L(c).modules).filter(([, v]) => v.status === 'trial' && v.days_left <= 3);
             return tr.length ? { id: c.id, name: c.name, company_code: c.company_code, days_left: Math.min(...tr.map(([, v]) => v.days_left)), modules: tr.map(([m]) => m) } : null; }).filter(Boolean).sort((a, b) => a.days_left - b.days_left),
           follow_ups: myFollowUps() }; },
     };
@@ -1029,11 +1034,26 @@
   function blocked(msg) {
     $app.innerHTML = `<div class="gate"><div class="gcard"><div class="glogo">${wordmark()}<span class="glbl">HQ</span></div>${msg}
       <button class="btn w" id="so" style="margin-top:8px">Sign out</button></div></div>`;
-    $app.querySelector('#so').onclick = async () => { await api.signOut(); gate(); };
+    $app.querySelector('#so').onclick = () => signOutNow();
   }
 
+  // Sign out (the account menu, the phone menu, the foot of the left-hand menu): ends the Supabase session (this browser,
+  // or every device), forgets everything HQ loaded and shows the sign-in screen in this same page, so Back shows nothing.
+  async function signOutNow(scope) {
+    SESS.on = false; clearInterval(SESS.timer); closePanel();
+    try { await api.signOut(scope); } catch { /* signed out here even if the server can't be reached */ }
+    try { localStorage.removeItem('riyeser.hq.session'); } catch { /* no storage */ }
+    try { Object.keys(sessionStorage).filter((k) => /^riyeser\.hq|^hq\./.test(k)).forEach((k) => sessionStorage.removeItem(k)); } catch { /* no storage */ }
+    Object.keys(S).forEach((k) => delete S[k]); Object.assign(S, { me: null, tab: 'overview', companies: [], perms: [] });
+    document.body.classList.remove('hqv2', 'mmopen'); document.title = 'Riyeser HQ';
+    if (DEMO) { location.replace('/hq/'); return; }
+    window.history.replaceState(null, '', location.pathname + location.search);
+    gate(`<div class="note">${scope === 'global' ? 'You\'ve signed out of Riyeser HQ on every device.' : 'You\'ve signed out of Riyeser HQ.'}</div>`);
+  }
   async function loadMe() {
     S.me = await api.me();
+    // hq_me doesn't say who you are by id: the signed-in session does ("Assign to me", "You")
+    if (S.me && !S.me.id) { try { const ss = await api.session(); if (ss && ss.user) S.me.id = ss.user.id; } catch { /* not needed to show HQ */ } }
     S.perms = S.me && S.me.active ? (S.me.perms || permsOf({ role: S.me.role })) : [];
   }
   async function start() {
@@ -1088,12 +1108,12 @@
     ['payments', 'Invoices & payments', can('licences.view')], ['support', 'Support', can('support.view', 'support.diagnostics')], ['inbox', 'Team Inbox', can('overview.view')],
     ['inactive', 'Inactive accounts', can('customers.view', 'accounts.inactive')], ['health', 'System health', can('overview.view')], ['emails', 'Emails', can('emails.view')],
     ['downloads', 'Downloads', can('downloads.view')], ['reports', 'Business reports', can('reports.view')], ['traffic', 'Website traffic', can('reports.view')], ['team', 'HQ team', true], ['history', 'History', can('audit.view')],
-    ['settings', 'Settings', can('settings.manage')]].filter((x) => x[2]);
-  const VIEWS = () => ({ overview, companies, signups, licences, approvals, refunds, payments, support, inbox, inactive, health, emails, downloads, reports, traffic, team, history, settings });
+    ['settings', 'Settings', can('settings.manage')], ['test-accounts', 'Test accounts', can('test_accounts.manage')]].filter((x) => x[2]);
+  const VIEWS = () => ({ overview, companies, signups, licences, approvals, refunds, payments, support, inbox, inactive, health, emails, downloads, reports, traffic, team, history, settings, 'test-accounts': testAccounts });
   // The left-hand menu: the same on every screen, showing only what this person's permissions allow.
   const NAV = [['Overview', '🏠', ['overview']], ['Customers', '👥', ['companies']], ['Signups', '🌱', ['signups']],
     ['Billing & Licences', '💳', ['licences', 'approvals', 'refunds', 'payments']], ['Support', '🎧', ['support']], ['Team Inbox', '💬', ['inbox']],
-    ['Retention', '🔁', ['inactive']], ['System Operations', '🛠️', ['health', 'emails', 'downloads']], ['Reports', '📊', ['reports', 'traffic']], ['Admin', '⚙️', ['team', 'history', 'settings']]];
+    ['Retention', '🔁', ['inactive']], ['System Operations', '🛠️', ['health', 'emails', 'downloads']], ['Reports', '📊', ['reports', 'traffic']], ['Admin', '⚙️', ['team', 'history', 'settings', 'test-accounts']]];
   const SOON = { inbox: 'soon' };
   // A group (Billing & Licences, System Operations, Admin) is a heading that folds its pages away (remembered); it isn't a
   // page itself, so only the page you're on is highlighted.
@@ -1122,20 +1142,21 @@
     const ini = initials(S.me.name);
     $app.innerHTML = `${DEMO ? `<div class="demo">Demo with sample data. Nothing here is real. <label>Acting as <select id="demoAs" aria-label="Demo staff member">${api.staffList().map((s) => `<option value="${s.user_id}"${s.display_name === S.me.name ? ' selected' : ''}>${esc(s.display_name)} (${esc(roleName(s.role))})</option>`).join('')}</select></label></div>` : ''}
       <div class="frame"><aside class="side"><div class="brand" role="img" aria-label="Riyeser HQ">${wordmark(false)}<span class="glbl">HQ</span></div><nav class="snav" aria-label="HQ">${navHtml()}</nav>
-        <p class="sfoot">Staff only · account information, never customers' messages or books</p></aside>
+        <p class="sfoot">Staff only · account information, never customers' messages or books</p><button type="button" class="sout" data-signout>Sign out</button></aside>
       <header class="mbar"><span class="mlogo" role="img" aria-label="Riyeser HQ">${wordmark(false)}</span><span class="mbt" id="mbarT"></span>
         <button type="button" id="mnav" class="mnav" aria-expanded="false" aria-controls="mmenu">Menu <span class="tb" data-mbadge></span></button>
         <button type="button" class="av mav2" id="mme" aria-label="${esc(S.me.name)}, open the menu">${esc(ini)}</button></header>
       <div class="mmenu" id="mmenu" hidden><nav class="mml" aria-label="HQ sections">${phoneMenuHtml()}</nav>
-        <div class="mmfoot"><span class="av">${esc(ini)}</span><span class="mmwho">${esc(S.me.name)} <small>${esc(roleName(S.me.role))}</small></span><button type="button" id="so2" class="btn sm">Sign out</button></div></div>
+        <div class="mmfoot"><span class="av">${esc(ini)}</span><span class="mmwho">${esc(S.me.name)} <small>${esc(roleName(S.me.role))}</small></span><button type="button" id="so2" class="btn sm" data-signout>Sign out</button>
+          <button type="button" class="btn sm" data-signout="global">Sign out of all devices</button></div></div>
       <div class="mcol"><header class="mtop"><form id="gsearch" class="gsearch" role="search"><input name="q" placeholder="Search customers by name, Company ID, ABN, phone or email…" aria-label="Search customers"></form>
-        <div class="me"><span class="av">${esc(ini)}</span><span class="mn">${esc(S.me.name)} <small>${esc(roleName(S.me.role))}</small></span><button id="so" class="btn sm">Sign out</button></div></header>
+        ${acctMenu()}</header>
       <main id="main"></main></div></div>`;
     $app.querySelectorAll('[data-tab]').forEach((b) => b.onclick = () => { S.ticket = null; go('#/' + b.dataset.tab); });
     $app.querySelectorAll('.ngrp').forEach((g) => g.onclick = () => { const open = g.getAttribute('aria-expanded') !== 'true'; g.setAttribute('aria-expanded', String(open));
       $app.querySelector(`.nkids[data-of="${CSS.escape(g.dataset.grp)}"]`).hidden = !open;
       const shut = navClosed().filter((x) => x !== g.dataset.grp); if (!open) shut.push(g.dataset.grp); try { localStorage.setItem('hq.navClosed', JSON.stringify(shut)); } catch { /* not remembered */ } });
-    $app.querySelector('#so').onclick = $app.querySelector('#so2').onclick = async () => { await api.signOut(); gate(); };
+    $app.querySelectorAll('[data-signout]').forEach((b) => b.onclick = () => signOutNow(b.dataset.signout || 'local'));
     const mm = $app.querySelector('#mmenu'); const mb = $app.querySelector('#mnav');
     const menu = (open) => { if (open) mm.style.top = Math.max(0, $app.querySelector('.mbar').getBoundingClientRect().bottom) + 'px'; mm.hidden = !open; mb.setAttribute('aria-expanded', String(open)); document.body.classList.toggle('mmopen', open);
       if (open) { const cur = mm.querySelector('.mmi.on') || mm.querySelector('.mmi'); if (cur) cur.focus(); } };
@@ -1151,6 +1172,10 @@
     route();
     badges();
   }
+  // The account menu at the top right of every page: who you are and Sign out.
+  const acctMenu = () => `<details class="dd acct" id="acct"><summary class="acs" aria-label="${esc(S.me.name)}, ${esc(roleName(S.me.role))}: account menu"><span class="av">${esc(initials(S.me.name))}</span><span class="mn">${esc(S.me.name)} · ${esc(roleName(S.me.role))}</span><span class="car" aria-hidden="true">▾</span></summary>
+    <div class="ddm right"><div class="acwho"><b>${esc(S.me.name)}</b><small>${esc(roleName(S.me.role))} · Riyeser HQ</small></div>
+      <button type="button" id="so" data-signout>Sign out</button><button type="button" data-signout="global">Sign out of all devices</button></div></details>`;
   const initials = (n) => String(n || '?').replace(/\(.*?\)/g, '').trim().split(/\s+/).filter(Boolean).slice(0, 3).map((w) => w[0]).join('').toUpperCase() || '?';
   // Pages have addresses (#/companies, #/company/<id>/programs, …), so they can be linked to and Back works.
   function go(hash) { if (location.hash === hash) route(); else location.hash = hash; }
@@ -1206,8 +1231,33 @@
         else if (!txt && !c.querySelector('img, svg, input, .ck, .pill, .avatar')) c.classList.add('tempty');
         else if (name && !c.hasAttribute('data-label')) c.setAttribute('data-label', name); }); });
   });
+  // A box that scrolls sideways is only ever a wide data table (marked data-wide: a tidy scrollbar and a sticky first
+  // column, see hq.css); everything else fits its box.
+  const wideTables = (root) => root.querySelectorAll('.scroll, .tw2').forEach((el) => { if (el.querySelector('table') && !el.hasAttribute('data-wide')) el.setAttribute('data-wide', ''); });
   let cardQ = 0;
-  new MutationObserver(() => { if (!cardQ) cardQ = requestAnimationFrame(() => { cardQ = 0; cardTables(document); }); }).observe(document.body, { childList: true, subtree: true });
+  new MutationObserver(() => { if (!cardQ) cardQ = requestAnimationFrame(() => { cardQ = 0; cardTables(document); wideTables(document); }); }).observe(document.body, { childList: true, subtree: true });
+  // Row menus (⋯, ▾, Filters…: <details class="dd">) float above the page: fixed to the window next to their button,
+  // flipped up or left when there's no room, so they're never cut off by a table or card and never add a scrollbar.
+  // One open at a time; a click elsewhere or Esc closes it.
+  function placeMenu(d) {
+    const m = d.querySelector(':scope > .ddm'); const sm = d.querySelector(':scope > summary'); if (!m || !sm) return;
+    const pad = 8; const vw = document.documentElement.clientWidth; const vh = window.innerHeight;
+    Object.assign(m.style, { position: 'fixed', left: '0px', top: '0px', right: 'auto', bottom: 'auto', maxHeight: '', overflowY: '', maxWidth: `${vw - 2 * pad}px`, visibility: 'hidden' });
+    const s = sm.getBoundingClientRect(); const w = m.offsetWidth; let h = m.offsetHeight;
+    if (h > vh - 2 * pad) { m.style.maxHeight = `${vh - 2 * pad}px`; m.style.overflowY = 'auto'; h = vh - 2 * pad; }
+    const alignRight = m.classList.contains('right') || s.left + s.width / 2 > vw / 2;
+    const left = Math.max(pad, Math.min(alignRight ? s.right - w : s.left, vw - w - pad));
+    let top = s.bottom + 4; if (top + h > vh - pad) top = s.top - 4 - h >= pad ? s.top - 4 - h : Math.max(pad, vh - pad - h);
+    Object.assign(m.style, { left: `${Math.round(left)}px`, top: `${Math.round(top)}px`, visibility: '' });
+  }
+  const openMenus = () => [...document.querySelectorAll('details.dd[open]')];
+  document.addEventListener('toggle', (e) => { const d = e.target; if (!(d instanceof HTMLDetailsElement) || !d.classList.contains('dd')) return;
+    if (d.open) { openMenus().forEach((x) => { if (x !== d && !x.contains(d)) x.open = false; }); placeMenu(d); }
+    else { const m = d.querySelector(':scope > .ddm'); if (m) m.removeAttribute('style'); } }, true);
+  document.addEventListener('click', (e) => { openMenus().forEach((d) => { if (!d.contains(e.target)) d.open = false; }); }, true);
+  document.addEventListener('keydown', (e) => { if (e.key !== 'Escape') return; openMenus().forEach((d) => { d.open = false; const sm = d.querySelector('summary'); if (sm && d.contains(document.activeElement)) sm.focus(); }); });
+  const replace = () => openMenus().forEach(placeMenu);
+  window.addEventListener('scroll', replace, true); window.addEventListener('resize', replace);
   const main = (html) => { const m = document.getElementById('main'); m.className = ''; m.innerHTML = html; return m; };
 
   // A small dialog. wire(d, close) sets up its buttons.
@@ -1238,7 +1288,8 @@
   function columnChart(rows, label, value, unit) {
     const max = Math.max(1, ...rows.map(value));
     return `<div class="bars" role="img" aria-label="${esc(unit)} chart">${rows.map((r) => `<div class="b" tabindex="0"><span class="tip">${esc(label(r))}: ${num(value(r))} ${esc(unit)}</span><i style="height:${Math.max(1.5, (value(r) / max) * 100)}%"></i></div>`).join('')}</div>
-      <div class="xlab">${rows.map((r, i) => `<span>${i % Math.max(1, Math.ceil(rows.length / 6)) === 0 ? esc(label(r)) : ''}</span>`).join('')}</div>`;
+      <div class="xlab">${(() => { const st = Math.max(1, Math.ceil(rows.length / 6)); const rest = rows.length % st;
+        return rows.map((r, i) => (i % st === 0 && i + st <= rows.length ? `<span style="flex-grow:${st}">${esc(label(r))}</span>` : '')).join('') + (rest ? `<span style="flex-grow:${rest}"></span>` : ''); })()}</div>`;
   }
   function barList(rows, label, value) {
     const max = Math.max(1, ...rows.map(value));
@@ -1251,40 +1302,80 @@
   const cityOf = (c) => { const city = String(c.address || '').split(/[,\n]/).map((x) => x.trim()).filter(Boolean).pop(); return [city && city !== c.country ? city : null, c.country].filter(Boolean).join(', '); };
   const avatar = (name, cls = '') => `<span class="avatar${cls ? ' ' + cls : ''}" aria-hidden="true">${esc(initials(name))}</span>`;
   const ISSUE = { update: 'bad', complaint: 'blue', approval: 'violet', refund: 'warn', follow_up: 'warn', renewal: 'warn', signup: 'violet', payment: 'bad', invoice: 'warn' };
-  const card = (icon, cls, k, v, d) => `<div class="ccard"><span class="cic ${cls}" aria-hidden="true">${icon}</span><div><div class="k">${k}</div><div class="v">${v}</div>${d ? `<div class="d">${d}</div>` : ''}</div></div>`;
+  const card = (icon, cls, k, v, d, href, id) => `<${href ? `a class="ccard click" href="${href}"${id ? ` id="${id}"` : ''}` : 'div class="ccard"'}><span class="cic ${cls}" aria-hidden="true">${icon}</span><div class="cbody"><div class="k">${k}</div><div class="v">${v}</div>${d ? `<div class="d">${d}</div>` : ''}</div></${href ? 'a' : 'div'}>`;
+  // "Assigned to" on every HQ list: the person looking after it ("You" when that's you), or "Unassigned" with the team whose
+  // queue it's in. Older databases answer a team name ("Finance") or "Unassigned" in place of a person; that's a queue, not a person.
+  const TEAM_OF = { complaint: 'Support', update: 'Support', approval: 'Approvers', refund: 'Finance', payment: 'Finance', invoice: 'Finance', renewal: 'Sales', signup: 'Sales' };
+  const NOT_A_PERSON = ['', 'Unassigned', 'Nobody', 'Finance', 'Support', 'Sales', 'Riyeser', 'Approvers'];
+  function assignedTo(x) {
+    const raw = x.kind === 'approval' ? null : (x.assignee_name !== undefined ? x.assignee_name : x.owner);
+    const who = raw && !NOT_A_PERSON.includes(String(raw).trim()) ? String(raw).trim() : null;
+    const team = x.team || TEAM_OF[x.kind] || (raw && NOT_A_PERSON.includes(raw) && raw !== 'Unassigned' ? raw : '');
+    return { who, you: !!who && !!S.me && who === S.me.name, team };
+  }
+  const assignedHtml = (a, assignBtn = '') => (a.who ? `<span class="asg">${avatar(a.you ? S.me.name : a.who, 'sm')} <span>${a.you ? '<b>You</b>' : esc(a.who)}</span></span>`
+    : `<span class="asg none"><span class="muted">Unassigned</span>${a.team ? `<small class="tteam">${esc(a.team)} team</small>` : ''}${assignBtn}</span>`);
+  // "Assign to me" on a work-queue item: a ticket is assigned to you; anything else makes you the person looking after that customer.
+  const canAssign = (x) => !!x.workspace_id && x.kind !== 'follow_up' && (['complaint', 'update'].includes(x.kind) ? can('support.assign', 'support.reply') : can('customers.edit', 'support.assign', 'licences.manage'));
+  async function assignToMe(x) {
+    if (['complaint', 'update'].includes(x.kind)) await api.ticketAssign(x.ref, S.me.id); else await api.setOwner(x.workspace_id, S.me.id);
+    flash(['complaint', 'update'].includes(x.kind) ? 'Ticket assigned to you.' : `${x.business || 'The customer'} is now assigned to you.`);
+  }
+  // Test, demo and internal accounts are left out of the figures unless "Include test accounts" is ticked (the same setting as HQ V2).
+  const inclTest = () => { try { return localStorage.getItem('hq.v2.inclTest') === '1'; } catch { return false; } };
+  const setInclTest = (on) => { try { if (on) localStorage.setItem('hq.v2.inclTest', '1'); else localStorage.removeItem('hq.v2.inclTest'); } catch { /* not remembered */ } };
+  const realAccount = (x) => !x.account_kind || x.account_kind === 'customer';
+  const QUEUE_SHOWN = 10;
   async function overview() {
     main('<p class="muted">Loading…</p>');
+    const inc = inclTest();
     const soft = (p) => p.catch((e) => (missing(e) ? { missing: true } : null));
-    const [o, wq, a, ho, off, pr] = await Promise.all([api.overview().catch(() => null), soft(api.workQueue()), soft(api.attention()), soft(api.handover()),
-      api.linkOffline ? api.linkOffline().catch(() => undefined) : undefined, can('licences.view') && api.paymentsReceived ? api.paymentsReceived(7).catch(() => null) : null]);
-    const cn = (wq && !wq.missing && wq.counts) || {}; const q = (wq && !wq.missing && wq.queue) || [];
+    const [o, wq, a, ho, off, pr, k] = await Promise.all([api.overview(inc).catch(() => null), soft(api.workQueue()), soft(api.attention(inc)), soft(api.handover()),
+      api.linkOffline ? api.linkOffline().catch(() => undefined) : undefined, can('licences.view') && api.paymentsReceived ? api.paymentsReceived(7).catch(() => null) : null,
+      api.kpis ? api.kpis(inc).catch(() => null) : null]);
+    const cn = (wq && !wq.missing && wq.counts) || {}; const q = ((wq && !wq.missing && wq.queue) || []).filter((x) => inc || realAccount(x));
+    const hiddenQ = ((wq && !wq.missing && wq.queue) || []).length - q.length;
+    // the count cards: from hq_kpis (test accounts left out) when the database has it, else the work queue's counts
+    const K = k && !k.missing ? k : null; const pick = (kv, old) => (K ? kv : old);
+    const pay = K && K.payments_7d ? K.payments_7d : pr; const dash = (v) => (v == null ? '—' : num(v));
     const wk = o ? (o.signups_by_week || []).map((w) => ({ ...w, label: new Date(w.week).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) })) : [];
-    const m = main(`<h2>Operations overview</h2><p class="sub">Good to see you, ${esc(String(S.me.name || '').split(' ')[0])}. Account information only: HQ never sees customers' messages or books.</p>
+    const testNote = K && Number(K.test_accounts) ? (inc ? 'Test accounts included' : `${num(K.test_accounts)} test account${Number(K.test_accounts) === 1 ? '' : 's'} left out`) : '';
+    const m = main(`<div class="phead"><div><h2>Operations overview</h2><p class="sub">Good to see you, ${esc(String(S.me.name || '').split(' ')[0])}. Account information only: HQ never sees customers' messages or books.</p></div>
+        <div class="pacts">${testNote ? `<span class="muted small">${esc(testNote)}</span>` : ''}<label class="swl"><input type="checkbox" id="inclTest"${inc ? ' checked' : ''}> Include test accounts</label></div></div>
+      <div class="ccards">${card('👤', 'blue', 'New signups', dash(pick(K && K.new_signups_week, cn.new_signups ?? (o && o.companies_7d))), 'this week', can('customers.view') ? '#/signups' : '')}
+        ${card('💳', 'red', 'Failed payments', dash(pick(K && K.failed_payments, cn.failed_payments)), 'PayPal, in their grace period', can('licences.view') ? '#/payments' : '')}
+        ${pay ? card('💵', 'green', 'Payments received', money(pay.total), `${num(pay.count)} payment${Number(pay.count) === 1 ? '' : 's'} in the last 7 days`, '#/payments', 'payRecv') : ''}
+        ${card('🔄', 'green', 'Renewals due', dash(pick(K && K.renewals_due_7d, cn.renewals_due)), 'trials and paid, next 7 days', can('licences.view') ? '#/licences' : '')}
+        ${card('⚠️', 'amber', 'Open complaints', dash(pick(K && K.open_tickets, cn.open_complaints)), 'open support tickets', can('support.view') ? '#/support' : '')}</div>
       <div class="ops"><div class="opsl">
-        <div class="ccards">${card('👤', 'blue', 'New signups', num(cn.new_signups ?? (o && o.companies_7d)), 'this week')}${card('💳', 'red', 'Failed payments', cn.failed_payments == null ? '—' : num(cn.failed_payments), 'PayPal, in their grace period')}
-          ${pr ? `<a class="ccard click" id="payRecv" href="#/payments" title="Open Invoices &amp; payments"><span class="cic green" aria-hidden="true">💵</span><div><div class="k">Payments received</div><div class="v">${money(pr.total)}</div><div class="d">${num(pr.count)} payment${Number(pr.count) === 1 ? '' : 's'} in the last 7 days</div></div></a>` : ''}
-          ${card('🔄', 'green', 'Renewals due', cn.renewals_due == null ? '—' : num(cn.renewals_due), 'trials and paid, next 7 days')}${card('⚠️', 'amber', 'Open complaints', cn.open_complaints == null ? '—' : num(cn.open_complaints), 'open support tickets')}</div>
-        <div class="card" id="queueCard"><h3>Needs attention <small>· ${q.length ? `${q.length} item${q.length === 1 ? '' : 's'} for you` : 'nothing waiting'}</small></h3>
+        <div class="card" id="queueCard"><h3>Needs attention <small>· ${q.length ? `${q.length} item${q.length === 1 ? '' : 's'} for you` : 'nothing waiting'}${hiddenQ ? ` · ${hiddenQ} from test accounts hidden` : ''}</small></h3>
           ${wq && wq.missing ? '<p class="muted small">Run the latest <b>team-chat.sql</b> in Supabase (SQL Editor) to switch on the work queue.</p>'
-            : q.length ? `<div class="scroll"><table class="tbl queue" id="queue"><tr><th>Customer</th><th>Issue</th><th>Owner</th><th>Next action</th></tr>
-            ${q.map((x, i) => `<tr data-kind="${esc(x.kind)}"><td><div class="cust">${avatar(x.business, 'sq')}<div><button class="lnk" data-goco="${esc(x.workspace_id)}"><b>${esc(x.business || '')}</b></button><small>${esc(cityOf(x))}</small></div></div></td>
-              <td><span class="pill ${ISSUE[x.kind] || ''}">${esc(x.issue)}</span><small>${esc(x.detail || '')}</small></td><td class="nowrap">${avatar(x.owner, 'sm')} ${esc(x.owner)}</td>
-              <td><div class="nact"><button class="btn sm p" data-qi="${i}">${esc(x.action)}</button><details class="dd"><summary class="btn sm" aria-label="More actions">▾</summary><div class="ddm">
+            : q.length ? `<table class="tbl queue" id="queue"><thead><tr><th>Customer</th><th>Issue</th><th>Assigned to</th><th class="r">Next action</th></tr></thead><tbody>
+            ${q.map((x, i) => `<tr data-kind="${esc(x.kind)}"${i >= QUEUE_SHOWN ? ' class="qmore" hidden' : ''}><td><div class="cust">${avatar(x.business, 'sq')}<div><button class="lnk" data-goco="${esc(x.workspace_id)}"><b>${esc(x.business || '')}</b></button><small>${esc(cityOf(x))}</small>${realAccount(x) ? '' : `<small class="akind">${esc(x.account_kind)} account</small>`}</div></div></td>
+              <td><span class="pill ${ISSUE[x.kind] || ''}">${esc(x.issue)}</span><small>${esc(x.detail || '')}${x.kind === 'approval' && x.owner && !NOT_A_PERSON.includes(x.owner) ? ` · asked by ${esc(x.owner)}` : ''}</small></td>
+              <td>${assignedHtml(assignedTo(x), canAssign(x) && !assignedTo(x).who ? `<button class="lnk asgme" data-assignme="${i}">Assign to me</button>` : '')}</td>
+              <td class="r"><div class="nact"><button class="btn sm p" data-qi="${i}">${esc(x.action)}</button><details class="dd"><summary class="btn sm" aria-label="More actions for ${esc(x.business || 'this customer')}">⋯</summary><div class="ddm right">
                 <button data-qm="open" data-qi="${i}">Open customer</button><button data-qm="conversations" data-qi="${i}">Conversations</button>
                 ${can('support.reply') ? `<button data-qm="message" data-qi="${i}">Send customer reply</button>` : ''}${can('customers.notes') ? `<button data-qm="call" data-qi="${i}">Log a call</button><button data-qm="note" data-qi="${i}">Add internal note</button>` : ''}
-                ${can('licences.view') ? `<button data-qm="programs" data-qi="${i}">Programs and licence</button>` : ''}</div></details></div></td></tr>`).join('')}</table></div>`
-            : '<p class="muted small">Nothing needs you right now. 🎉</p>'}</div>
+                ${can('licences.view') ? `<button data-qm="programs" data-qi="${i}">Programs and licence</button>` : ''}${can('test_accounts.manage') && realAccount(x) ? `<button data-qm="test" data-qi="${i}">Mark as a test account…</button>` : ''}</div></details></div></td></tr>`).join('')}</tbody></table>
+            ${q.length > QUEUE_SHOWN ? `<div class="qfoot"><button type="button" class="btn sm" id="queueAll" aria-expanded="false">Show all ${q.length}</button></div>` : ''}`
+            : `<p class="muted small">Nothing needs you right now. 🎉${hiddenQ ? ` (${hiddenQ} item${hiddenQ === 1 ? '' : 's'} from test accounts hidden.)` : ''}</p>`}</div>
         ${attentionHtml(a, off)}
-        ${o ? `<h3 class="h3">Riyeser at a glance</h3><div class="tiles">${tile('Companies', num(o.companies), `+${num(o.companies_7d)} this week · +${num(o.companies_30d)} in 30 days`)}
+      </div><div class="opsr">${systemHealthCard(off, a)}${handoverCard(ho)}</div></div>
+      ${o ? `<h3 class="h3 sect">Riyeser at a glance${o.include_test === false ? ' <small class="muted">· test accounts left out</small>' : ''}</h3><div class="tiles">${tile('Companies', num(o.companies), `+${num(o.companies_7d)} this week · +${num(o.companies_30d)} in 30 days`)}
           ${tile('People', num(o.people), 'in all companies')}${tile('Linked PCs', num(o.pcs), `${num(o.pcs_active_7d)} active this week`)}
           ${tile('Riyeser Link', num(o.calls_paid) + ' paid', `${num(o.calls_trial)} on the free trial`)}</div>
-        <div class="grid g2"><div class="card"><h3>New companies per week</h3>${columnChart(wk, (r) => r.label, (r) => Number(r.companies), 'companies')}</div>
+        <div class="grid g3 ovcharts"><div class="card"><h3>New companies per week</h3>${columnChart(wk, (r) => r.label, (r) => Number(r.companies), 'companies')}</div>
           <div class="card"><h3>Riyeser Central versions in use <small>· PCs seen in 30 days</small></h3>${barList(o.versions || [], (r) => r.version, (r) => Number(r.pcs))}</div>
           <div class="card"><h3>Companies by country</h3>${barList(o.countries || [], (r) => r.country, (r) => Number(r.companies))}
-            <p class="muted small" style="margin-top:12px">${num(o.requests_waiting)} join request${o.requests_waiting === 1 ? '' : 's'} waiting for a company admin · ${num(o.pcs_active_30d)} PCs active in 30 days</p></div></div>` : ''}
-      </div><div class="opsr">${systemHealthCard(off, a)}${handoverCard(ho)}</div></div>`);
+            <p class="muted small" style="margin-top:12px">${num(o.requests_waiting)} join request${o.requests_waiting === 1 ? '' : 's'} waiting for a company admin · ${num(o.pcs_active_30d)} PCs active in 30 days</p></div></div>` : ''}`);
     wireAttention(m, overview); wireHealth(m);
+    m.querySelector('#inclTest').onchange = (e) => { setInclTest(e.target.checked); overview(); };
+    const all = m.querySelector('#queueAll'); if (all) all.onclick = () => { const open = all.getAttribute('aria-expanded') !== 'true'; m.querySelectorAll('#queue tr.qmore').forEach((r) => { r.hidden = !open; });
+      all.setAttribute('aria-expanded', String(open)); all.textContent = open ? `Show the first ${QUEUE_SHOWN}` : `Show all ${q.length}`; };
+    m.querySelectorAll('[data-assignme]').forEach((b) => b.onclick = async () => { b.disabled = true; try { await assignToMe(q[Number(b.dataset.assignme)]); overview(); } catch (err) { b.disabled = false; alert(plain(err)); } });
     m.querySelectorAll('[data-qi]').forEach((b) => b.onclick = () => { const x = q[Number(b.dataset.qi)]; const mm = b.dataset.qm; b.closest('details') && b.closest('details').removeAttribute('open');
+      if (mm === 'test') { S.taPrefill = x.business || ''; return go('#/test-accounts'); }
       if (mm) { if (['message', 'call', 'note'].includes(mm)) S.cpAfter = mm; return openCompany(x.workspace_id, mm === 'programs' ? 'programs' : ['open', 'note'].includes(mm) ? null : 'conversations'); }
       if (x.kind === 'complaint' || x.kind === 'update') { S.ticket = x.ref; return go('#/support'); }
       if (x.kind === 'approval') return go('#/approvals');
@@ -1367,11 +1458,11 @@
       ['Riyeser Link', ['team'], [['Extensions registered', null], ['Test call', null]]], ['Accounting', ['accounting-basics', 'accounting'], [['First invoice', null]]]]
       .map(([n, ids, items]) => `<div class="chk"><b>${n}</b><div>${check(has(x, ids))} Installed on a PC</div>${items.map(([l]) => `<div>${check(null)} ${l} <small class="muted">${n === 'Riyeser Link' ? 'unknown until Link Office reports it' : 'not reported yet'}</small></div>`).join('')}</div>`).join('');
     m.querySelector('#sl').innerHTML = `<div class="tiles">${STAGES.slice(1).map(([k, l]) => tile(l, num(done(k)), `of ${num(all.length)} sign-ups (${all.length ? Math.round((done(k) / all.length) * 100) : 0}%)`)).join('')}</div>
-      <div class="card scroll"><table class="tbl sutbl" id="sutbl"><tr><th>Business</th>${STAGES.map(([, l]) => `<th class="c">${l}</th>`).join('')}<th>Blocking go-live</th><th>Owner</th><th></th></tr>
+      <div class="card scroll"><table class="tbl sutbl" id="sutbl"><tr><th>Business</th>${STAGES.map(([, l]) => `<th class="c">${l}</th>`).join('')}<th>Blocking go-live</th><th>Assigned to</th><th></th></tr>
       ${rows.map((x) => { const st = stagesOf(x); const blk = STAGES.find(([k]) => !st[k]);
         return `<tr data-su="${esc(x.id)}"><td><button class="lnk" data-goco="${esc(x.id)}"><b>${esc(x.name)}</b></button><small>${esc(x.owner_name || '')}${x.owner_email ? ` · ${esc(x.owner_email)}` : ''} · ${ago(x.created_at)}</small></td>
           ${STAGES.map(([k]) => `<td class="c">${check(st[k])}</td>`).join('')}<td>${blk ? `<span class="pill warn">${esc(blk[1])}</span><small>${esc(BLOCK[blk[0]] || '')}</small>` : '<span class="pill ok">Live</span>'}</td>
-          <td class="nowrap">${x.hq_owner_name ? `${avatar(x.hq_owner_name, 'sm')} ${esc(x.hq_owner_name)}` : '<span class="muted">Unassigned</span>'}${x.next_follow_up ? `<small>follow up ${day(x.next_follow_up.date)}</small>` : ''}</td>
+          <td>${assignedHtml({ who: x.hq_owner_name || null, you: !!x.hq_owner_name && x.hq_owner_name === S.me.name, team: 'Sales' })}${x.next_follow_up ? `<small>follow up ${day(x.next_follow_up.date)}</small>` : ''}</td>
           <td><details class="dd chkdd"><summary class="btn sm">Checklists</summary><div class="ddm wide">${lists(x)}</div></details></td></tr>`; }).join('') || `<tr><td colspan="9" class="muted">No sign-ups in this range.</td></tr>`}</table></div>`;
   }
 
@@ -1505,6 +1596,33 @@
       try { await api.setBillingEntity(d); flash('Billing entity saved. New invoices use it.'); payments(); } catch (err) { flash(plain(err)); } };
     if (S.markPaid) { const ref = S.markPaid; S.markPaid = null; const o = b.unpaid.find((x) => x.ref === ref); if (o && b.can_mark_paid) markPaidDlg(o.ref, o.total, payments); }
   }
+  // Admin → Test accounts: Riyeser's own test, demo and internal businesses, which the Overview leaves out unless
+  // "Include test accounts" is ticked. Nothing is marked automatically: staff mark each one, with a reason (HQ history).
+  const AKINDS = [['test', 'Test'], ['demo', 'Demo'], ['internal', 'Internal'], ['customer', 'Customer (real)']];
+  async function testAccounts() {
+    const pre = S.taPrefill || ''; S.taPrefill = null;
+    const m = main(`<h2>Test accounts</h2><p class="sub">Riyeser's own test, demo and internal businesses. The Overview's figures, Needs attention and Queue at a glance leave them out unless you tick “Include test accounts”. Every change goes in the HQ history.</p>
+      <div class="card" style="margin-bottom:16px"><h3>Mark a business</h3><form id="tak" class="takf"><label class="f"><span>Company ID or name</span><input name="q" required placeholder="e.g. RIY-7K3M-Q2" autocomplete="off" value="${esc(pre)}"></label>
+        <label class="f"><span>It is</span><select name="kind">${AKINDS.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></label>
+        <label class="f grow"><span>Why</span><input name="reason" required minlength="3" maxlength="200" placeholder="e.g. Our own QA business"></label><button class="btn p">Save</button></form><div id="takmsg"></div></div>
+      <div class="card" id="tal"><p class="muted">Loading…</p></div>`);
+    const f0 = m.querySelector('#tak'); if (pre) { f0.kind.value = 'test'; f0.reason.focus(); }
+    f0.onsubmit = async (e) => { e.preventDefault(); const f = new FormData(e.target); const msg = m.querySelector('#takmsg');
+      const q = String(f.get('q') || '').trim(); const kind = String(f.get('kind')); const reason = String(f.get('reason') || '').trim();
+      try { const list = await api.companies(q, 'all'); const rows = Array.isArray(list) ? list : (list && list.rows) || [];
+        const hit = rows.find((c) => String(c.company_code || '').toLowerCase() === q.toLowerCase()) || rows.find((c) => String(c.name || '').toLowerCase() === q.toLowerCase()) || (rows.length === 1 ? rows[0] : null);
+        if (!hit) { msg.innerHTML = `<p class="err">${rows.length ? 'More than one business matches: type its Company ID (for example RIY-7K3M-Q2).' : 'No business matches. Check the Company ID or name.'}</p>`; return; }
+        await api.setAccountKind(hit.id, kind, reason); flash(`${hit.name} is now marked ${(AKINDS.find((x) => x[0] === kind) || [0, kind])[1].toLowerCase()}.`); testAccounts(); }
+      catch (err) { msg.innerHTML = `<p class="err">${esc(plain(err))}</p>`; } };
+    let list; try { list = await api.testAccounts(); } catch (err) { const el = m.querySelector('#tal'); if (el) el.innerHTML = missing(err) ? '<p class="muted small">Run the latest <b>team-chat.sql</b> in Supabase (SQL Editor) to switch on test accounts.</p>' : `<div class="err">${esc(plain(err))}</div>`; return; }
+    const el = m.querySelector('#tal'); if (!el) return; list = list || [];
+    el.innerHTML = `<h3>Marked accounts <small>· ${num(list.length)}</small></h3>${list.length ? `<table class="tbl"><thead><tr><th>Business</th><th>Company ID</th><th>Kind</th><th>Joined Riyeser</th><th class="r"></th></tr></thead><tbody>
+      ${list.map((c) => `<tr><td><button class="lnk" data-goco="${esc(c.id)}"><b>${esc(c.name)}</b></button><small>${esc(c.country || '')}</small></td><td class="nowrap">${esc(c.company_code || '')}</td>
+        <td><span class="pill">${esc((AKINDS.find((x) => x[0] === c.account_kind) || [0, c.account_kind])[1])}</span></td><td class="nowrap">${esc(day(c.created_at))}</td>
+        <td class="r"><button class="btn sm" data-real="${esc(c.company_code || c.name)}">Mark as a real customer</button></td></tr>`).join('')}</tbody></table>`
+      : '<p class="muted small">No test accounts marked yet. Every business counts in the figures.</p>'}`;
+    el.querySelectorAll('[data-real]').forEach((b) => b.onclick = () => { f0.q.value = b.dataset.real; f0.kind.value = 'customer'; f0.reason.value = ''; f0.reason.focus(); f0.scrollIntoView({ block: 'nearest' }); });
+  }
   async function inbox() { main(soon('Team Inbox', 'Internal discussions linked to a customer, case or invoice, handovers that become tasks with an owner and due time, and commitments saved to the customer timeline. For now, use the Team handover on the Overview and internal notes on each customer page.', 'Coming soon')); }
   async function settings() { await team(); const el = document.getElementById('settings'); if (el) el.scrollIntoView({ block: 'start' }); }
   // "Needs attention": only what this person can act on. Each item opens the right page.
@@ -1517,11 +1635,11 @@
       [Array.isArray(off) ? off.length : null, 'Link Offices offline', 'linkoff', 'bad']].filter((x) => x[0] != null);
     const fu = a.follow_ups || [];
     return `<div class="card attn" id="attn"><h3>Queue at a glance <small>· overdue and unassigned work, for ${esc(S.me.name)}</small></h3>
-      <div class="alist">${items.map(([n, l, g, bad]) => `<button class="aitem${n ? ` on${bad ? ' bad' : ''}` : ''}" data-go="${g}"><b>${num(n)}</b><span>${l}</span></button>`).join('')}</div>
+      <div class="alist" style="--cols:${[3, 4, 2].find((c) => items.length % c === 0) || 3}">${items.map(([n, l, g, bad]) => `<button class="aitem${n ? ` on${bad ? ' bad' : ''}` : ''}" data-go="${g}"><b>${num(n)}</b><span>${l}</span></button>`).join('')}</div>
       ${(a.trials_3d || []).length ? `<div class="alrow" id="attnTrials"><h4>Trials ending in 3 days</h4>${a.trials_3d.slice(0, 12).map((t) => `<button class="lnk" data-goco="${esc(t.id)}" data-cptab="programs">${esc(t.name)} <small>${t.days_left === 0 ? 'today' : `in ${t.days_left} day${t.days_left === 1 ? '' : 's'}`}</small></button>`).join('')}</div>` : ''}
       ${Array.isArray(off) && off.length ? `<div class="alrow"><h4>Link Offices offline</h4>${off.slice(0, 12).map((t) => `<button class="lnk" data-goco="${esc(t.id || t.workspace_id)}" data-cptab="link">${esc(t.name || t.business || 'A business')}</button>`).join('')}</div>` : ''}
       </div>
-      <div class="card" id="myfu" style="margin-bottom:14px"><h3>My follow-ups <small>· ${fu.length ? `${fu.filter((f) => f.due).length} due` : 'none yet'}</small></h3>${followUpList(fu)}</div>`;
+      <div class="card" id="myfu"><h3>My follow-ups <small>· ${fu.length ? `${fu.filter((f) => f.due).length} due` : 'none yet'}</small></h3>${followUpList(fu)}</div>`;
   }
   function followUpList(fu, here) {
     if (!fu || !fu.length) return '<p class="muted small">Nothing to follow up. Add a follow-up date when you log a call or add a note.</p>';
@@ -1540,7 +1658,7 @@
   // ------------------------------------------------------------------ companies: filters, sorting, pages (50 at a time, from the database)
   const CVIEWS = [['all', 'All businesses', {}, 'created', true], ['trials_week', 'Trials ending this week', { plan: 'trial', trial_days: 7 }, 'trial', false],
     ['paying', 'Paying customers', { plan: 'paid' }, 'plan', true], ['follow_up', 'Needs follow-up', { follow_up: true }, 'last_active', true], ['mine', 'My customers', { mine: true }, 'name', false]];
-  const CCOLS = [['name', 'Business'], ['owner', 'Owner'], ['phone', 'Phone'], ['plan', 'Plan'], ['trial', 'Trial ends'], ['last_active', 'Last active'], ['tickets', 'Tickets'], ['status', 'Status']];
+  const CCOLS = [['name', 'Business'], ['owner', 'Business owner'], ['phone', 'Phone'], ['plan', 'Plan'], ['trial', 'Trial ends'], ['last_active', 'Last active'], ['tickets', 'Tickets'], ['status', 'Status']];
   const SORT_DESC_FIRST = { plan: true, last_active: false, tickets: true, created: true };
   const PER_PAGE = 50;
   const planCell = (c) => (c.paid_n == null ? (c.calls_paid_until && new Date(c.calls_paid_until) > new Date() ? '<span class="pill ok">Riyeser Link paid</span>' : '<span class="pill">—</span>')
@@ -1583,12 +1701,12 @@
     if (r.old) m.querySelector('#cf').insertAdjacentHTML('afterbegin', '<p class="muted small" style="grid-column:1/-1">Filters, sorting and pages switch on once the latest <b>team-chat.sql</b> is run in Supabase (SQL Editor).</p>');
     const arrow = (k) => (st.sort === k ? (st.desc ? ' ↓' : ' ↑') : '');
     const rows = r.rows || [];
-    m.querySelector('#cl').innerHTML = rows.length ? `<table class="tbl ctbl"><tr>${CCOLS.map(([k, l]) => `<th${k === 'tickets' ? ' class="n"' : ''}><button class="sortb${st.sort === k ? ' on' : ''}" data-sort="${k}">${l}${arrow(k)}</button></th>`).join('')}<th>Riyeser owner</th><th>Follow-up</th>${rows.some((c) => c.storage_pct != null) ? '<th class="n">Storage</th>' : ''}</tr>
+    m.querySelector('#cl').innerHTML = rows.length ? `<table class="tbl ctbl"><tr>${CCOLS.map(([k, l]) => `<th${k === 'tickets' ? ' class="n"' : ''}><button class="sortb${st.sort === k ? ' on' : ''}" data-sort="${k}">${l}${arrow(k)}</button></th>`).join('')}<th>Assigned to</th><th>Follow-up</th>${rows.some((c) => c.storage_pct != null) ? '<th class="n">Storage</th>' : ''}</tr>
       ${rows.map((c) => `<tr class="click" data-co="${esc(c.id)}"><td><b>${esc(c.name)}</b><small class="code">${esc(c.company_code || '')}</small></td>
         <td>${esc(c.owner_name || '')}<small>${esc(c.owner_email || '')}</small></td><td class="nowrap">${esc(c.phone || '')}</td><td>${planCell(c)}</td>
         <td>${c.trial_days != null ? `${daysPill(c.trial_days)}<small>${day(c.trial_end)}</small>` : c.trial_days_left != null && c.paid_n == null ? `${daysPill(c.trial_days_left)}` : '<span class="muted">—</span>'}</td>
         <td>${ago(c.last_active_at || c.last_seen)}</td><td class="n">${c.tickets_open != null ? (c.tickets_open ? `<span class="pill warn">${num(c.tickets_open)}</span>` : '0') : ''}</td>
-        <td>${pill(BSTAT, c.status || 'active')}</td><td class="nowrap">${c.hq_owner_name ? esc(c.hq_owner_name) : '<span class="muted">—</span>'}</td>
+        <td>${pill(BSTAT, c.status || 'active')}</td><td class="nowrap">${c.hq_owner_name ? (c.hq_owner_name === S.me.name ? '<b>You</b>' : esc(c.hq_owner_name)) : '<span class="muted">Unassigned</span>'}</td>
         <td class="nowrap">${c.next_follow_up ? `<span class="pill${c.next_follow_up <= today() ? ' warn' : ''}">${day(c.next_follow_up)}</span>` : '<span class="muted">—</span>'}</td>${rows.some((x) => x.storage_pct != null) ? `<td class="n">${c.storage_pct != null ? `<span class="pill${Number(c.storage_pct) >= 80 ? ' warn' : ''}">${Math.round(Number(c.storage_pct))}%</span>` : ''}</td>` : ''}</tr>`).join('')}</table>`
       : '<p class="muted">No companies match.</p>';
     const total = Number(r.total || 0); const from = total ? (st.page - 1) * PER_PAGE + 1 : 0; const to = Math.min(total, (st.page - 1) * PER_PAGE + rows.length);
@@ -1607,7 +1725,7 @@
     const st = S.cl; let rows = []; let page = 1;
     for (;;) { const r = await api.companiesPage({ q: st.q, f: clean(st.f), sort: st.sort, desc: st.desc, page, per: 5000, exp: true });
       rows = rows.concat(r.rows || []); if (r.old || !(r.rows || []).length || rows.length >= Number(r.total || 0) || page >= 10) break; page += 1; }
-    csvFile('companies', ['Business', 'Company ID', 'Owner', 'Owner email', 'Phone', 'Country', 'Status', 'Kind', 'Paid programs', 'Trial ends', 'Trial days left', 'Last active', 'Open tickets', 'People', 'PCs', 'Joined', 'Riyeser owner', 'Next follow-up'],
+    csvFile('companies', ['Business', 'Company ID', 'Owner', 'Owner email', 'Phone', 'Country', 'Status', 'Kind', 'Paid programs', 'Trial ends', 'Trial days left', 'Last active', 'Open tickets', 'People', 'PCs', 'Joined', 'Assigned to', 'Next follow-up'],
       rows.map((c) => [c.name, c.company_code, c.owner_name, c.owner_email, c.phone, c.country, c.status, c.kind === 'personal' ? 'Just me' : 'Business', (c.paid || []).map(modName).join('; '),
         c.trial_end || '', c.trial_days ?? '', c.last_active_at || '', c.tickets_open ?? '', c.people ?? '', c.pcs ?? '', c.created_at, c.hq_owner_name || '', c.next_follow_up || '']));
     flash(`Downloaded ${num(rows.length)} business${rows.length === 1 ? '' : 'es'}.`);
@@ -1636,7 +1754,7 @@
     'settings.changed': 'changed an HQ setting', 'audit.exported': 'downloaded the HQ history', 'sweep.support': 'support sweep (automatic)', 'sweep.inactivity': 'inactivity sweep (automatic)',
     'ticket.started': 'messaged the customer', 'call.logged': 'logged a call', 'note.pinned': 'pinned a note', 'note.unpinned': 'unpinned a note', 'follow_up.done': 'ticked off a follow-up',
     'licence.unlocked': 'unlocked a program', 'licence.paid_until': 'marked a program paid', 'licence.paused': 'paused a program', 'licence.cancelled': 'cancelled a program',
-    'customers.exported': 'downloaded the businesses list', 'customer.owner_set': 'set the Riyeser owner', 'handover.added': 'added a handover note', 'handover.done': 'ticked off a handover note' };
+    'customers.exported': 'downloaded the businesses list', 'customer.owner_set': 'changed who the customer is assigned to', 'handover.added': 'added a handover note', 'handover.done': 'ticked off a handover note' };
   const histExtra = (h) => { const d = h.details || {}; return [h.ticket || d.ticket, d.refund, d.offer, d.module ? modName(d.module) : null, d.status, d.reason, d.email, d.until, d.role, LEVELS[d.to] ? 'to ' + LEVELS[d.to] : null,
     h.action === 'billing.doc_resent' ? [d.ref, Array.isArray(d.to) ? 'to ' + d.to.join(', ') : '', d.contact_updated ? 'billing email updated' : ''].filter(Boolean).join(' ') : null].filter(Boolean).join(' · '); };
 
@@ -1707,7 +1825,7 @@
     const backName = (TABS().find((x) => '#/' + x[0] === back) || [0, 'Companies'])[1];
     const L = c.licence; const ren = L ? MODULES.map(([mm]) => L.modules[mm] || {}).filter((v) => v.active).map((v) => (v.status === 'trial' ? v.trial_ends : v.paid_until)).filter(Boolean).sort()[0] : null;
     const nf = c.next_follow_up;
-    const menu = [can('customers.edit', 'support.assign', 'licences.manage') && !c.old && '<button data-menu="owner">👤 Set the Riyeser owner</button>',
+    const menu = [can('customers.edit', 'support.assign', 'licences.manage') && !c.old && '<button data-menu="owner">👤 Assign to someone at Riyeser</button>',
       can('support.reply') && !c.old && '<button data-menu="message">✉️ Send customer reply</button>', can('customers.notes') && !c.old && '<button data-menu="call">📞 Log a call</button>',
       can('customers.notes') && '<button data-menu="note">📝 Add internal note</button>', can('offers.grant') && c.licence && open && '<button data-fix="offer">🎁 Give a free period</button>',
       can('customers.edit') && c.extra && '<button data-fix="edit">✏️ Edit details</button>', can('people.change_owner') && c.extra && '<button data-fix="owner">👑 Change the business owner</button>',
@@ -1716,7 +1834,7 @@
     const m = main(`<div class="cpage" data-ws="${esc(id)}">
       <a class="cpback" id="cpBack" href="${esc(back)}">← ${esc(backName)}</a>
       <header class="cphead"><div class="cpid"><div class="cptitle"><h2>${esc(p.name)}</h2>${p.country ? `<span class="sep">${esc(p.country)}</span>` : ''}${pill(BSTAT, p.status || 'active')}</div>
-        <div class="cpline"><span>Owner: <b id="cpOwner">${esc(p.hq_owner_name || 'Unassigned')}</b></span><span>Next renewal: <b>${ren ? day(ren) : '—'}</b></span>
+        <div class="cpline"><span>Assigned to: <b id="cpOwner">${esc(p.hq_owner_name ? (p.hq_owner_name === S.me.name ? 'You' : p.hq_owner_name) : 'Unassigned')}</b></span><span>Next renewal: <b>${ren ? day(ren) : '—'}</b></span>
           <span>Next follow-up: <b id="cpNextFu">${nf ? `${day(nf.date)}${nf.date < today() ? ' (overdue)' : ''}` : 'none promised'}</b>${nf ? ` <small class="muted">${esc(nf.body)}</small>` : ''}</span></div>
         <div class="cpmeta"><span class="code">${esc(p.company_code || '')}</span>${copyBtn(p.company_code)}<span>${p.kind === 'personal' ? 'Just me' : 'Business'}</span>
           <span>Joined ${day(p.created_at)}</span>${p.last_active_at ? `<span>Last active ${ago(p.last_active_at)}</span>` : ''}</div>
@@ -1765,11 +1883,11 @@
   }
   function setOwner() {
     const c = S.cp; const staff = c.staff || [];
-    dlg(`<h3>👤 Riyeser owner for ${esc(c.profile.name)}</h3><p class="muted small">The person at Riyeser who looks after this customer. It shows on the customer page and under "My customers".</p>
-      <form id="sof"><label class="f"><span>Owner</span><select name="staff"><option value="">Nobody (unassigned)</option>${staff.map((x) => `<option value="${esc(x.user_id)}"${x.user_id === c.profile.hq_owner ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>
+    dlg(`<h3>👤 Who looks after ${esc(c.profile.name)}</h3><p class="muted small">The person at Riyeser who looks after this customer. It shows on the customer page and under "My customers".</p>
+      <form id="sof"><label class="f"><span>Assigned to</span><select name="staff"><option value="">Unassigned</option>${staff.map((x) => `<option value="${esc(x.user_id)}"${x.user_id === c.profile.hq_owner ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>
       <div id="soerr"></div><div class="mfoot"><button type="button" class="btn" data-close>Cancel</button><button class="btn p">Save</button></div></form>`, (d, close) => {
       d.querySelector('#sof').onsubmit = async (e) => { e.preventDefault();
-        try { await api.setOwner(c.profile.id || S.cpId, String(new FormData(e.target).get('staff') || '') || null); close(); await reloadCompany(); flash('Riyeser owner saved.'); }
+        try { await api.setOwner(c.profile.id || S.cpId, String(new FormData(e.target).get('staff') || '') || null); close(); await reloadCompany(); flash('Saved: who looks after this customer.'); }
         catch (err) { d.querySelector('#soerr').innerHTML = `<div class="err">${esc(plain(err))}</div>`; } }; });
   }
   const MOD_ICON = { basic: '📗', plus: '📒', payroll: '🧾', pos: '🛒', bookings: '📅', as_built: '🏗️', calls: '💬', estimate: '📐' };
@@ -2269,7 +2387,7 @@
   const folderName = (k) => (FOLDERS.find((f) => f[0] === k) || [0, 'Tickets'])[1];
   const SF0 = { product: '', owner: '', level: '', topic: '' };
   const FILTERS = () => [['product', 'Product', [['', 'All products'], ...PRODUCTS.map(([k, l]) => [k, l])]],
-    ['owner', 'Owner', [['', 'Anyone'], ['me', 'Me'], ['none', 'Nobody yet'], ...(S.supStaff || []).map((x) => [x.user_id, x.name])]],
+    ['owner', 'Assigned to', [['', 'Anyone'], ['me', 'Me'], ['none', 'Unassigned'], ...(S.supStaff || []).map((x) => [x.user_id, x.name])]],
     ['level', 'Level', [['', 'Any level'], ['1', 'Level 1 · Support'], ['2', 'Level 2 · Senior'], ['3', 'Level 3 · Management']]],
     ['topic', 'Topic', [['', 'Any topic'], ...Object.entries(TOPICS)]]];
   const keep = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* private window: not remembered */ } } };
@@ -2294,7 +2412,7 @@
         <div class="fbar"><div class="fdd"><button type="button" class="btn sm" id="filtBtn" aria-expanded="false" aria-controls="fpop">Filters</button>
           <div class="fpop" id="fpop" hidden><form class="sfil" id="sfil"></form><div class="fpfoot"><button type="button" class="lnk" id="fclear2">Clear all</button><button type="button" class="btn sm p" id="fdone">Done</button></div></div></div>
           <div class="fchips" id="fchips"></div></div>
-        <div id="tl" class="tlist"><p class="muted">Loading…</p></div></section>
+        <div id="tl" class="tlist" data-vscroll><p class="muted">Loading…</p></div></section>
       <section class="sw-conv" id="tv"></section></div>`);
     m.classList.add('wide');
     m.querySelector('#tsf').onsubmit = (e) => { e.preventDefault(); S.tq = String(new FormData(e.target).get('q')); loadInbox(true); };
@@ -2362,7 +2480,7 @@
         <span class="tkt"><b>${esc(t.subject)}</b><time datetime="${esc(t.updated_at)}">${ago(t.updated_at)}</time></span>
         <small>${esc(t.business || t.opened_by_email || 'No business')} · <span class="code">${esc(t.ref)}</span>${t.product ? ` · ${esc(prodName(t.product))}` : ''}</small>
         <span class="tk1">${pill(TSTAT, t.status)}${actBadge(t.who_acts)}${t.work_blocked && t.status !== 'done' ? ' <span class="pill bad">Work blocked</span>' : ''}${t.level > 1 ? ` <span class="pill">L${t.level}</span>` : ''}${t.overdue ? ' <span class="pill bad">Overdue</span>' : ''}
-          <span class="tkown">${t.assignee_name ? `Owner: ${esc(t.assignee_name)}` : 'No owner yet'}</span></span>
+          <span class="tkown">${t.assignee_name ? `Assigned to: ${t.assignee_name === S.me.name ? 'You' : esc(t.assignee_name)}` : 'Unassigned · Support team'}</span></span>
         ${t.next_update_due && t.status !== 'done' ? `<span class="tnu${t.update_overdue ? ' late' : ''}">${t.update_overdue ? '● Update overdue' : 'Update due'} ${esc(dueText(t.next_update_due))}${t.next_update_owner_name ? ` · ${esc(t.next_update_owner_name)}` : ''}</span>` : ''}
         ${timer(t, od)}</span></button>`).join('')
       : `<p class="muted small tlnone">Nothing in ${esc(folderName(S.box))}${S.tq || Object.values(S.sf).some(Boolean) ? ' with this search or these filters' : ''}.</p>`;
@@ -2458,7 +2576,7 @@
       ? `<div class="msg call"><small><b>📞 Call · ${x.call_direction === 'in' ? 'they called us' : 'we called them'}${x.call_with ? ` · ${esc(x.call_with)}` : ''}</b> · ${esc(x.from)} · ${ago(x.at)} <span class="aud">only staff see this</span></small>${body(x)}</div>`
       : x.internal ? `<div class="msg note"><small><b>Internal note: only staff see this</b> · ${esc(x.from)} · ${ago(x.at)}</small>${body(x)}</div>`
         : `<div class="msg${x.staff ? ' staff' : ' mcust'}"><small><span class="mav" aria-hidden="true">${esc(initials(x.from))}</span><b>${esc(x.from)}</b>${x.staff ? ' · to the customer' : ''} · ${ago(x.at)} <span class="muted">${esc(whenFull(x.at))}</span></small>${body(x)}</div>`)).join('');
-    const ownerOpts = `<option value="">Nobody yet</option>${workers(t.level).map((x) => `<option value="${esc(x.user_id)}"${x.user_id === t.assignee ? ' selected' : ''}${!can('support.assign') && x.user_id !== myId && x.user_id !== t.assignee ? ' disabled' : ''}>${esc(x.name)}</option>`).join('')}`;
+    const ownerOpts = `<option value="">Unassigned</option>${workers(t.level).map((x) => `<option value="${esc(x.user_id)}"${x.user_id === t.assignee ? ' selected' : ''}${!can('support.assign') && x.user_id !== myId && x.user_id !== t.assignee ? ' disabled' : ''}>${esc(x.name)}</option>`).join('')}`;
     const prop = (label, html) => `<label class="tprop"><span>${label}</span>${html}</label>`;
     const more = [can('support.escalate') && '<button type="button" id="tesc">⬆ Escalate / ⬇ send back</button>',
       t.workspace_id && can('refunds.request', 'refunds.approve') && '<button type="button" id="trf">↩️ Refund request</button>',
@@ -2473,12 +2591,12 @@
         <div class="tacts">${actBadge(t.who_acts)}<button type="button" class="btn sm" id="detBtn" aria-controls="tdx">Details</button>
           <details class="dd tmore"><summary class="btn sm" id="tmore">⋯ More</summary><div class="ddm right">${more}</div></details></div></div>
       <div class="tprops" id="tprops">${prop('Status', `<select id="tst"${r.can_work ? '' : ' disabled'}>${TSTAT_ORDER.map((k) => `<option value="${k}"${k === t.status ? ' selected' : ''}>${TSTAT[k][0]}</option>`).join('')}</select>`)}
-        ${prop('Owner', `<select id="tas"${can('support.assign') || r.can_work ? '' : ' disabled'}>${ownerOpts}</select>`)}
+        ${prop('Assigned to', `<select id="tas"${can('support.assign') || r.can_work ? '' : ' disabled'}>${ownerOpts}</select>`)}
         ${prop('Priority', `<select id="tpr"${can('support.reply', 'support.assign') ? '' : ' disabled'}>${['low', 'normal', 'high', 'urgent'].map((k) => `<option value="${k}"${k === t.priority ? ' selected' : ''}>${k[0].toUpperCase() + k.slice(1)}</option>`).join('')}</select>`)}
         ${prop('Product', `<select id="tprod"${r.can_work ? '' : ' disabled'}><option value="">Not set</option>${PRODUCTS.map(([k, l]) => `<option value="${k}"${k === t.product ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>`)}
         <span class="tflags">Level ${t.level} · ${LEVELS[t.level]}${t.work_blocked && t.status !== 'done' ? ' <span class="pill bad">Work blocked</span>' : ''}${t.overdue_at ? ' <span class="pill bad">Overdue</span>' : ''}${t.rating ? ` <span class="pill ok">Rated ${'★'.repeat(t.rating)}${'☆'.repeat(5 - t.rating)}</span>` : ''}</span></div>
       ${t.rating_comment ? `<p class="small rcomment">“${esc(t.rating_comment)}”</p>` : ''}
-      <div class="conv" id="thread">${thread}</div>
+      <div class="conv" id="thread" data-vscroll>${thread}</div>
       ${r.can_work ? `<form id="rf" class="rbox${dr.tab === 'note' ? ' isnote' : ''}"><div class="ctabs" role="tablist">
           <button type="button" class="ctab${dr.tab === 'reply' ? ' on' : ''}" data-ctab="reply" role="tab" aria-selected="${dr.tab === 'reply'}">✉️ Reply to customer</button>
           <button type="button" class="ctab${dr.tab === 'note' ? ' on' : ''}" data-ctab="note" role="tab" aria-selected="${dr.tab === 'note'}">📝 Internal note</button>
@@ -2531,7 +2649,7 @@
     const onSel = (sel, fn) => { const x = tv.querySelector(sel); if (x) x.onchange = (e) => fn(e.target.value); };
     onSel('#tst', (v) => act(() => api.ticketStatus(id, v)));
     onSel('#tpr', (v) => act(() => api.ticketPriority(id, v)));
-    onSel('#tas', (v) => act(() => api.ticketAssign(id, v || null), v ? `Owner: ${(staff.find((x) => x.user_id === v) || {}).name || ''}` : 'No owner now.'));
+    onSel('#tas', (v) => act(() => api.ticketAssign(id, v || null), v ? `Assigned to ${(staff.find((x) => x.user_id === v) || {}).name || ''}.` : 'Unassigned now.'));
     onSel('#tprod', (v) => act(() => api.ticketSet(id, { product: v || null })));
     const esb = tv.querySelector('#tesc'); if (esb) esb.onclick = () => dlg(`<h3>Escalate or send back</h3><p class="muted small">Now: level ${t.level} (${LEVELS[t.level]}). The reason is an internal note; the customer only sees "We've passed this to our senior team".</p>
       <form id="ef"><label class="f"><span>Move to</span><select name="level">${[1, 2, 3].filter((l) => l !== t.level).map((l) => `<option value="${l}"${l === t.level + 1 ? ' selected' : ''}>Level ${l} · ${LEVELS[l]}</option>`).join('')}</select></label>
@@ -3152,8 +3270,8 @@
   }
   // What the V2 layout may use: the same api, permissions and pages as the current HQ (nothing extra on the server).
   const v2ctx = () => ({ api, S, can, DEMO, esc, num, money, day, ago, plain, missing, main, go, closePanel, badges, loadMe, roleName, initials, ROLES, PERMS, ROLE_PERMS,
-    MODULES, PRODUCTS, ghRun, whenFull, tabs: TABS, views: VIEWS(), companyPage, openCompany, permsOf,
-    signOut: async () => { await api.signOut(); S.v2 = null; gate(); },
+    MODULES, PRODUCTS, ghRun, whenFull, tabs: TABS, views: VIEWS(), companyPage, openCompany, permsOf, assignedTo, assignedHtml, canAssign, assignToMe,
+    signOut: (scope) => signOutNow(scope),
     remount: () => { S.v2 = null; shell(); } });
 
   window.RiyeserHQ = { state: S, demo: DEMO, openCompany };

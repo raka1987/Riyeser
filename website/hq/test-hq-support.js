@@ -48,7 +48,7 @@ const BASE = (process.env.HQ_URL || 'http://127.0.0.1:8090').replace(/\/$/, '');
   check((await pg.$eval('#boxes .fold.on', (x) => x.dataset.box)) === 'open', 'Open is the folder to start with');
   const row = await pg.$eval('#tl .tk.late', (x) => ({ t: x.innerText.replace(/\s+/g, ' '), bg: getComputedStyle(x).backgroundColor, icon: x.querySelector('.tkic').textContent }));
   console.log('red row:', row.t.slice(0, 180), row.bg);
-  check(row.t.includes('Payroll export fails after update') && row.t.includes('Harbour Cafe') && /T-\d{5}/.test(row.t) && row.t.includes('Payroll') && row.t.includes('Investigating') && row.t.includes('Riyeser to act') && row.t.includes('Owner: Sam') && / ago/.test(row.t) && row.icon === '🕒', 'a row: subject, business, number, status, owner, updated time');
+  check(row.t.includes('Payroll export fails after update') && row.t.includes('Harbour Cafe') && /T-\d{5}/.test(row.t) && row.t.includes('Payroll') && row.t.includes('Investigating') && row.t.includes('Riyeser to act') && row.t.includes('Assigned to: You') && / ago/.test(row.t) && row.icon === '🕒', 'a row: subject, business, number, status, assigned to (You), updated time');
   check(['rgb(254, 226, 226)', 'rgb(254, 202, 202)'].includes(row.bg) && row.t.includes('Update overdue'), 'an overdue promised update is marked red');
   const upd = await pg.$$eval('#tl .tk time', (t) => t.map((x) => x.getAttribute('datetime')));
   check(upd.every((x, i) => i === 0 || upd[i - 1] >= x), 'newest updated first');
@@ -90,7 +90,7 @@ const BASE = (process.env.HQ_URL || 'http://127.0.0.1:8090').replace(/\/$/, '');
   const head = await text('.tview .tsub'); console.log('header:', head);
   check(head.includes('Harbour Cafe') && /T-\d{5}/.test(head) && head.includes('opened') && head.includes('A program problem') && !!(await pg.$('.tview .tsub [data-goco=w2]')), 'header: business (links to the customer page) · ticket number · opened · topic');
   const props = await pg.$$eval('#tprops .tprop', (l) => l.map((x) => x.querySelector('span').textContent + ':' + x.querySelector('select').selectedOptions[0].text));
-  check(props.join(' | ') === 'Status:Investigating | Owner:Sam | Priority:High | Product:Payroll', `one row of pickers: ${props.join(' | ')}`);
+  check(props.join(' | ') === 'Status:Investigating | Assigned to:Sam | Priority:High | Product:Payroll', `one row of pickers: ${props.join(' | ')}`);
   check(await pg.$$eval('#tprops select', (l) => l.every((x) => x.scrollWidth <= x.clientWidth + 1)), 'each picker shows its whole value');
   check((await pg.$$('.tview .tacts .act')).length === 1 && (await pg.$$('.tview .pill[class*=" "]')).length <= 2, 'one "Riyeser to act / Customer to act" indicator, no repeated status pills');
   await pg.click('#tmore'); const menu = await pg.$$eval('.tmore .ddm button', (l) => l.map((x) => x.textContent.trim()));
@@ -136,7 +136,7 @@ const BASE = (process.env.HQ_URL || 'http://127.0.0.1:8090').replace(/\/$/, '');
 
   // assign and status
   await pg.selectOption('#tas', { label: 'Help Desk' }); await pg.waitForFunction(() => document.querySelector('#tas').selectedOptions[0].text === 'Help Desk');
-  check((await text('#tl .tk.on')).includes('Owner: Help Desk'), 'assign: the owner shows in the inbox');
+  check((await text('#tl .tk.on')).includes('Assigned to: Help Desk'), 'assign: who it\'s assigned to shows in the inbox');
   await pg.selectOption('#tst', 'waiting_us'); await pg.waitForFunction(() => document.querySelector('#tst').value === 'waiting_us');
   check((await pg.$eval('#tst', (s) => s.selectedOptions[0].text)) === 'In progress' && (await text('.tacts')).includes('Riyeser to act'), 'status: In progress, Riyeser to act');
 

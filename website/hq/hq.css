@@ -632,3 +632,85 @@ main.wide { max-width: none; }
 .tbiz { margin: 4px 0; padding-left: 18px; }
 .trx { display: grid; gap: 8px; margin-top: 10px; padding: 10px; border: 1px dashed var(--line); border-radius: 10px; min-width: 0; }
 .trx .row { display: flex; gap: 8px; flex-wrap: wrap; } .trx select, .trx input { max-width: 100%; min-width: 0; }
+
+/* ---------------------------------------------------------------- layout pass (fix/hq-layout)
+   One spacing scale: 16 px between cards, 24 px between sections. Cards in a row are the same height; numbers shrink to
+   fit instead of being cut off; nothing scrolls inside a card except a wide data table (data-wide). */
+/* the account menu, top right of every page (phones: in the Menu) */
+.acct { margin-left: auto; flex: none; }
+.acct > summary.acs { display: flex; align-items: center; gap: 10px; padding: 4px 8px 4px 4px; border-radius: 12px; font-size: 14px; color: var(--ink); white-space: nowrap; }
+.acct > summary.acs:hover, .acct[open] > summary.acs { background: #f1f4f9; } .acct .mn { font-weight: 600; } .acct .car { font-size: 11px; color: var(--muted); }
+.acct .ddm { min-width: 240px; } .acwho { padding: 8px 10px 10px; border-bottom: 1px solid var(--line); margin-bottom: 4px; } .acwho b { display: block; color: var(--ink); } .acwho small { color: var(--muted); }
+.sout { background: none; border: 0; color: #c9d6f5; font-size: 13px; font-weight: 600; text-align: left; padding: 8px 10px 0; text-decoration: underline; }
+.sout:hover { color: #fff; }
+@media (max-width: 900px) { .mtop .acct { display: none; } .mmfoot { flex-wrap: wrap; } }
+/* page head with its own controls (Include test accounts) */
+.phead > div:first-child { flex: 1; min-width: 0; } .phead .sub { margin-bottom: 0; }
+.pacts { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 14px; padding-top: 6px; }
+.swl { display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 600; color: var(--ink); white-space: nowrap; cursor: pointer; }
+.swl input { width: 16px; height: 16px; margin: 0; accent-color: var(--blue); }
+/* the count cards: one equal grid, every card the same height, the number scales with the card */
+.ccards { grid-template-columns: repeat(auto-fit, minmax(176px, 1fr)); grid-auto-rows: 1fr; gap: 16px; margin-bottom: 16px; }
+.ccards .ccard, .ccard { container-type: inline-size; min-width: 0; padding: 16px; gap: 12px; }
+.ccard .cbody { flex: 1; min-width: 0; } .ccard .k { overflow-wrap: anywhere; }
+.ccards .ccard .v, .ccard .v { font-size: clamp(20px, 14cqi, 30px); white-space: nowrap; }
+.ccard .d { margin-top: 4px; line-height: 1.35; overflow-wrap: anywhere; }
+@media (max-width: 1600px) { .ccards .cic { display: grid; } }
+@container (max-width: 210px) { .cic { display: none !important; } }
+/* main column and right column: the same top line, the same gaps; nothing sticky */
+.ops { gap: 16px; align-items: start; } .opsl, .opsr { gap: 16px; } .opsr { position: static; }
+.ops .card, .ops .attn { margin: 0; }
+/* Needs attention: a table that fits the card (no scrollbar), the action buttons on one line */
+.queue { table-layout: auto; } .queue th.r, .queue td.r { text-align: right; } .queue td { vertical-align: middle; }
+.queue td:nth-child(2) { min-width: 150px; } .queue td small { overflow-wrap: anywhere; }
+.queue .cust > div { min-width: 0; } .queue .nact { justify-content: flex-end; flex-wrap: nowrap; }
+.queue .nact .dd > summary { padding-left: 10px; padding-right: 10px; letter-spacing: 1px; }
+.asg { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; } .asg.none { display: grid; gap: 2px; justify-items: start; white-space: normal; }
+.tteam { display: inline-block !important; font-size: 11.5px; font-weight: 700; color: #475569; background: #eef2f7; border-radius: 999px; padding: 1px 8px; }
+.asgme { font-size: 12.5px; } .akind { display: inline-block !important; margin-top: 4px; font-size: 11.5px; font-weight: 700; background: #f1f5f9; color: #475569; border-radius: 999px; padding: 1px 8px; text-transform: capitalize; }
+.qfoot { display: flex; justify-content: center; padding-top: 12px; }
+/* Queue at a glance: an equal grid (columns chosen so the last row is full), the number beside its label */
+.alist { grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr)); grid-auto-rows: 1fr; gap: 8px; }
+.aitem { align-items: center; gap: 10px; min-width: 0; } .aitem b { flex: none; min-width: 1.4ch; text-align: right; line-height: 1; } .aitem span { min-width: 0; line-height: 1.3; overflow-wrap: anywhere; }
+@media (max-width: 640px) { .alist { grid-template-columns: minmax(0, 1fr); grid-auto-rows: auto; } }
+.alrow { margin-top: 16px; }
+/* sections below the columns */
+.h3.sect { margin: 24px 0 12px; } .tiles { gap: 16px; margin-bottom: 16px; } .grid { gap: 16px; }
+@media (min-width: 1151px) { .ovcharts { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 1150px) and (min-width: 901px) { .ovcharts { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ovcharts > .card:last-child { grid-column: 1 / -1; } }
+/* charts: axis labels sized to the columns they label (never cut); bar list labels wrap */
+.xlab span { flex: 1 1 0; overflow: visible; white-space: nowrap; text-align: left; }
+.hb .lab { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; line-height: 1.3; }
+/* wide data tables: they may scroll sideways in their own box, with a tidy visible scrollbar and the first column kept in view */
+[data-wide] { overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; scrollbar-color: #b8c3d9 transparent; }
+[data-wide]::-webkit-scrollbar { height: 8px; } [data-wide]::-webkit-scrollbar-thumb { background: #b8c3d9; border-radius: 8px; } [data-wide]::-webkit-scrollbar-track { background: transparent; }
+@media (min-width: 641px) {
+  [data-wide] > table tr > :first-child { position: sticky; left: 0; z-index: 1; background: var(--card); box-shadow: 1px 0 0 var(--line); }
+  [data-wide] > table tr > th:first-child { background: #f8fafd; } .hqv2 [data-wide] > table tr > th:first-child { background: inherit; }
+  [data-wide] > table tr.click:hover > :first-child { background: inherit; }
+}
+/* cards side by side are the same height */
+.licgrid { align-items: stretch; }
+/* the Support inbox: the folders and the ticket list are panes of the same height (each scrolls on its own, on purpose) */
+@media (min-width: 901px) { .sw-rail, .sw-in { height: calc(100vh - 136px); max-height: none; } }
+.tk small { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+/* phones: the page title in the top bar wraps instead of being cut */
+@media (max-width: 900px) { .mbt { white-space: normal; overflow: visible; text-overflow: clip; font-size: 15px; line-height: 1.15; } }
+/* Admin → Test accounts */
+.takf { display: flex; flex-wrap: wrap; gap: 0 12px; align-items: flex-end; } .takf .f { flex: 1 1 180px; min-width: 0; } .takf .f.grow { flex: 2 1 260px; } .takf .btn { margin-bottom: 12px; }
+/* a cell of buttons in a table is still a table cell (the .tacts class it gets for phones must not make it a flex box on a
+   desktop: that broke the row lines under "Next action" and every other buttons column) */
+.tbl td.tacts { display: table-cell; }
+/* page head: the controls drop under the title when there isn't room; phones: count cards two by two */
+.phead { flex-wrap: wrap; } .phead > div:first-child { flex: 1 1 420px; }
+@media (max-width: 640px) {
+  .pacts { justify-content: flex-start; padding-top: 0; flex: 1 1 100%; }
+  .ccards { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; } .ccards > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .ccards .ccard, .ccard { padding: 12px; } .ccards .cic { display: none; }
+}
+/* Customers filters: the tick boxes and the buttons each take a full line under the pickers (no tall empty column) */
+@media (min-width: 641px) { .cfilters > .row { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; } }
+/* Reports: the trials-to-paid table has seven columns, so it takes the full width (headings never squeezed) */
+#rConv { grid-column: 1 / -1; }
+/* the customer page's Conversations bar: the heading takes its own line on a phone, the buttons under it */
+@media (max-width: 640px) { .cvbar { flex-wrap: wrap; } .cvbar > h3 { flex: 1 1 100% !important; } }

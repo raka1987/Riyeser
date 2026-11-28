@@ -258,3 +258,17 @@
   HQ: `../../hq/test-hq-trial.js` (the panel at 1366 and 390, the verdict, read-only, the extension, roles, Licences counts).
   Desktop: `desktop/test/trial-guard.test.js` (new PC, new Windows user, reinstall, deleted AppData, restored company
   file, clock rolled back, paid programs, signed-in businesses, demo mode, Report an issue).
+- HQ layout: `../../hq/test-hq-layout.js` opens every page of the current HQ and of HQ V2 (`?v2=1`) at 1280, 1366, 1440,
+  1920 and 390 px and fails on: anything scrolling sideways (the page or a box) except wide data tables (`data-wide`: a thin
+  visible scrollbar, first column kept in view), a box with its own inner scrollbar (the Support inbox's list and thread
+  are marked `data-vscroll`: panes on purpose), text cut off or squeezed into a sliver, table cells out of line, cards side
+  by side of different heights (more than 1 px), and row menus (⋯) that open outside the window, behind something or inside
+  a scrolling box. On the Overview it also puts big figures (US$64,512.50) and long captions in the count cards. Owner
+  decisions behind it: "Assigned to" (a person, "You", or "Unassigned" with the team's tag and Assign to me) instead of
+  "Owner: Finance"; test, demo and internal accounts left out of the current Overview (Needs attention, the count cards,
+  Queue at a glance, Riyeser at a glance) unless "Include test accounts" is ticked (`hq_overview(boolean)`,
+  `hq_attention(boolean)`, checked in `rules-test.sql`); Admin → Test accounts in the current layout.
+- HQ sign-out: `../../hq/test-hq-signout.js` (against a pretend Supabase, both layouts and a phone): the account menu at the
+  top right ("Sam · Owner") with Sign out and Sign out of all devices, the Sign out link at the foot of the left-hand menu;
+  Sign out ends the session (logout, scope local; "all devices" scope global), forgets the stored session, lands on the
+  sign-in screen; Back shows no HQ data; no HQ data calls afterwards; the old session's token is refused.

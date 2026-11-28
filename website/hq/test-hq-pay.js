@@ -16,8 +16,10 @@ const BASE = (process.env.HQ_URL || 'http://127.0.0.1:8090').replace(/\/$/, '');
   const text = async (sel) => (await pg.textContent(sel)).replace(/\s+/g, ' ').trim();
   const flash = () => pg.evaluate(() => { const f = [...document.querySelectorAll('.flash')].pop(); return f ? f.textContent : ''; });
   await pg.goto(`${BASE}/hq/?demo`); await pg.waitForSelector('.tiles');
-  // the overview: failed payments counted, both kinds in the work queue
-  check(/Failed payments\s*1/.test(await text('.ccards')), 'Overview: 1 failed payment');
+  // the overview: the failed payment belongs to a test account (Demo Joinery 12), so it's left out until "Include test accounts"
+  check(/Failed payments\s*0/.test(await text('.ccards')) && !(await pg.$('#queue tr[data-kind=payment]')), 'Overview: a test account\'s failed payment is left out by default');
+  await pg.check('#inclTest'); await pg.waitForSelector('#inclTest:checked'); await pg.waitForSelector('#queue tr[data-kind=payment]');
+  check(/Failed payments\s*1/.test(await text('.ccards')), 'Overview with test accounts: 1 failed payment');
   check(/Payments received\s*US\$25\s*1 payment in the last 7 days/.test(await text('#payRecv')) && (await pg.getAttribute('#payRecv', 'href')) === '#/payments', `Overview: payments received in 7 days, linking to Invoices & payments (${await text('#payRecv')})`);
   const kinds = await pg.$$eval('#queue tr[data-kind]', (rs) => rs.map((r) => r.dataset.kind + ': ' + r.querySelector('.pill').textContent));
   check(kinds.some((k) => k === 'payment: Payment failed') && kinds.some((k) => /^invoice: Invoice (unpaid|overdue)$/.test(k)), `work queue: ${kinds.filter((k) => /payment|invoice/.test(k)).join(', ')}`);

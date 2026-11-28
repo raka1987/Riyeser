@@ -124,14 +124,14 @@
           const open = !closed.includes(gk); if (!its.length) return '';
           return `<div class="ng2"><button type="button" class="ngh2" data-g="${gk}" aria-expanded="${open}" aria-controls="ng2-${gk}" title="${esc(gt)}"><span class="gi2" aria-hidden="true">${gi}</span><span class="gt2">${esc(gt)}</span><span class="car2" aria-hidden="true">▾</span></button>
             <div class="ngk2" id="ng2-${gk}"${open ? '' : ' hidden'}>${its.map((p) => `<a href="#/${p.k}" class="ni2" data-k="${p.k}"><span class="nt2">${esc(p.t)}</span>${p.kind === 'plan' ? `<span class="tag2" title="Not built yet — planned in Phase ${p.plan.phase}">Phase ${p.plan.phase}</span>` : ''}<span class="tb" data-badge="${p.k}"></span></a>`).join('')}</div></div>`; }).join('')}</nav>
-        <div class="sfoot2">Staff only · account information, never customers’ books, payroll, documents, sales, messages or call recordings.</div></aside>
+        <div class="sfoot2">Staff only · account information, never customers’ books, payroll, documents, sales, messages or call recordings.<button type="button" class="sout2" data-signout2>Sign out</button></div></aside>
       <div class="scrim2" id="scrim2" hidden></div>
       <div class="col2"><header class="top2"><button type="button" class="ib2 menubtn" id="menuBtn" aria-controls="side2" aria-expanded="false" aria-label="Open the menu">☰</button>
           <a href="#/overview" class="mlogo2" aria-label="Riyeser HQ, Overview">${wordmark()}<span class="hq2">HQ</span></a>
           <form class="search2" id="search2" role="search"><input id="q2" name="q" type="search" autocomplete="off" placeholder="Search customers, Company ID, email… or a page" aria-label="Search customers or pages" aria-controls="sr2" aria-expanded="false"><div class="sr2" id="sr2" role="listbox" hidden></div></form>
           ${X.DEMO ? `<label class="demo2" title="Demo with made-up data. Nothing here is real.">Demo data · acting as <select id="demoAs2" aria-label="Demo staff member">${X.api.staffList().map((s) => `<option value="${esc(s.user_id)}"${s.display_name === me.name ? ' selected' : ''}>${esc(s.display_name)} (${esc(X.roleName(s.role))})</option>`).join('')}</select></label>` : ''}
-          <details class="me2"><summary aria-label="${esc(me.name)}: your menu"><span class="av2">${esc(ini)}</span><span class="mn2">${esc(me.name)}<small>${esc(X.roleName(me.role))}</small></span></summary>
-            <div class="mem2"><a href="?v2=0${X.DEMO ? '&demo' : ''}" id="oldHq">Switch back to the current HQ</a><button type="button" id="so2v">Sign out</button></div></details></header>
+          <details class="me2"><summary aria-label="${esc(me.name)}: your menu"><span class="av2">${esc(ini)}</span><span class="mn2">${esc(me.name)} · ${esc(X.roleName(me.role))}</span><span class="mcar2" aria-hidden="true">▾</span></summary>
+            <div class="mem2"><div class="mwho2"><b>${esc(me.name)}</b><small>${esc(X.roleName(me.role))} · Riyeser HQ</small></div><a href="?v2=0${X.DEMO ? '&demo' : ''}" id="oldHq">Switch back to the current HQ</a><button type="button" id="so2v" data-signout2>Sign out</button><button type="button" data-signout2="global">Sign out of all devices</button></div></details></header>
         <div class="proto2" role="note">Prototype of the new HQ layout. Pages marked “Phase” aren’t built yet. <a href="?v2=0${X.DEMO ? '&demo' : ''}">Back to the current HQ</a></div>
         <main id="main" tabindex="-1"></main></div></div>`;
     wire(app);
@@ -152,7 +152,7 @@
       const c = JSON.parse(store.get('hq.v2.closed') || '[]').filter((x) => x !== g.dataset.g); if (!open) c.push(g.dataset.g); store.set('hq.v2.closed', JSON.stringify(c)); });
     app.querySelectorAll('.ni2').forEach((a) => a.addEventListener('click', () => drawer(false)));
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && v2.classList.contains('open')) { drawer(false); mb.focus(); } });
-    app.querySelector('#so2v').onclick = () => X.signOut();
+    app.querySelectorAll('[data-signout2]').forEach((x) => x.onclick = () => X.signOut(x.dataset.signout2 || 'local'));
     const das = app.querySelector('#demoAs2'); if (das) das.onchange = async () => { X.api.asStaff(das.value); await X.loadMe(); X.closePanel(); X.remount(); };
     if (matchMedia('(max-width: 640px)').matches) app.querySelector('#q2').placeholder = 'Search customers or pages';   // nothing cut off on a phone
     searchBox(app);
@@ -235,7 +235,7 @@
       <section class="card2" id="ovw"><h2>New businesses per week</h2>${skeletonRows(2)}</section>`);
     m.querySelector('#refresh').onclick = overview; wireTestSwitch(m, 'incl', overview);
     const inc = inclTest();
-    const [k, wq, att] = await Promise.all([X.api.kpis ? soft(X.api.kpis(inc)) : { ok: false, missing: true, e: new Error('missing') }, soft(X.api.workQueue()), soft(X.api.attention())]);
+    const [k, wq, att] = await Promise.all([X.api.kpis ? soft(X.api.kpis(inc)) : { ok: false, missing: true, e: new Error('missing') }, soft(X.api.workQueue()), soft(X.api.attention(inc))]);
     if (!document.getElementById('ovk')) return;
     const at = loadedAt(t0); const live = `Live · ${at}`; const K = k.ok ? k.v : null;
     const scope = K ? (K.include_test ? ' (test accounts included)' : `${Number(K.test_accounts) ? ` · ${X.num(K.test_accounts)} test account${Number(K.test_accounts) === 1 ? '' : 's'} left out` : ''}`) : '';
@@ -285,14 +285,15 @@
   const ISSUE = { complaint: 'bad', update: 'bad', approval: 'warn', refund: 'warn', payment: 'bad', invoice: 'warn', follow_up: 'blue', renewal: 'blue', signup: '' };
   const PRIO = { complaint: 'High', update: 'High', payment: 'High', approval: 'Medium', invoice: 'Medium', refund: 'Medium', follow_up: 'Normal', renewal: 'Normal', signup: 'Normal' };
   function queueTable(q, short) {
-    return `<div class="tw2"><table class="tbl t2"><tr><th>Priority</th><th>Customer</th><th>What</th>${short ? '' : '<th>Owner</th><th>When</th>'}<th>Next action</th></tr>
+    return `<div class="tw2"><table class="tbl t2"><tr><th>Priority</th><th>Customer</th><th>What</th>${short ? '' : '<th>Assigned to</th><th>When</th>'}<th>Next action</th></tr>
       ${q.map((x, i) => `<tr><td>${pill2(PRIO[x.kind] === 'High' ? 'bad' : PRIO[x.kind] === 'Medium' ? 'warn' : '', PRIO[x.kind] || 'Normal')}</td>
         <td>${x.workspace_id ? `<button class="lnk" data-goco="${esc(x.workspace_id)}"><b>${esc(x.business || 'A business')}</b></button>` : '<b>—</b>'}<small>${esc(x.country || '')}</small></td>
         <td><span class="pill2 ${ISSUE[x.kind] || ''}">${esc(x.issue)}</span><small>${esc(x.detail || '')}</small></td>
-        ${short ? '' : `<td class="nowrap">${esc(x.owner || 'Unassigned')}</td><td class="nowrap">${x.at ? esc(X.ago(x.at)) : ''}</td>`}
+        ${short ? '' : `<td>${X.assignedHtml(X.assignedTo(x), X.canAssign(x) && !X.assignedTo(x).who ? `<button class="lnk asgme" data-assignme="${i}">Assign to me</button>` : '')}</td><td class="nowrap">${x.at ? esc(X.ago(x.at)) : ''}</td>`}
         <td><button class="btn2 sm p" data-qi="${i}">${esc(x.action)}</button></td></tr>`).join('')}</table></div>`;
   }
   function wireQueue(root, q) {
+    root.querySelectorAll('[data-assignme]').forEach((b) => b.onclick = async () => { b.disabled = true; try { await X.assignToMe(q[Number(b.dataset.assignme)]); queue(); } catch (err) { b.disabled = false; alert(X.plain(err)); } });
     root.querySelectorAll('[data-qi]').forEach((b) => b.onclick = () => { const x = q[Number(b.dataset.qi)];
       if (x.kind === 'complaint' || x.kind === 'update') { X.S.ticket = x.ref; return X.go('#/support'); }
       if (x.kind === 'approval') return X.go('#/approvals');
@@ -310,7 +311,7 @@
     const m = main(`${head('My work queue', 'Everything waiting for you or your team, most urgent first: tickets, approvals, payments, follow-ups, renewals and stuck sign-ups.', `${testSwitch('inclq')}<button class="btn2" id="refresh">↻ Refresh</button>`)}
       <div id="qk">${`<div class="kg2">${['Waiting in the queue', 'High priority', 'My open tickets', 'Follow-ups due'].map((l) => kpi({ label: l, state: 'loading' })).join('')}</div>`}</div><section class="card2" id="ql">${skeletonRows(6)}</section>`);
     m.querySelector('#refresh').onclick = queue; wireTestSwitch(m, 'inclq', queue);
-    const [wq, att] = await Promise.all([soft(X.api.workQueue()), soft(X.api.attention())]);
+    const [wq, att] = await Promise.all([soft(X.api.workQueue()), soft(X.api.attention(inclTest()))]);
     if (!document.getElementById('ql')) return;
     if (!wq.ok) { document.getElementById('qk').innerHTML = ''; document.getElementById('ql').innerHTML = stateBox(wq.missing ? 'unknown' : 'error', wq.missing ? 'Needs a database update' : 'Couldn’t load the work queue', esc(wq.missing ? 'Run the latest team-chat.sql to switch on the work queue.' : X.plain(wq.e)), '<button class="btn2" id="again">Try again</button>');
       const a = document.getElementById('again'); if (a) a.onclick = queue; return; }

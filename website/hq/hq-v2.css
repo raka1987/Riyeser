@@ -173,3 +173,10 @@ a.k2:hover { border-color: #9db8f5; box-shadow: 0 10px 26px -20px rgba(11,92,255
 }
 @media (max-width: 360px) { .kg2 { grid-template-columns: minmax(0, 1fr); } }
 @media print { .side2, .top2, .proto2 { display: none !important; } .v2 { display: block; } }
+/* layout pass (fix/hq-layout): six figure cards are two full rows of three (no lone cards on a second row); the account
+   menu shows "Name · Role"; Sign out at the foot of the menu */
+@media (min-width: 901px) { .kg2:has(> :nth-child(6):last-child) { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.me2 .mn2 { flex-direction: row; white-space: nowrap; } .mcar2 { font-size: 11px; color: var(--v2-muted); }
+.mwho2 { padding: 8px 10px 10px; border-bottom: 1px solid var(--v2-line); margin-bottom: 4px; } .mwho2 b { display: block; color: var(--v2-ink); } .mwho2 small { color: var(--v2-muted); }
+.sout2 { display: block; margin-top: 8px; padding: 0; background: none; border: 0; color: #c9d6f5; font-size: 13px; font-weight: 600; text-decoration: underline; cursor: pointer; }
+.sout2:hover { color: #fff; }
