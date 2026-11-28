@@ -688,7 +688,7 @@ window.addEventListener('pointerup', () => {
     if (d.x1 === undefined || Math.abs(d.x1 - d.x0) < 4 || Math.abs(d.y1 - d.y0) < 4) return;
     pushUndo();
     const color = st.tool === 'highlight' ? '#facc15' : st.tool === 'redact' ? '#000000' : $('#color').value;
-    if (st.tool === 'redact') toast('Blacked out. When you save, whatever is underneath is permanently removed: that page becomes a picture (its other words can\'t be searched or copied, and the file gets bigger). Use Recognise text afterwards to make it searchable again.');
+    if (st.tool === 'redact') toast('Blacked out. When you save, whatever is underneath is permanently removed: that page becomes a picture (its other words can\'t be searched or copied, and the file gets bigger). Its document properties (title, author, subject, keywords) are cleared too. Use Recognise text afterwards to make it searchable again.');
     addAnn(d.src, { id: newId(), type: st.tool, color: st.tool === 'highlight' && $('#color').value !== '#1d4ed8' ? $('#color').value : color, ...boxFromView(d.src, Math.min(d.x0, d.x1), Math.min(d.y0, d.y1), Math.abs(d.x1 - d.x0), Math.abs(d.y1 - d.y0)) });
     drawOverlay(d.src);
   }
@@ -1116,6 +1116,10 @@ async function buildPdf(orderList = st.order) {
       pg.drawText(label, { x: (width - tw) / 2, y: st.pageNumbers.position === 'top' ? height - 26 : 18, size: 10, font: f, color: rgb(0.2, 0.2, 0.2) });
     });
   }
+  // QA (PDF-RED-02): a redacted file also loses its document properties (title, author, subject, keywords) and the
+  // XMP metadata copy of them: they often repeat the private details (a name, an account number) the redaction hides.
+  st.lastRedacted = orderList.some((e) => (st.anns[e.src] || []).some((a) => a.type === 'redact'));
+  if (st.lastRedacted) T.clearDocInfo(window.PDFLib, doc);
   removeUnused(doc); // deleted pages and replaced content are really gone from the file
   // S41: a PDF opened with its password is saved with the same password; "Password…" sets a new one
   const protectWith = st.protect ? st.protect.password : (st.password || null);
@@ -1224,7 +1228,7 @@ async function save(saveAs = false) {
     await loadBytes(out);
     setDirty(false);
     st.protect = null;
-    toast(`Saved to ${target}. (The previous version was backed up.)`);
+    toast(st.lastRedacted ? `Saved to ${target}. The previous version, before redacting, was kept in Tools › Copies kept when saving over a file: delete it there if it mustn't be kept.` : `Saved to ${target}. (The previous version was backed up.)`);
     // M15: pages made into pictures (Redact) can't be searched any more: offer Recognise text for them
     if ((st.lastFlattened || []).length) {
       $('#scanbanner').innerHTML = `📷 ${st.lastFlattened.length === 1 ? 'The page you redacted is' : `The ${st.lastFlattened.length} pages you redacted are`} now a picture, so its words can't be searched or copied. <button class="primary" data-cmd="ocr">Recognise text</button>`;
@@ -1486,6 +1490,7 @@ const commands = {
   backupnow: async () => { const f = await bridge.call('backup:now'); toast(`Backed up: ${String(f).split(/[\\/]/).pop()}`); },
   backuprestore: () => bridge.call('backup:restore'),
   backupfolder: () => bridge.call('backup:folder'),
+  pdfbackups: () => bridge.call('pdf:backups'),
   // S41: "Protect with a password" (payslips, invoices): the file needs the password to open once it's saved
   async protect() {
     if (!st.doc) return;
