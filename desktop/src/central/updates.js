@@ -1,6 +1,9 @@
 // Update checks for Riyeser Central: compares the versions installed on this PC with the latest public release
 // (made by the "Publish Riyeser release" button) and installs newer ones in the background.
 const RELEASE_API = 'https://api.github.com/repos/raka1987/Riyeser/releases/latest';
+// Admin panel → Updates → channel: "Early access" also takes a release marked pre-release (the newest of the list).
+const RELEASES_API = 'https://api.github.com/repos/raka1987/Riyeser/releases?per_page=15';
+const CHANNELS = ['stable', 'early'];
 const ALLOWED_DOWNLOAD = /^https:\/\/(github\.com\/raka1987\/Riyeser\/releases\/download\/|objects\.githubusercontent\.com\/|release-assets\.githubusercontent\.com\/)/i;
 
 // Each program: its name in Windows' installed-apps list, the release file, and how to install it silently.
@@ -55,6 +58,35 @@ function latestFromRelease(release, versionsJson = null) {
   }
   const sig = (release.assets || []).find((a) => a.name === 'installers.sig.json' && ALLOWED_DOWNLOAD.test(a.browser_download_url));
   return { tag: release.tag_name, name: release.name, published: release.published_at, products: out, manifestUrl: sig ? sig.browser_download_url : null };
+}
+
+/** The release a channel follows from GitHub's list: stable = the newest that isn't a pre-release; early = the newest. */
+function pickRelease(list, channel = 'stable') {
+  const ok = (Array.isArray(list) ? list : []).filter((r) => r && !r.draft && (channel === 'early' || !r.prerelease));
+  return ok.sort((a, b) => String(b.published_at || '').localeCompare(String(a.published_at || '')))[0] || null;
+}
+
+/**
+ * How Windows uninstalls a program, from the same `reg query … /s` text: { name, command, quiet } or null.
+ * quiet is QuietUninstallString when the installer wrote one. The program that matches is found the same way as
+ * installedFromRegistry (the longest name), so "Riyeser Link Office" is never taken for "Riyeser Link".
+ */
+function uninstallFromRegistry(text, id) {
+  let best = null; let bestLen = -1;
+  for (const block of String(text || '').split(/\r?\n(?=HKEY_)/)) {
+    const name = (block.match(/^\s*DisplayName\s+REG_SZ\s+(.+?)\s*$/mi) || [])[1];
+    const cmd = (block.match(/^\s*UninstallString\s+REG_(?:EXPAND_)?SZ\s+(.+?)\s*$/mi) || [])[1];
+    const quiet = (block.match(/^\s*QuietUninstallString\s+REG_(?:EXPAND_)?SZ\s+(.+?)\s*$/mi) || [])[1];
+    if (!name || !cmd) continue;
+    let who = null; let len = -1;
+    for (const q of PRODUCTS) {
+      const l = Math.max(-1, ...[q.display, ...(q.also || [])].filter((n) => name.toLowerCase().startsWith(n.toLowerCase())).map((n) => n.length));
+      const hit = l >= 0 ? l : (q.alsoRe && q.alsoRe.test(name) ? 0 : -1);
+      if (hit > len) { len = hit; who = q; }
+    }
+    if (who && who.id === id && len > bestLen) { best = { name, command: cmd, quiet: quiet || null }; bestLen = len; }
+  }
+  return best;
 }
 
 /** Installed versions from `reg query HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall /s` output. */
@@ -122,5 +154,5 @@ function availableUpdates(installed, latest) {
       file: latest.products[p.id].name || p.asset, digest: latest.products[p.id].digest || null }));
 }
 
-module.exports = { RELEASE_API, PRODUCTS, newer, latestFromRelease, installedFromRegistry, availableUpdates, ALLOWED_DOWNLOAD,
+module.exports = { RELEASE_API, RELEASES_API, CHANNELS, pickRelease, uninstallFromRegistry, PRODUCTS, newer, latestFromRelease, installedFromRegistry, availableUpdates, ALLOWED_DOWNLOAD,
   versionInFileName, withFoundPrograms, findPortable };

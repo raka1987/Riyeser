@@ -161,6 +161,16 @@ jobs:
           $r.programs | Format-Table id, status, where -AutoSize | Out-String | Write-Host
           foreach ($id in @("desk", "pdf", "services", "team", "linkoffice")) { if (($r.programs | Where-Object id -eq $id).status -ne "installed") { throw "Riyeser Central can't find $id" } }
           Write-Host "Riyeser Central" $r.version "finds Documents, PDF, As Built, Riyeser Link and Riyeser Link Office"
+          # Central 1.9's home screen (the App launcher) draws a tile for each of them, with no page errors
+          $ui = "$env:RUNNER_TEMP\central-ui.json"
+          Start-Process -FilePath $central.FullName -ArgumentList "--self-test-ui=$ui" -Wait
+          $u = Get-Content $ui -Raw | ConvertFrom-Json
+          $u.tiles | Format-Table name, line -AutoSize | Out-String | Write-Host
+          foreach ($n in @("Documents", "PDF", "As Built", "Link", "Link Office", "Add a program")) { if (-not ($u.tiles | Where-Object name -eq $n)) { throw "Riyeser Central's home screen has no $n tile" } }
+          if ($u.errors.Count) { throw "Riyeser Central's home screen had errors: $($u.errors -join ' | ')" }
+          if ($u.hscroll) { throw "Riyeser Central's home screen scrolls sideways" }
+          Copy-Item "$env:RUNNER_TEMP\central-ui.png" dist-central\ -ErrorAction SilentlyContinue
+          Write-Host "Riyeser Central" $u.version "home screen:" $u.tiles.Count "tiles, pill:" $u.pill
           # As Built must carry its own copy of the app (works with no internet)
           $svc = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter "Riyeser Services.exe" | Select-Object -First 1
           $sreport = "$env:RUNNER_TEMP\services.json"
@@ -199,6 +209,12 @@ jobs:
             desktop/dist-team/RiyeserLink-Setup-*.exe
             desktop/dist-linkoffice/RiyeserLinkOffice-Setup-*.exe
           if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: central-home-screen
+          path: desktop/dist-central/central-ui.png
+          if-no-files-found: ignore
 
   # Riyeser Central's Install button, on a real Windows PC: every program from the latest release, installed with the
   # same silent options Central uses, then read back from Windows' installed-apps list the way Central reads it.
@@ -318,6 +334,13 @@ jobs:
           $lo = $r.results | Where-Object id -eq linkoffice
           if (-not $lo.elevated -or $lo.where -ne "HKLM") { throw "Link Office should install through the permission prompt, for the whole PC: $($lo | ConvertTo-Json -Compress -Depth 4)" }
           Write-Host "Every program installed the way Central installs it, and is listed; Link Office through Start-Process -Verb RunAs, in HKLM"
+      - name: Central 1.9's Uninstall finds each program's own uninstaller (a tile's ⋯ menu)
+        shell: pwsh
+        run: |
+          $hkcu = reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall" /s /reg:64 | Out-String
+          $hklm = reg query "HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall" /s /reg:64 | Out-String
+          Set-Content -Path C:\riy\out\uninstall-reg.txt -Value ($hkcu + "`n" + $hklm) -Encoding utf8
+          node -e "const u = require('./src/central/updates'); const fs = require('fs'); const t = fs.readFileSync('C:/riy/out/uninstall-reg.txt', 'utf8'); const r = JSON.parse(fs.readFileSync('C:/riy/out/admin-new.json', 'utf8')).results; const miss = []; for (const x of r) { const f = u.uninstallFromRegistry(t, x.id); console.log(x.id.padEnd(18), f ? f.command : '(none)'); if (!f) miss.push(x.id); } if (miss.length) { console.error('No uninstaller found for ' + miss.join(', ')); process.exit(1); }"
       - name: The released Riyeser Central finds every program
         shell: pwsh
         run: |

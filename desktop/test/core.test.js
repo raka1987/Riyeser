@@ -600,7 +600,8 @@ test('Riyeser Central reads the last pay run from Riyeser Payroll without changi
   fs.writeFileSync(file, Buffer.from(db.export()));
   const before = fs.readFileSync(file);
   const { lastPayRun, payrollDbPath } = require('../src/central/sources');
-  assert.deepEqual(await lastPayRun(file), { found: true, lastRun: { pay_date: '2026-11-20', total_net: 7420, employees: 3 } });
+  // 1.9: and the next pay run, one pay period after the last (the launcher's "Fri pay run")
+  assert.deepEqual(await lastPayRun(file), { found: true, lastRun: { pay_date: '2026-11-20', total_net: 7420, employees: 3 }, nextRun: { pay_date: '2026-11-27', periodDays: 7 } });
   assert.ok(fs.readFileSync(file).equals(before));
   assert.deepEqual(await lastPayRun(path.join(dir, 'missing.db')), { found: false, lastRun: null }); // fresh install: nothing
   assert.equal(payrollDbPath('/appdata'), path.join('/appdata', 'Riyeser Payroll', 'payroll', 'payroll.db'));

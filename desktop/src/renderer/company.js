@@ -21,7 +21,7 @@ const formData = (f) => Object.fromEntries([...new FormData(f).entries()].map(([
 const pwField = (n, label, auto) => `<label class="wf"><span>${label}</span><span class="pwwrap"><input name="${n}" type="password" minlength="8" required autocomplete="${auto}" spellcheck="false"><button type="button" class="pweye" data-pweye aria-label="Show password" title="Show password">👁</button></span></label>`;
 
 const FRun = () => window.RiyeserFirstRun;   // first-run.js: install your plan, your business, done
-async function coLoad() { CO.state = await bridge.call('company:get'); try { renderAcct(); } catch { /* sidebar not drawn yet */ } return CO.state; }
+async function coLoad() { CO.state = await bridge.call('company:get'); try { renderAcct(); if (typeof renderNav === 'function') renderNav(); } catch { /* not drawn yet */ } return CO.state; }
 
 // ---------------------------------------------------------------- the wizard
 function wiz(html) {
@@ -34,7 +34,7 @@ function wiz(html) {
 }
 function closeWizard() { $('#wizard').hidden = true; $('#wizard').innerHTML = ''; clearInterval(CO.poll); CO.poll = null; }
 const offlineNote = () => (CO.state && !CO.state.onlineReady
-  ? '<p class="wnote">Signing in with a Riyeser account is being switched on. Set up this PC without an account for now, and sign in later from <b>Company</b>.</p>' : '');
+  ? '<p class="wnote">Signing in with a Riyeser account is being switched on. Set up this PC without an account for now, and sign in later from <b>Your account</b>.</p>' : '');
 
 // The first step the first time: start blank (the normal set-up) or explore with demo data (Sample Trading Co).
 // Demo mode writes only demo.json: no company.json, so nothing is linked to a real online company.
@@ -136,7 +136,7 @@ function showWelcome(r) {
 
 function showPick() {
   CO.screen = 'pick';
-  wiz(`<h1>Which business is this PC for?</h1><p class="wsub">Your Riyeser account belongs to more than one. You can change it later under <b>Company</b>.</p>
+  wiz(`<h1>Which business is this PC for?</h1><p class="wsub">Your Riyeser account belongs to more than one. You can change it later under <b>Your account</b>.</p>
     <div class="wpick">${(CO.list || []).map((b) => `<button class="wbig wsm" data-w="pick" data-ws="${esc(b.workspace_id)}"><b>${esc(b.name)}</b><small>${esc(b.company_code || '')}${b.role ? ` · ${esc(b.role)}` : ''}</small></button>`).join('')}</div>
     <div class="wrow"><button type="button" class="btn s" data-w="back">Back</button></div>`);
 }
@@ -166,7 +166,7 @@ function showCreated(c) {
   wiz(`<div class="wdone">✅</div><h1>${esc(c.name)} is set up</h1>
     <p class="wsub">Give this Company ID to your staff and branches. They choose <b>Join an existing company</b> and enter it, then you approve them.</p>
     <div class="wid"><span id="wid">${esc(c.company_code || '')}</span><button class="btn" data-w="copy">Copy</button></div>
-    <p class="wnote">You can always find it under <b>Company</b> in the sidebar. Branch codes (for staff who belong to a branch) are in Riyeser Link.</p>
+    <p class="wnote">You can always find it under <b>Your account</b> (your initials, top right) and in <b>🔒 Admin → People &amp; access</b>. Branch codes (for staff who belong to a branch) are in Riyeser Link.</p>
     <div class="wrow"><button class="btn" data-w="done">Start using Riyeser</button></div>`);
 }
 
@@ -331,7 +331,7 @@ function renderCoBar() {
   bar.hidden = !show;
   if (show) bar.innerHTML = `<span style="font-size:24px">🔗</span><div class="grow"><b>This PC was unlinked from ${esc(s.company.name)}</b><div class="lbl">An admin removed it, or you left the company. Everything on this PC is still here.</div></div><button class="go" data-w="restart">Set up or join a business</button>`;
 }
-// The bottom of the sidebar always says who's signed in, with a Sign in / Sign out button.
+// Your account (the avatar menu) always says who's signed in, with a Sign in / Sign out button.
 function renderAcct() {
   const el = $('#acct'); if (!el) return; const s = CO.state || {};
   el.innerHTML = s.signedIn
@@ -353,7 +353,7 @@ async function offerSetup() { await coLoad(); if (!CO.state.company && !CO.state
     const first = window.RiyeserDemo.firstScreen(s, demo);
     if (first === 'waiting') { showWaiting(s.pendingJoin.company_name); checkJoin(true); }
     else if (first === 'start') { CO.first = true; showStart(); }
-    else if (first === 'signedout') { if (typeof setView === 'function') setView('company'); }   // never the first-run choice again
+    else if (first === 'signedout') { /* never the first-run choice again; nothing pops up: the avatar menu has Sign in */ }
     else if (s.company && s.company.mode === 'online') { await bridge.call('company:checkLinked').catch(() => null); await coLoad(); renderCoBar(); }
   } catch { /* the rest of Central works without it */ }
   setInterval(async () => { try { await bridge.call('company:checkLinked'); await coLoad(); renderCoBar(); renderAcct(); } catch { /* offline */ } }, 24 * 3600 * 1000);

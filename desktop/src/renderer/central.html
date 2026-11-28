@@ -7,76 +7,102 @@
   <link rel="stylesheet" href="central.css">
 </head>
 <body>
+  <a class="skip" href="#tiles">Skip to your programs</a>
   <div id="demobar" class="demobar" role="status" hidden></div>
-  <div class="app">
-    <aside class="side">
-      <div class="logo"><img src="logo-r.png" alt=""><b>Riyeser Central</b></div>
-      <nav class="nav" id="nav"></nav>
-      <div class="foot"><div id="acct" class="acct"></div><span id="foot"></span><br><button id="licbtn">Licence</button> · <button id="checkupd">Check for updates</button> · <button id="setbtn">Settings</button></div>
-    </aside>
-    <main class="main">
+  <div class="shell">
+    <header class="tb">
+      <button class="brand" data-view="home" aria-label="Riyeser home"><span class="lg"><img src="logo-r.png" alt=""></span><b>Riyeser</b></button>
+      <div class="search" role="search">
+        <span class="sic" data-ic="search" aria-hidden="true"></span>
+        <input id="q" type="search" placeholder="Search programs, customers, files…" autocomplete="off" spellcheck="false" aria-label="Search programs, customers and files" aria-controls="results">
+        <button id="qclear" class="clear" hidden aria-label="Clear the search" data-ic="x"></button>
+      </div>
+      <button id="adminbtn" class="tbbtn" aria-haspopup="dialog"><span aria-hidden="true">🔒</span> Admin</button>
+      <div class="avwrap">
+        <button id="avbtn" class="av" aria-haspopup="menu" aria-expanded="false" aria-controls="avmenu" aria-label="Your account, Settings and Help"><span id="avtxt">R</span></button>
+        <div id="avmenu" class="menu avmenu" role="menu" hidden></div>
+      </div>
+    </header>
+    <main class="main" id="main">
       <div class="inner">
-        <header class="top">
-          <div class="greet"><h1 id="hello">Hello.</h1><div class="date">Your business at a glance in Riyeser Central. <span id="date"></span></div></div>
-          <label class="search"><span data-ic="search"></span><input id="q" placeholder="Search all your files: name, words inside, company" autocomplete="off"><button id="qclear" class="clear" hidden aria-label="Clear" data-ic="x"></button></label>
-          <button id="theme" class="iconbtn" title="Light or dark"></button>
-        </header>
-        <div id="updates" class="panel banner" hidden></div>
-        <div id="licbar" class="panel banner" hidden></div>
-        <div id="cobar" class="panel banner" hidden></div>
-        <div id="demonote" class="panel banner" hidden></div>
-        <div id="frbar" class="panel banner" role="status" hidden></div>
-
-        <section id="results" hidden></section>
-
-        <section id="home">
-          <div id="checklist" class="panel cl" hidden></div>
-          <div class="cards" id="cards"></div>
-          <div class="cols">
-            <div class="stack">
-              <div class="panel" id="actp">
-                <div class="ph"><span class="grow">Recent activity</span><button class="lnk" id="actall">View all <span class="chev">›</span></button></div>
-                <div id="activity"></div>
-              </div>
-              <div class="panel" id="moneyp">
-                <div class="ph"><span class="grow">Invoices to chase</span><button class="lnk" data-open="" id="moneyopen">Open Accounting <span class="chev">›</span></button></div>
-                <div id="money"></div>
-              </div>
-            </div>
-            <div class="stack">
-              <div class="panel" id="onlinep" hidden><div class="ph"><span class="grow">Online connections</span><button class="lnk" id="onlinenow">Sync now <span class="chev">›</span></button></div><div id="online"></div></div>
-              <div class="panel" id="quickp"><div class="ph"><span class="grow">Shortcuts</span></div><div class="quick" id="quick"></div></div>
-              <div class="panel" id="todayp"><div class="ph"><span class="grow">Today</span></div><div id="today"></div></div>
-              <div class="panel" id="todop"><div class="ph"><span class="grow">To-do</span><button class="lnk" data-open="desk">Open Desk Assistant <span class="chev">›</span></button></div><div id="todo"></div></div>
-            </div>
+        <div id="frbar" class="panel banner slim" role="status" hidden></div>
+        <section id="results" aria-live="polite" hidden></section>
+        <section id="home" aria-labelledby="hello">
+          <div class="hello">
+            <div class="hi"><h1 id="hello">Hello</h1><div id="sub" class="sub"></div></div>
+            <button id="pill" class="pill ok" aria-haspopup="dialog" aria-expanded="false"><span class="dot" aria-hidden="true"></span><span id="pilltxt">All good</span></button>
           </div>
-          <div id="getstarted" class="panel" hidden></div>
+          <div class="grid" id="tiles" role="list" aria-label="Your programs"></div>
+          <div class="chips" id="chips" aria-label="Today"></div>
         </section>
-
-        <section id="companyv" hidden></section>
-
-        <section id="appsv" hidden>
+        <section id="appsv" aria-labelledby="appsh" hidden>
+          <div class="apphead"><button class="back" data-view="home" aria-label="Back to your programs">‹ Back</button><h2 id="appsh">Add a program</h2></div>
           <div id="planbar" class="panel banner" hidden></div>
-          <h2 class="sec">More Riyeser apps</h2>
           <div class="apps" id="apps"></div>
         </section>
       </div>
     </main>
   </div>
+
+  <!-- a small popover: Needs attention, and what a status chip is about -->
+  <div id="pop" class="pop" role="dialog" aria-modal="false" hidden></div>
+  <!-- a tile's ⋯ / right-click menu -->
+  <div id="tmenu" class="menu tmenu" role="menu" hidden></div>
+
+  <!-- 🔒 Admin panel -->
+  <dialog id="admdlg" class="licdlg admdlg" aria-labelledby="admh">
+    <div class="admhead"><h2 id="admh">🔒 Admin</h2><span id="admwho" class="lbl"></span><span class="grow"></span><button class="btn s sm" id="admlock" hidden>Lock now</button><button class="x" data-close aria-label="Close">✕</button></div>
+    <div id="admlockv" class="admlockv" hidden></div>
+    <div id="admopen" class="admbody" hidden>
+      <nav class="admnav" id="admnav" aria-label="Admin sections"></nav>
+      <div class="admmain" id="admmain">
+        <section class="admsec" data-sec="overview"><h3>Overview</h3><div id="adm-overview"></div></section>
+        <section class="admsec" data-sec="pcs"><h3>PCs &amp; licences</h3><div id="adm-pcs"></div></section>
+        <section class="admsec" data-sec="people"><h3>People &amp; access</h3><div id="adm-people"></div></section>
+        <section class="admsec" data-sec="updates"><h3>Updates</h3><div id="updates" class="banner" hidden></div><div id="adm-updates"></div></section>
+        <section class="admsec" data-sec="online"><h3>Online connections</h3>
+          <div class="panel" id="onlinep" hidden><div class="ph"><span class="grow">Status</span><button class="lnk" id="onlinenow">Sync now <span class="chev">›</span></button></div><div id="online"></div></div>
+          <div id="adm-online"></div><div id="osset"></div></section>
+        <section class="admsec" data-sec="branches"><h3>Branches &amp; relay</h3><div id="adm-branches"></div></section>
+        <section class="admsec" data-sec="backups"><h3>Backups</h3><div id="adm-backups"></div></section>
+        <section class="admsec" data-sec="help"><h3>Get help &amp; diagnostics</h3><div id="adm-help"></div></section>
+        <section class="admsec" data-sec="demo"><h3>Demo mode</h3><div id="adm-demo"></div></section>
+        <section class="admsec" data-sec="fresh"><h3>Fresh start</h3><div id="adm-fresh"></div></section>
+        <section class="admsec" data-sec="advanced"><h3>Advanced</h3><div id="adm-advanced"></div></section>
+      </div>
+    </div>
+  </dialog>
+
   <dialog id="licdlg" class="licdlg">
     <form method="dialog" class="lichead"><b>Your Riyeser licence</b><button class="x" value="close" aria-label="Close">✕</button></form>
     <div id="licbody"></div>
   </dialog>
-  <dialog id="setdlg" class="licdlg">
+  <dialog id="setdlg" class="licdlg" aria-label="Settings">
     <form method="dialog" class="lichead"><b>Settings</b><button class="x" value="close" aria-label="Close">✕</button></form>
-    <div class="setbody"><label class="setrow"><input type="checkbox" id="sethide"><span><b>Show “Getting started” on the home screen</b><small>The checklist that helps you set up Riyeser. It ticks itself as you go.</small></span></label>
+    <div class="setbody">
+      <fieldset class="setgrp"><legend>Theme</legend><div class="seg" role="radiogroup" aria-label="Theme">
+        <label><input type="radio" name="settheme" value="light"> Light</label><label><input type="radio" name="settheme" value="dark"> Dark</label><label><input type="radio" name="settheme" value="system"> Same as Windows</label></div></fieldset>
+      <label class="setrow"><input type="checkbox" id="setstart"><span><b>Start Riyeser Central with Windows</b><small id="setstartnote">Opens when you sign in to Windows, so your programs are one click away.</small></span></label>
+      <label class="setrow"><input type="checkbox" id="setnotify" checked><span><b>Notifications</b><small>A quiet Windows notification when a booking or order comes in from your website. Nothing else.</small></span></label>
+      <label class="setrow"><input type="checkbox" id="sethide"><span><b>Show “Getting started” on the home screen</b><small>The checklist that helps you set up Riyeser. It ticks itself as you go.</small></span></label>
       <label class="setrow"><input type="checkbox" id="setusage" checked><span><b>Send anonymous usage counts</b><small>Tells Riyeser when Riyeser is installed or updated on a PC, so we know how many people really use it. Sent: a random number made for this PC, which Riyeser programs and versions are installed, the Windows version and, once this PC is linked, your business’s country. Never your name, email, business details, files or records.</small></span></label>
-      <div class="setabout" id="setabout"><b>About Riyeser Central and your privacy</b><p>Riyeser Central only reads the other programs’ records on this PC to show your home screen; they stay on this PC. It checks GitHub for updates, and talks to Riyeser online only for your account, your business’s licence and, unless you turn it off above, the anonymous usage counts. Demo mode is never counted.</p></div></div>
+      <label class="setrow setsel"><span><b>Language</b><small>Riyeser is in English for now.</small></span><select id="setlang" aria-label="Language"><option value="en" selected>English</option></select></label>
+      <div class="setabout" id="setabout"><b>About Riyeser Central and your privacy</b><p>Riyeser Central only reads the other programs’ records on this PC to show your home screen; they stay on this PC. It checks GitHub for updates, and talks to Riyeser online only for your account, your business’s licence and, unless you turn it off above, the anonymous usage counts. Demo mode is never counted.</p><p id="setver"></p></div>
+    </div>
+  </dialog>
+  <dialog id="helpdlg" class="licdlg" aria-label="Help">
+    <form method="dialog" class="lichead"><b>Help</b><button class="x" value="close" aria-label="Close">✕</button></form>
+    <div class="setbody" id="helpbody"></div>
+  </dialog>
+  <dialog id="acctdlg" class="licdlg acctdlg" aria-label="Your account">
+    <form method="dialog" class="lichead"><b>Your account</b><button class="x" value="close" aria-label="Close">✕</button></form>
+    <div class="setbody"><div id="acct" class="acct"></div><section id="companyv"></section></div>
   </dialog>
   <div id="wizard" class="wiz" hidden></div>
-  <div id="toast" class="toast"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script src="demo-ui.js"></script>
   <script src="licence-ui.js"></script>
+  <script src="launcher.js"></script>
   <script src="central.js"></script>
   <script src="company.js"></script>
   <script src="first-run.js"></script>

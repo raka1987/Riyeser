@@ -18,7 +18,10 @@ const CI_VARS = ['CI', 'GITHUB_ACTIONS', 'TF_BUILD', 'JENKINS_URL', 'BUILDKITE',
 
 const isCi = (env = process.env) => CI_VARS.some((k) => env[k] && env[k] !== 'false' && env[k] !== '0');
 /** Before anything else is written on this start: had this PC run Central before usage counts existed? */
-const hadCentralBefore = (store) => !store.get(STATE, null) && EARLIER_KEYS.some((k) => store.get(k, null) != null);
+// Looks at the files, not store.get(k, null): the store keeps a missing key's fallback, and a cached null for e.g.
+// 'locations' broke Central's program list on a brand new PC (1.9 fix).
+const has = (store, k) => (typeof store.file === 'function' ? (() => { try { return require('fs').statSync(store.file(k)).isFile(); } catch { return false; } })() : store.get(k, null) != null);
+const hadCentralBefore = (store) => !has(store, STATE) && EARLIER_KEYS.some((k) => has(store, k));
 const enabled = (store) => { const s = store.get(SETTING, null); return !(s && s.off === true); };
 function setEnabled(store, on) { store.set(SETTING, { off: !on, at: new Date().toISOString() }); return enabled(store); }
 

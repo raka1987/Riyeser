@@ -1,4 +1,4 @@
-// Riyeser Central: "Online connections" on the home screen, the "Connect your website" guide, the activity trail,
+// Riyeser Central: "Online connections" in the Admin panel, the "Connect your website" guide, the activity trail,
 // and its part of Settings (which PC brings the items in). The sync itself runs in the main process
 // (central/online-sync.js); this only shows it.
 //
@@ -38,7 +38,7 @@
     }
     if (v === 'off') {
       const who = s.syncPc ? esc(s.syncPc) : 'Another PC';
-      return `${line(`<b>Off on this PC.</b> ${who} brings in what your website sends.`, s.otherPc ? 'Automatic: the PC with the company file does it. If that\'s this PC, choose “This PC” in Settings → Online connections.' : 'Turn it on in Settings → Online connections if this PC should do it.')}${links()}`;
+      return `${line(`<b>Off on this PC.</b> ${who} brings in what your website sends.`, s.otherPc ? 'Automatic: the PC with the company file does it. If that\'s this PC, choose “This PC” in Admin → Online connections.' : 'Turn it on in Admin → Online connections if this PC should do it.')}${links()}`;
     }
     if (v === 'paused') return line(`<b>Paused: demo mode is on.</b>`, 'What your website sends waits in your online post box until you leave demo mode.');
     if (v === 'starting') return line('<b>Checking…</b>', 'Riyeser Central is looking at your online post box.');
@@ -186,9 +186,9 @@
   }
 
   function settingsBox() {
-    const body = $('#setdlg .setbody'); if (!body || $('#osbox')) return;
+    const body = $('#osset'); if (!body || $('#osbox')) return;   // Admin panel → Online connections
     const box = document.createElement('div'); box.id = 'osbox';
-    box.style.cssText = 'margin-top:18px;padding:14px 16px;border:1px solid var(--line);border-radius:12px';
+    box.style.cssText = 'margin-top:14px;padding:14px 16px;border:1px solid var(--line);border-radius:12px';
     box.innerHTML = `<b>Online connections</b>
       <p style="margin:6px 0 10px;font-size:13px;line-height:1.45">One PC in the business brings in bookings, orders and payments from your website and sends back prices, stock and free times. It needs Riyeser Accounting, Bookings or POS and the company file.</p>
       <label class="setrow"><input type="radio" name="osmode" value="auto"><span><b>Automatic</b><small>The PC that has the company file does it. Best for most businesses.</small></span></label>
@@ -210,7 +210,7 @@
   $('#onlinenow').addEventListener('click', () => safe(async () => { $('#onlinenow').disabled = true; try { st = await bridge.call('onlineSync:now'); render(); } finally { $('#onlinenow').disabled = false; } }));
   if (bridge && bridge.on) {
     bridge.on('online-sync', (s) => { st = s; render(); });
-    bridge.on('online-sync:open', () => { if (typeof setView === 'function') setView('home'); const b = $('#onlinep'); if (b) b.scrollIntoView({ behavior: 'smooth', block: 'center' }); });
+    bridge.on('online-sync:open', () => { if (typeof setView === 'function') setView('home'); });   // the chips say what came in
   }
   load();
   setInterval(load, 60 * 1000);

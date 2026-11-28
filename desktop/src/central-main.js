@@ -26,6 +26,8 @@ const usageCounts = require('./central/usage-counts');
 const firstRun = require('./central/first-run');
 const { LocalApp } = require('./central/local-app');
 const { createSync } = require('./central/online-sync');
+const { AdminLock } = require('./central/admin');
+const { memoryStore } = require('./link/relaychecks');
 const crypto = require('crypto');
 
 app.setName('Riyeser Central');
@@ -45,6 +47,7 @@ let localApp = null; let onlineSync = null;   // online connections (set up in r
 // A new online booking or order: a Windows notification; clicking it brings Central forward.
 function showOnlineNotification(n) {
   try {
+    if (store && (store.get('prefs', {}) || {}).notify === false) return;   // Settings → Notifications: off
     const { Notification } = require('electron');
     if (!Notification.isSupported()) return;
     const note = new Notification({ title: n.title, body: n.body || '' });
@@ -121,7 +124,7 @@ const exists = (p) => { try { return fs.statSync(p).isFile(); } catch { return f
 
 /** Where a program is installed: a place you picked, the usual install folder, or a desktop / Start menu shortcut. */
 function locate(p) {
-  const saved = (store.get('locations', {}))[p.id];
+  const saved = (store.get('locations', {}) || {})[p.id];
   if (saved && exists(saved)) return saved;
   const roots = [localPrograms(), ...(p.machine ? [process.env.ProgramW6432, process.env.ProgramFiles].filter(Boolean) : [])];
   for (const root of roots) for (const d of p.dirs || []) for (const e of p.exes || []) { const f = path.join(root, d, e); if (exists(f)) return f; }
@@ -202,13 +205,17 @@ let reportProgramsNow = async () => null;   // set up in registerIpc once the on
 let usage = null; let usageFirst = 'new';
 const usageTick = () => (usage ? installedVersions().then((v) => usage.tick(v)).catch(() => null) : Promise.resolve(null));
 const programsReporter = programReports.createReporter({ report: () => reportProgramsNow() });
+// Admin panel → Updates → channel: 'stable' (the latest release) or 'early' (pre-releases too).
+const updateChannel = () => { const c = (store && store.get('prefs', {}) || {}).channel; return updates.CHANNELS.includes(c) ? c : 'stable'; };
 async function checkUpdates(force) {
   const cached = store.get('updateCheck', null);
-  if (!force && cached && Date.now() - cached.at < 6 * 3600 * 1000) return { ...cached.result, installed: await installedVersions(), cached: true };
-  const res = await net.fetch(updates.RELEASE_API, { headers: { 'User-Agent': 'Riyeser-Central', Accept: 'application/vnd.github+json' } });
+  const channel = updateChannel();
+  if (!force && cached && (cached.channel || 'stable') === channel && Date.now() - cached.at < 6 * 3600 * 1000) return { ...cached.result, installed: await installedVersions(), cached: true };
+  const res = await net.fetch(channel === 'early' ? updates.RELEASES_API : updates.RELEASE_API, { headers: { 'User-Agent': 'Riyeser-Central', Accept: 'application/vnd.github+json' } });
   if (res.status === 404) return { latest: null, updates: [], note: 'No release published yet.' };
   if (!res.ok) throw new Error(`Couldn't check for updates (${res.status}). Try again later.`);
-  const release = await res.json();
+  const release = channel === 'early' ? updates.pickRelease(await res.json(), 'early') : await res.json();
+  if (!release) return { latest: null, updates: [], note: 'No release published yet.' };
   let versionsJson = null;
   const vj = (release.assets || []).find((a) => a.name === 'versions.json');
   if (vj) { try { versionsJson = await (await net.fetch(vj.browser_download_url, { headers: { 'User-Agent': 'Riyeser-Central' } })).json(); } catch { /* use the release notes */ } }
@@ -216,7 +223,7 @@ async function checkUpdates(force) {
   // S58: the release's signed list of installer hashes (checked before any installer runs)
   latest.manifest = null;
   if (latest.manifestUrl) { try { latest.manifest = await (await net.fetch(latest.manifestUrl, { headers: { 'User-Agent': 'Riyeser-Central' } })).json(); } catch { /* checked (and refused if needed) at install */ } }
-  store.set('updateCheck', { at: Date.now(), result: { latest } });
+  store.set('updateCheck', { at: Date.now(), channel, result: { latest } });
   return { latest, installed: await installedVersions() };
 }
 async function updateStatus(force) {
@@ -475,7 +482,7 @@ function registerIpc() {
     if (r.canceled || !r.filePaths[0]) return null;
     let f = r.filePaths[0];
     if (/\.lnk$/i.test(f)) { try { f = shell.readShortcutLink(f).target; } catch { /* keep the link */ } }
-    store.update('locations', {}, (l) => ({ ...l, [id]: f }));
+    store.update('locations', {}, (l) => ({ ...(l || {}), [id]: f }));
     return f;
   });
   handle('central:today', async () => {
@@ -494,7 +501,7 @@ function registerIpc() {
       if (installed('accounting') || installed('accounting-basics')) { try { money = await sources.pendingPayments(demo.demoAccountingDb()); } catch (e) { money = { found: false, error: e.message }; } }
       if (installed('payroll')) { try { payroll = await sources.lastPayRun(demo.demoPayrollDb(appDataDir)); } catch (e) { payroll = { found: false, lastRun: null, error: e.message }; } }
       const tasks = deskInstalled && !documents ? sample.tasks : [];
-      return { demo: true, documents, deskFound: deskInstalled, calendars: deskInstalled && !documents ? 1 : 0, meetings: deskInstalled && !documents ? sample.meetings : [], meetingErrors: [], tasks, taskCount: tasks.length, money, recent: [], payroll, organisedRoot: '' };
+      return { demo: true, documents, inbox: documents ? 5 : null, deskFound: deskInstalled, calendars: deskInstalled && !documents ? 1 : 0, meetings: deskInstalled && !documents ? sample.meetings : [], meetingErrors: [], tasks, taskCount: tasks.length, money, recent: [], payroll, organisedRoot: '' };
     }
     const da = deskInstalled ? sources.deskAssistant(deskData()) : { found: false, settings: {}, tasks: [] };
     const open = documents ? [] : (da.tasks || []).filter((t) => !t.done);
@@ -523,7 +530,9 @@ function registerIpc() {
     let payroll = { found: false, lastRun: null };
     if (installed('payroll')) { try { payroll = await sources.lastPayRun(sources.payrollDbPath(app.getPath('appData'))); } catch (e) { payroll = { found: false, lastRun: null, error: e.message }; } }
     const organisedRoot = deskInstalled ? ((da.settings && da.settings.organisedRoot) || '') : '';
-    return { documents, deskFound: da.found, calendars: cals.length, meetings, meetingErrors, tasks, taskCount: open.length, money, recent, payroll, organisedRoot };
+    // Riyeser Documents: how many documents wait in its Inbox (its library folder, from its settings)
+    const inbox = documents ? sources.inboxCount((sources.readJson(path.join(deskData(), 'documents.json'), {}) || {}).root || path.join(app.getPath('documents'), 'Riyeser Documents')) : null;
+    return { documents, inbox, deskFound: da.found, calendars: cals.length, meetings, meetingErrors, tasks, taskCount: open.length, money, recent, payroll, organisedRoot };
   });
   // ---------- licence (one for the whole Riyeser suite; %APPDATA%\Riyeser\licence.json) ----------
   const appData = app.getPath('appData'); const lfetch = (u, o) => net.fetch(u, o);
@@ -531,13 +540,22 @@ function registerIpc() {
   // The company's plan from Riyeser online: when Central starts, once a day, and on "Check now".
   handle('central:licenceRefresh', async () => { await refreshOnlineLicence(true); return licence.status(appData); });
   // S12: no licence keys to type any more: the plan comes from the Riyeser account (Company page sign-in)
-  handle('central:licenceRemove', () => licence.remove(appData, { fetchFn: lfetch }));
+  handle('central:licenceRemove', () => { admin.require(); return licence.remove(appData, { fetchFn: lfetch }); });
   handle('central:buy', () => shell.openExternal(licence.BUY_URL));
   handle('central:home', () => shell.openExternal(licence.HOME_URL));   // Riyeser home page: add a paid program there
   // ---------- the company this PC belongs to (%APPDATA%\Riyeser\company.json; set up or join online) ----------
   // programsFn: the Riyeser programs installed on this PC, sent to Riyeser when the PC links, at the daily check-in
   const on = new online.Online({ store, fetchFn: (u, o) => net.fetch(u, o), appData, appVersion: app.getVersion(), deviceName: os.hostname(),
     programsFn: () => installedVersions(), shareDevice: true });
+  // The 🔒 Admin panel (central/admin.js): an owner or admin, with two-step sign-in, held in memory for 15 minutes of use
+  const admin = new AdminLock({ readCompany: () => online.readCompany(appData), isDemo: demoOn,
+    makeOnline: () => new online.Online({ store: memoryStore(store), fetchFn: (u, o) => net.fetch(u, o), appData, appVersion: app.getVersion(), deviceName: os.hostname() }) });
+  handle('admin:state', () => admin.state());
+  handle('admin:unlock', (email, password) => admin.unlock(email, password));
+  handle('admin:code', (code) => admin.unlockCode(code));
+  handle('admin:lock', () => admin.lock());
+  handle('admin:touch', () => admin.touch());
+  handle('admin:business', () => admin.business());
   // ...and soon after the list changes (only when it's different from what this PC last sent)
   usage = usageCounts.createUsageCounts({ store, config: () => on.config(), fetchFn: (u, o) => net.fetch(u, o), isDemo: demoOn, packaged: app.isPackaged,
     appVersion: app.getVersion(), osVersion: process.platform === 'win32' ? `Windows ${os.release()}` : `${os.type()} ${os.release()}`,
@@ -564,7 +582,7 @@ function registerIpc() {
     notify: showOnlineNotification, onChange: (st) => send('online-sync', st), trailFile: path.join(app.getPath('userData'), 'online-trail.json') });
   onlineSync.start(20 * 1000);
   handle('onlineSync:status', () => onlineSync.status());
-  handle('onlineSync:setMode', async (mode) => { const st = onlineSync.setMode(String(mode || '')); onlineSync.tick(); return st; });
+  handle('onlineSync:setMode', async (mode) => { admin.require(); const st = onlineSync.setMode(String(mode || '')); onlineSync.tick(); return st; });
   handle('onlineSync:now', () => onlineSync.poke());
   // "Connect your website" guide: Send a test (through the real post box) and where it is
   handle('onlineSync:sendTest', (kind) => onlineSync.sendTest(String(kind || '')));
@@ -584,10 +602,26 @@ function registerIpc() {
     if (!url) throw new Error('Unknown page.');
     return shell.openExternal(url).then(() => true);
   });
+  // The signed-in person's role in the linked business (owner, admin or member), asked of Riyeser online once a day.
+  let roleBusy = null;
+  const businessRole = async (company) => {
+    if (!company || company.mode !== 'online' || !company.workspace_id || !on.session) return null;
+    const c = store.get('online-role', null);
+    const fresh = c && c.ws === company.workspace_id && c.email === on.session.user.email && Date.now() - c.at < 24 * 3600 * 1000;
+    if (!fresh && !roleBusy) {
+      roleBusy = on.myBusinesses().then((list) => { const b = list.find((x) => x.workspace_id === company.workspace_id); if (b) store.set('online-role', { ws: company.workspace_id, email: on.session && on.session.user.email, role: b.role || 'member', at: Date.now() }); })
+        .catch(() => {}).finally(() => { roleBusy = null; });
+    }
+    if (!(c && c.ws === company.workspace_id) && roleBusy) await Promise.race([roleBusy, new Promise((ok) => setTimeout(ok, 3000))]);
+    const now = store.get('online-role', null);
+    return now && now.ws === company.workspace_id ? now.role : null;
+  };
   const companyState = async () => {
     const setup = store.get('company-setup', {}) || {};
     const s = on.session;
-    return { company: online.readCompany(appData), onlineReady: await on.ready(), signedIn: s ? s.user.email : null,
+    const company = online.readCompany(appData);
+    return { company, role: await businessRole(company).catch(() => null), kind: company ? (company.kind || ((store.get('online-kind', null) || {}).ws === company.workspace_id ? store.get('online-kind', null).kind : null)) : null,
+      onlineReady: await on.ready(), signedIn: s ? s.user.email : null,
       pendingJoin: setup.pendingJoin || null, skipped: !!setup.skipped, unlinked: !!setup.unlinked,
       // signed out on purpose (company.json put away): the Company page asks to sign in, and the first-run choice isn't shown
       signedOut: !!setup.signedOut && !s, lastEmail: on.lastEmail() };
@@ -631,6 +665,7 @@ function registerIpc() {
   // Only after the person said yes to "Turn on demo mode?" (the renderer sends { confirmed: true }).
   handle('demo:start', (opts) => {
     if (!demoUi.startAllowed(opts)) throw new Error('Demo mode wasn\'t turned on. Choose Try demo mode, then Turn on demo mode.');
+    admin.require();   // a business PC: only from the unlocked Admin panel
     demo.start(appData); return { on: true, business: demo.BUSINESS };
   });
   handle('demo:leave', () => ({ ...demo.leave({ appData }), on: false, neverSetUp: neverSetUp() }));
@@ -812,6 +847,7 @@ function registerIpc() {
   const restartSoon = () => setTimeout(() => { quitting = true; app.relaunch(); app.exit(0); }, 1500);
   handle('fresh:check', async () => ({ open: await openNow(), folders: freshstart.plan(freshOpts()).map((f) => ({ name: f.name, dir: f.dir })), sets: freshstart.sets(freshOpts()) }));
   handle('fresh:start', async (typed, signOut) => {
+    admin.require();
     if (String(typed || '').trim() !== freshstart.CONFIRM) throw new Error(`Type ${freshstart.CONFIRM} to go ahead.`);
     const open = await openNow();
     if (open.length) return { ok: false, open, message: freshstart.closeFirst(open) };
@@ -842,6 +878,7 @@ function registerIpc() {
     return { file: r.filePaths[0], program: info.program, summary: B.summary(info) };
   });
   handle('backup:restoreAll', async (file) => {
+    if (online.readCompany(appData)) admin.require();   // from the Admin panel (a new PC's first run has no business yet)
     const open = await openNow();
     if (open.length) return { ok: false, open, message: freshstart.closeFirst(open) };
     await B.describeBackup(file);
@@ -851,6 +888,7 @@ function registerIpc() {
   });
   handle('backup:result', () => { const r = backupResult; backupResult = null; return r; });
   handle('fresh:bringBack', async (id) => {
+    admin.require();
     const set = freshstart.sets(freshOpts()).find((s) => s.id === id);
     if (!set) throw new Error('That fresh start isn’t on this PC any more.');
     const open = await openNow();
@@ -859,6 +897,57 @@ function registerIpc() {
     if (!r.ok) return { ...r, message: `Nothing was brought back: ${r.failed.name} is in use (${r.failed.dir}). Close it and try again.` };
     restartSoon();
     return r;
+  });
+  // ---------- 1.9: the launcher's extras ----------
+  // Admin panel → Updates: each program's version on this PC and in the release, and the channel.
+  handle('central:versions', async (force) => {
+    let r;
+    try { r = await checkUpdates(!!force); } catch (e) {   // offline: what's on this PC, and why the latest isn't known
+      return { installed: await installedVersions().catch(() => ({})), latest: {}, release: null, channel: updateChannel(), note: /^Couldn't check/.test(e.message) ? e.message : 'Couldn\'t check for the latest versions: no connection right now.' };
+    }
+    const latest = Object.fromEntries(Object.entries((r.latest && r.latest.products) || {}).map(([id, x]) => [id, x.version]));
+    return { installed: r.installed || {}, latest, release: r.latest ? r.latest.name || r.latest.tag : null, channel: updateChannel(), note: r.note || null };
+  });
+  handle('central:setChannel', (ch) => {
+    admin.require();
+    if (!updates.CHANNELS.includes(ch)) throw new Error('Unknown update channel.');
+    store.update('prefs', {}, (o) => ({ ...(o || {}), channel: ch })); store.set('updateCheck', null);
+    return ch;
+  });
+  // A tile's ⋯ → Uninstall: Windows' own uninstaller for that program (asked first in Central).
+  handle('central:uninstall', async (id) => {
+    admin.require();
+    const p = updates.PRODUCTS.find((x) => x.id === id && !x.self);
+    if (!p) throw new Error('Unknown program');
+    if (process.platform !== 'win32') throw new Error('Programs uninstall on Windows only.');
+    const q = (key) => new Promise((resolve) => execFile('reg', ['query', key, '/s', '/reg:64'], { windowsHide: true, maxBuffer: 16 * 1024 * 1024 }, (err, out) => resolve(out || '')));
+    const u = updates.uninstallFromRegistry(`${await q('HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall')}\n${await q('HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall')}`, id);
+    if (!u) { await shell.openExternal('ms-settings:appsfeatures'); return { settings: true }; }   // not in Windows' list: Installed apps
+    spawn('cmd.exe', ['/d', '/s', '/c', `"${u.command}"`], { detached: true, stdio: 'ignore', windowsHide: true, windowsVerbatimArguments: true }).unref();
+    installLog({ id, stage: 'uninstall', detail: u.name });
+    setTimeout(() => programsReporter.soon(), 60 * 1000);
+    return { started: true, name: u.name };
+  });
+  // Settings (this person's): start with Windows, notifications. Theme and language are kept in the window.
+  const prefs = () => store.get('prefs', {}) || {};
+  const loginOn = () => { try { return !!app.getLoginItemSettings().openAtLogin; } catch { return false; } };
+  handle('central:prefs', () => ({ startWithWindows: loginOn(), notify: prefs().notify !== false, canStart: app.isPackaged && process.platform === 'win32' }));
+  handle('central:startWithWindows', (onOff) => {
+    if (!(app.isPackaged && process.platform === 'win32')) throw new Error('Starting with Windows works in the installed Riyeser Central.');
+    app.setLoginItemSettings({ openAtLogin: !!onOff }); return loginOn();
+  });
+  handle('central:notify', (onOff) => { store.update('prefs', {}, (o) => ({ ...(o || {}), notify: !!onOff })); return !!onOff; });
+  // The search box: customers in the books (read-only copy), while Accounting or Invoices is installed.
+  handle('central:customers', async (q) => {
+    const ok = ['accounting', 'accounting-basics', 'invoices'].some((id) => !!locate(PROGRAMS.find((x) => x.id === id)));
+    if (!ok) return [];
+    return sources.findCustomers(demoOn() ? demo.demoAccountingDb() : sources.accountingDbPath(), String(q || '').slice(0, 80));
+  });
+  // The Admin panel's links to Riyeser Link (people, join requests, phones and branches): only these places.
+  handle('central:openWeb', (what) => {
+    const url = { people: 'https://riyeser.com/link/', requests: 'https://riyeser.com/link/?requests', phones: 'https://riyeser.com/link/?phones', requestsHelp: 'https://riyeser.com/link/?help' }[String(what)];
+    if (!url) throw new Error('Unknown page.');
+    return shell.openExternal(url).then(() => true);
   });
   handle('file:open', async (p) => { if (!fs.existsSync(p)) throw new Error('That file has moved or been deleted. Try searching for it.'); const err = await shell.openPath(p); if (err) throw new Error(err); return true; });
   handle('file:reveal', (p) => { shell.showItemInFolder(p); return true; });
@@ -957,6 +1046,25 @@ app.whenReady().then(async () => {
   }
   registerIpc();
   createWindow();
+  // Used by the Windows build check: the home screen as people see it (the launcher's tiles, pill and chips, any page
+  // errors, and a picture of the window), then quit.
+  const uiTest = process.argv.find((a) => a.startsWith('--self-test-ui='));
+  if (uiTest) {
+    const out = uiTest.slice('--self-test-ui='.length); const errors = [];
+    win.webContents.on('console-message', (_e, level, message) => { if (level >= 3) errors.push(message); });
+    win.webContents.once('did-finish-load', async () => {
+      let r = null;
+      for (let i = 0; i < 60 && !(r && r.tiles.length); i++) {
+        await new Promise((ok) => setTimeout(ok, 500));
+        r = await win.webContents.executeJavaScript(`({ tiles: [...document.querySelectorAll('#tiles .app')].map((a) => ({ name: a.querySelector('b').textContent, line: a.querySelector('.tl').textContent.trim() })),
+          pill: document.querySelector('#pilltxt').textContent, chips: [...document.querySelectorAll('#chips .chip')].map((c) => c.textContent), admin: !document.querySelector('#adminbtn').hidden,
+          hscroll: document.documentElement.scrollWidth > innerWidth + 1, wizard: !document.querySelector('#wizard').hidden })`).catch(() => null);
+      }
+      try { fs.writeFileSync(out.replace(/\.json$/i, '.png'), (await win.webContents.capturePage()).toPNG()); } catch { /* the report is what matters */ }
+      fs.writeFileSync(out, JSON.stringify({ version: app.getVersion(), ...(r || { tiles: [] }), errors }, null, 2));
+      app.exit(0);
+    });
+  }
 });
 app.on('before-quit', () => { quitting = true; if (onlineSync) onlineSync.stop(); if (localApp) localApp.stop(); });
 app.on('window-all-closed', () => app.quit());

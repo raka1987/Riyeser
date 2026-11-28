@@ -84,8 +84,47 @@ async function lastPayRun(dbPath) {
     const st = db.prepare(`SELECT r.pay_date, r.total_net, (SELECT COUNT(*) FROM payslips p WHERE p.run_id = r.id) AS employees
       FROM payroll_runs r ORDER BY r.pay_date DESC, r.id DESC LIMIT 1`);
     const row = st.step() ? st.getAsObject() : null; st.free();
-    return { found: true, lastRun: row ? { pay_date: row.pay_date, total_net: Number(row.total_net) || 0, employees: Number(row.employees) || 0 } : null };
+    // The next pay run: the last one's pay date plus the length of its pay period (weekly, fortnightly…), when known.
+    let nextRun = null;
+    try {
+      const p = db.prepare('SELECT period_start, period_end, pay_date FROM payroll_runs ORDER BY pay_date DESC, id DESC LIMIT 1');
+      const r = p.step() ? p.getAsObject() : null; p.free();
+      nextRun = r ? nextPayRun(r) : null;
+    } catch { /* an older Payroll without pay periods */ }
+    return { found: true, lastRun: row ? { pay_date: row.pay_date, total_net: Number(row.total_net) || 0, employees: Number(row.employees) || 0 } : null, nextRun };
   } finally { db.close(); }
+}
+
+/** The next pay date after a run: { pay_date } one pay period (period_start..period_end, 7 to 31 days) later, or null. */
+function nextPayRun(r) {
+  const d = (v) => new Date(`${String(v || '').slice(0, 10)}T12:00:00Z`);
+  const len = Math.round((d(r.period_end) - d(r.period_start)) / 86400000) + 1;
+  if (!r.pay_date || !Number.isFinite(len) || len < 7 || len > 31) return null;
+  const next = d(r.pay_date);
+  if (len >= 28) next.setUTCMonth(next.getUTCMonth() + 1); else next.setUTCDate(next.getUTCDate() + len);
+  return { pay_date: next.toISOString().slice(0, 10), periodDays: len };
+}
+
+/** Customers whose name (or contact person or email) has every word typed, from the books (read-only copy). */
+async function findCustomers(dbPath, q, { limit = 8 } = {}) {
+  const words = String(q || '').trim().toLowerCase().split(/\s+/).filter(Boolean).slice(0, 5);
+  if (!words.length || !dbPath || !fs.existsSync(dbPath)) return [];
+  const SQL = await sqlJs();
+  const db = new SQL.Database(new Uint8Array(fs.readFileSync(dbPath)));
+  try {
+    const where = words.map(() => "(lower(name) LIKE ? OR lower(coalesce(contact_person,'')) LIKE ? OR lower(coalesce(email,'')) LIKE ?)").join(' AND ');
+    const st = db.prepare(`SELECT name, contact_person, email, phone FROM contacts WHERE kind = 'customer' AND active = 1 AND ${where} ORDER BY name LIMIT ${Math.max(1, Math.min(20, limit))}`);
+    st.bind(words.flatMap((w) => [`%${w}%`, `%${w}%`, `%${w}%`]));
+    const out = []; while (st.step()) { const r = st.getAsObject(); out.push({ name: r.name, contact: r.contact_person || '', email: r.email || '', phone: r.phone || '' }); }
+    st.free();
+    return out;
+  } catch { return []; } finally { db.close(); }
+}
+
+/** How many documents wait in Riyeser Documents' Inbox (files in <library>\_Inbox). null when it can't be seen (a network library isn't looked at). */
+function inboxCount(root) {
+  if (!root || /^\\\\|^\/\//.test(root)) return null;
+  try { return fs.readdirSync(path.join(root, '_Inbox'), { withFileTypes: true }).filter((e) => e.isFile() && !e.name.startsWith('.') && !/^~\$|\.tmp$/i.test(e.name)).length; } catch { return null; }
 }
 
 const PERSONAL_EXT = /\.(pdf|docx?|xlsx?|xlsm|csv|pptx?|txt|rtf|odt|ods|jpe?g|png|heic|dwg|dxf|msg|eml|zip)$/i;
@@ -120,4 +159,4 @@ function recentDocuments({ recentDir, readLink, indexDocs = {}, limit = 15 } = {
   return out;
 }
 
-module.exports = { deskAssistant, accountingDbPath, pendingPayments, payrollDbPath, lastPayRun, recentDocuments, readJson };
+module.exports = { deskAssistant, accountingDbPath, pendingPayments, payrollDbPath, lastPayRun, nextPayRun, findCustomers, inboxCount, recentDocuments, readJson };
