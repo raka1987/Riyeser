@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto';
 import { helpGuides } from './help.mjs';
 import { developerPages, DEV_PAGES } from './developers.mjs';
 import { connectSection, connectTeaser } from './connect.mjs';
+import { minifyDir, minifyHtml } from './minify.mjs';
 import { PRICE, STORAGE_GB, BUNDLES, separately, planPrice, usd } from './prices.mjs';
 import { STATUS, WHERE, NET, CHECKED, FACTS, FEATURES, COMPARE_ACCOUNTING, COMPARE_LINK, FAQ as PROG_FAQ, HARDWARE, COUNTRIES } from './content/features.mjs';
 
@@ -22,8 +23,9 @@ const DOWNLOADS_REPO = 'raka1987/riyeser-downloads';
 const OLD_REPO = 'raka1987/Riyeser';
 const RELEASES = `https://github.com/${DOWNLOADS_REPO}/releases/latest/download`;
 const GH_API = (repo) => `https://api.github.com/repos/${repo}/releases`;
-// A release file's address in either repository (for the download counter's answer)
-const GH_FILE_RE = `/^https:\\/\\/github\\.com\\/(${DOWNLOADS_REPO.replace(/[/.-]/g, '\\$&')}|${OLD_REPO.replace(/[/.-]/g, '\\$&')})\\/releases\\//i`;
+// A release file's address in the public downloads repository (for the download counter's answer). Only the downloads
+// repository is allowed here, so the code repository's name is never written into a shipped page.
+const GH_FILE_RE = `/^https:\\/\\/github\\.com\\/${DOWNLOADS_REPO.replace(/[/.-]/g, '\\$&')}\\/releases\\//i`;
 const EMAIL = 'info@riyeser.com';
 // Early bird: 50% off the first 12 months for the first 100 businesses. Set to false once 100 businesses have it.
 const EARLY_BIRD = true;
@@ -926,6 +928,8 @@ const more = (t) => `<span class="more">${t} ${ARR}</span>`;
 const badgeOf = (p) => p.comesWith ? `<span class="badge with">${esc(withShort(p))}</span>` : p.free ? '<span class="badge free">Free forever</span>' : '<span class="badge">Free trial</span>';
 
 /** assets/x.webp -> assets/x.webp?v=<content hash>, so browsers fetch new pictures and styles as soon as they change. */
+// Pages are collected here and written in the finalize pass at the bottom (minify, then CSP).
+const PAGES = [];
 const versionOf = {};
 function withVersions(html) {
   return html.replace(/(assets\/[\w./-]+\.(?:webp|png|css))(?=["'\s)])/g, (m, a) => {
@@ -1017,20 +1021,15 @@ document.addEventListener('click',function(e){var x=e.target.closest&&e.target.c
 document.addEventListener('keydown',function(e){var x=e.target.closest&&e.target.closest('[data-href]');if(x&&(e.key==='Enter'||e.key===' ')){e.preventDefault();location.href=x.getAttribute('data-href')}});</script>
 <script>/* the Help Centre search button: open the first result, or go to the box */
 document.querySelectorAll('[data-gosearch]').forEach(function(b){b.addEventListener('click',function(){var a=document.querySelector('#hres a');if(a)location.href=a.href;else document.getElementById('hq').focus()})});</script>
-<script>/* Download buttons always point at the newest release file, whatever its exact name (the downloads repository's,
-   or the old code repository's while the downloads repository has no release yet). */
-(function(){var a=[].slice.call(document.querySelectorAll('a[href*="/releases/latest/download/"]'));if(!a.length||!window.fetch)return;
-var get=function(u){return fetch(u).then(function(r){return r.ok?r.json():(r.status===404?null:Promise.reject(r.status))})};
-get('${GH_API(DOWNLOADS_REPO)}/latest').then(function(rel){return rel||get('${GH_API(OLD_REPO)}/latest')}).then(function(rel){if(!rel)return;
-a.forEach(function(el){var want=el.href.split('/').pop().replace(/^Riye?ser/i,'').toLowerCase();
-var hit=(rel.assets||[]).filter(function(x){return x.name.replace(/^Riye?ser/i,'').toLowerCase()===want})[0];if(hit)el.href=hit.browser_download_url;});}).catch(function(){});})();</script>
 ${TRAFFIC}
 </body>
 </html>
 `;
   const file = join(OUT, path);
   mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, withCsp(withVersions(html)));
+  // Written at the end (finalize, bottom of this file): the page is minified first, then the CSP is built from the
+  // minified inline scripts, so the script hashes still match. Deferring keeps page() synchronous for every caller.
+  PAGES.push([file, withVersions(html)]);
 }
 
 // A Content-Security-Policy for every page: our own files, the inline scripts on that page (by their SHA-256), and
@@ -1318,7 +1317,7 @@ for (const p of PROGRAMS.filter((x) => x.file)) {
     <p class="dlgo-sub"><b>${esc(nm)}</b> for Windows 10 &amp; 11 <span class="dlgo-file">${esc(p.file)}</span></p>
     <p class="dlgo-st" id="dlst" role="status" aria-live="polite">Getting the newest version…</p>
     <a class="btn p big" id="dlgo" href="${esc(fn || gh)}" data-gh="${esc(gh)}">${DL} Download ${esc(nm)}</a>
-    <p class="dlgo-alt">Didn’t start? Press the button. Or <a href="${esc(gh)}">get it straight from GitHub</a>, where every Riyeser release is published.</p>
+    <p class="dlgo-alt">Didn’t start? Press the button to download ${esc(nm)}.</p>
   </div>
   <ol class="dlgo-steps">
     <li><span class="n">1</span><div><b>Open the file</b><small>When it finishes, open ${esc(p.file)} from your browser’s downloads.</small></div></li>
@@ -1654,7 +1653,10 @@ infoPage({
 </section>`,
 });
 
-// ---------- release notes: what's in the newest release (refreshed from GitHub in the browser) ----------
+// ---------- release notes: what's in the newest release ----------
+// The version table is built in (FACTS). The recent-releases list is refreshed in the browser from the site's own
+// /releases.json (written by the release workflow); if that isn't there yet it falls back to the releases API. Only
+// the tag and date are shown - no outside link - so the page never points people off riyeser.com.
 infoPage({
   path: 'releases.html', title: 'Release notes — Riyeser', h1: 'Release notes', eyebrow: 'Updates',
   lead: 'Which version of each Riyeser program is in the newest release. Riyeser Central installs updates for you.',
@@ -1663,12 +1665,12 @@ infoPage({
   <h2 class="h2">Release ${esc(CHECKED.release)}</h2>
   <div class="ptable-wrap" tabindex="0" role="region" aria-label="Program versions" style="margin-top:16px"><table class="ptable stack"><thead><tr><th scope="col">Program</th><th scope="col">Version</th></tr></thead>
   <tbody>${PROGRAMS.filter((p) => FACTS[p.id]).map((p) => `<tr><th scope="row"><a class="more" href="${up}programs/${p.id}.html">${esc(p.name)}</a></th><td data-label="Version">${esc(FACTS[p.id].version)}</td></tr>`).join('')}</tbody></table></div>
-  <div id="rel-live" hidden><h2 class="h2" style="margin-top:36px">Latest releases on GitHub</h2><ul class="rel-list" id="rel-list"></ul></div>
-  <p class="muted" style="margin-top:22px">Every release is published on <a class="more" href="https://github.com/${DOWNLOADS_REPO}/releases">GitHub</a>, where each installer is built and checked on Windows before it goes out. Detailed notes on what changed in each release aren't published yet; the <a class="more" href="${up}help.html">Help Centre</a> covers the newest features.</p>
+  <div id="rel-live" hidden><h2 class="h2" style="margin-top:36px">Recent releases</h2><ul class="rel-list" id="rel-list"></ul></div>
+  <p class="muted" style="margin-top:22px">Every installer is built and checked on Windows before it goes out, and Riyeser Central installs updates for you. Detailed notes on what changed in each release aren't published yet; the <a class="more" href="${up}help.html">Help Centre</a> covers the newest features.</p>
 </section>
 <script>(function(){if(!window.fetch)return;var get=function(u){return fetch(u).then(function(r){return r.ok?r.json():null})};
-get('${GH_API(DOWNLOADS_REPO)}?per_page=8').then(function(list){return list&&list.length?list:get('${GH_API(OLD_REPO)}?per_page=8')}).then(function(list){if(!list||!list.length)return;
-var ul=document.getElementById('rel-list');list.filter(function(r){return !r.draft&&r.published_at}).forEach(function(r){var li=document.createElement('li'),a=document.createElement('a');a.href=r.html_url;a.className='more';a.textContent=r.tag_name;li.appendChild(a);
+get('${up}releases.json').then(function(list){return (list&&list.length)?list:get('${GH_API(DOWNLOADS_REPO)}?per_page=8')}).then(function(list){if(!list||!list.length)return;
+var ul=document.getElementById('rel-list');list.filter(function(r){return !r.draft&&r.published_at}).forEach(function(r){var li=document.createElement('li'),b=document.createElement('b');b.textContent=r.tag_name;li.appendChild(b);
 var s=document.createElement('span');try{s.textContent=' · '+new Date(r.published_at).toLocaleDateString('en-AU',{day:'numeric',month:'long',year:'numeric'})}catch(e){}li.appendChild(s);ul.appendChild(li)});document.getElementById('rel-live').hidden=!ul.children.length}).catch(function(){})})()</script>`,
 });
 
@@ -1847,4 +1849,20 @@ writeFileSync(join(OUT, 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>\
 // Missing pages: the booking page's shell, which shows a business's booking page for /book/<address> and "That page
 // isn't here" for anything else (see the booking page above).
 writeFileSync(join(OUT, '404.html'), bookShell('Riyeser'));
+
+// versions.json: the program versions in the newest release, published by the site itself so pages (Release notes,
+// the download buttons) can read it without calling api.github.com. The release workflow also writes releases.json
+// (a short list of recent releases) next to it; pages fall back to api.github.com only if these are missing.
+// See docs/GOING-PRIVATE.md and publish-release.yml.
+writeFileSync(join(OUT, 'versions.json'), JSON.stringify({
+  release: CHECKED.release,
+  checked: CHECKED.date,
+  programs: Object.fromEntries(PROGRAMS.filter((p) => FACTS[p.id]).map((p) => [p.id, FACTS[p.id].version])),
+}, null, 2) + '\n');
+
+// Finalize: write each page minified, with its CSP computed from the minified inline scripts, then minify the
+// served scripts, styles and the directly-written pages (book, widget, assets). BUILT output only; source stays as is.
+const PAGE_PATHS = new Set();
+for (const [file, html] of PAGES) { writeFileSync(file, withCsp(await minifyHtml(html))); PAGE_PATHS.add(file); }
+await minifyDir(OUT, PAGE_PATHS);
 console.log('Built', urls.length, 'pages into', OUT);

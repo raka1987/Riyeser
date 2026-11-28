@@ -27,7 +27,8 @@
     "electron-builder": "^25.1.8",
     "pdfjs-dist": "^4.10.38",
     "pe-library": "^2.0.1",
-    "resedit": "^2.0.3"
+    "resedit": "^2.0.3",
+    "terser": "5.51.2"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.8.0",
@@ -54,7 +55,13 @@
     "files": [
       "src/**/*",
       "package.json",
-      "!node_modules/@tesseract.js-data/eng/4.0.0/**"
+      "!node_modules/@tesseract.js-data/eng/4.0.0/**",
+      "!**/*.map",
+      "!**/*.md",
+      "!**/{test,tests,__tests__}/**",
+      "!**/*.test.js",
+      "!**/*.test.ts",
+      "!**/*.test-d.ts"
     ],
     "win": {
       "target": "nsis",

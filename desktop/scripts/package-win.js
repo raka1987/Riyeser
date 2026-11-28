@@ -48,6 +48,11 @@ if (!process.argv[2] || process.argv[2] === 'services') {
   fs.cpSync(path.join(site, 'public'), path.join(root, 'build', 'services-web'), { recursive: true });
 }
 
+// Minify the app's own JavaScript into build/app-min/src before packaging (scripts/minify-app.js). builder.config.js
+// packs that mirror instead of src/, so the shipped installers don't carry readable source once the code repository
+// goes private. node_modules are left to electron-builder as usual. Done once, shared by every app below.
+run('node', ['scripts/minify-app.js', path.join(root, 'src'), path.join(root, 'build', 'app-min', 'src')]);
+
 const only = process.argv[2];
 for (const app of ['assistant', 'pdf', 'central', 'services', 'team', 'linkoffice'].filter((a) => !only || a === only)) {
   const out = app === 'assistant' ? 'dist' : `dist-${app}`;

@@ -5,7 +5,16 @@
 //   DESK_APP=team    -> Riyeser Link, formerly Riyeser Team (chat and calls: riyeser.com/link in its own window)
 //   DESK_APP=linkoffice -> Riyeser Link Office (the office phone system for desk phones)
 //   (default)        -> Riyeser Documents (formerly Riyeser Desk Assistant)
+const fs = require('fs');
+const path = require('path');
+const root = path.join(__dirname, '..');
 const base = require('../package.json').build;
+// package-win.js minifies src/ into build/app-min/src before building; pack that instead of src/ so the installers
+// don't carry readable source. A plain `electron-builder` (no mirror) falls back to src/, as before.
+const MIN_SRC = path.join(root, 'build', 'app-min', 'src');
+const appFiles = fs.existsSync(MIN_SRC)
+  ? base.files.map((f) => (f === 'src/**/*' ? { from: 'build/app-min/src', to: 'src' } : f))
+  : base.files;
 const which = ['pdf', 'central', 'services', 'team', 'linkoffice'].includes(process.env.DESK_APP) ? process.env.DESK_APP : 'assistant';
 const pdf = which === 'pdf';
 const APPS = {
@@ -51,10 +60,13 @@ const a = APPS[which];
 
 module.exports = {
   ...base,
+  files: appFiles,
   productName: a.name,
   appId: a.appId,
   ...(a.executableName ? { executableName: a.executableName } : {}),
-  ...(a.extraMetadata ? { extraMetadata: a.extraMetadata } : {}),
+  // homepage goes into the installer's "URL info" (Installed apps). Set it to riyeser.com so electron-builder never
+  // falls back to the code repository's git remote URL (which would put a github.com address in the installer).
+  extraMetadata: { homepage: 'https://riyeser.com', ...(a.extraMetadata || {}) },
   directories: { ...base.directories, output: a.out },
   // Riyeser PDF offers itself for .pdf files ("Open with", Default apps)
   ...(pdf ? { fileAssociations: [{ ext: 'pdf', name: 'PDF Document', description: 'PDF document', icon: a.ico, role: 'Editor' }] } : {}),
