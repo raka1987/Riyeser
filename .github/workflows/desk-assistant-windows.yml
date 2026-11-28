@@ -653,6 +653,7 @@ jobs:
           }
           Get-Process -Name "Riyeser*" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
           Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Riyeser*" | Format-Table DisplayName, DisplayVersion -AutoSize | Out-String | Write-Host
+          Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Riyeser*" | Select-Object DisplayName, DisplayVersion | ConvertTo-Json | Set-Content C:\riy\out\installed-before.json
       - name: Press Update all in the installed Central
         shell: pwsh
         run: |
@@ -711,6 +712,19 @@ jobs:
           if (Test-Path C:\riy\out\av.log) { Get-Content C:\riy\out\av.log | Write-Host }
           if (Test-Path C:\riy\out\update-all\update-all.json) { Get-Content C:\riy\out\update-all\update-all.json | Write-Host }
           Get-Process -Name "Riyeser*" -ErrorAction SilentlyContinue | Format-Table Name, Id, Path -AutoSize | Out-String | Write-Host
+      - name: All five updated (this branch's Central; the released one only shows what it did)
+        if: matrix.central == 'built'
+        shell: pwsh
+        run: |
+          $before = Get-Content C:\riy\out\installed-before.json -Raw | ConvertFrom-Json
+          $after = Get-Content C:\riy\out\installed-after.json -Raw | ConvertFrom-Json
+          $same = @()
+          foreach ($n in "Riyeser Central", "Riyeser Accounting Basics", "Riyeser Bookings", "Riyeser Estimate", "Riyeser POS") {
+            $b = ($before | Where-Object { $_.DisplayName -like "$n *" }).DisplayVersion; $a = ($after | Where-Object { $_.DisplayName -like "$n *" }).DisplayVersion
+            Write-Host "$n $b -> $a"
+            if (-not $a -or $a -eq $b) { $same += $n }
+          }
+          if ($same.Count) { throw "Not updated: $($same -join ', ')" }
       - uses: actions/upload-artifact@v4
         if: always()
         with:

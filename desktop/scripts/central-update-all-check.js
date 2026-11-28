@@ -98,6 +98,9 @@ function cdp(wsUrl) {
     const key = `${s.banner.replace(/\d+%/, '%')}|${s.toast}|${s.updError}`;
     if (key !== last) { note('window says', s); last = key; sameSince = Date.now(); await screenshot(String(s.banner.split('\n')[0] || 'banner').replace(/[^a-z0-9]+/gi, '-').slice(0, 40)); }
     if (s.updating === false) {
+      await sleep(3000);   // the banner is drawn again once Central has checked again
+      const s2 = await ev(`(() => ({ banner: (document.querySelector('#updates') || {}).innerText || '', updError: typeof updError !== 'undefined' ? updError : null }))()`).catch(() => null);
+      if (s2) { note('window says', s2); await screenshot('result'); }
       // --retry: when it says what didn't update (1.9.2), press its Try again once, as the person would
       const retry = !retried && process.argv.includes('--retry') && await ev(`(() => { const b = document.querySelector('#updates [data-updretry]'); if (!b) return false; b.click(); return true; })()`).catch(() => false);
       if (retry) { retried = true; note('pressed Try again', s); await sleep(800); await ev(`(() => { const b = document.querySelector('[data-upconfirm="now"]'); if (b) b.click(); return !!b; })()`).catch(() => null); last = ''; continue; }
