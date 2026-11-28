@@ -31,32 +31,32 @@ export const WHERE = { win: 'Windows', web: 'Web browser', phone: 'Phone browser
 export const NET = { offline: 'Works offline', lan: 'Office network', online: 'Needs internet' };
 
 // The release the register was checked against (the program versions are in that release's notes on GitHub).
-export const CHECKED = { date: '28 November 2026', release: 'riyeser-2026.11.27-60' };
+export const CHECKED = { date: '28 November 2026', release: 'riyeser-2026.11.28-65' };
 
 // ---------- each program at a glance ----------
 // runs: where it runs · net: internet in one line · account: is a Riyeser account needed · hw: hardware in one line
 // countries: what it is set up for · version: in the release above
 export const FACTS = {
-  central: { version: '1.8.12', runs: 'Windows 10 and 11 PCs', net: 'Works offline. Needs the internet to download and update programs, and for Online connections.',
+  central: { version: '1.9.1', runs: 'Windows 10 and 11 PCs', net: 'Works offline. Needs the internet to download and update programs, and for Online connections.',
     account: 'Not needed. Sign in with a free Riyeser account only to link the PC to your business (Riyeser Link, Online connections, a paid plan).',
     hw: 'Any PC that runs Windows 10 or 11.', countries: 'Any country.' },
   documents: { version: '1.0.0', runs: 'Windows 10 and 11 PCs; the library can sit on a shared network folder',
     net: 'Works offline. A shared library needs the office network.', account: 'Not needed.',
     hw: 'Scanners through Windows\' own scan window; scan-to-folder steps for HP, Canon, Brother, Ricoh, Kyocera and Epson office printers (not yet verified on each model).',
     countries: 'Any country. Reading scans (OCR) is set up for English text.' },
-  invoices: { version: '2.10.1', runs: 'Windows 10 and 11 PCs', net: 'Works offline. Emailing an invoice needs the internet and your email settings.',
+  invoices: { version: '2.11.0', runs: 'Windows 10 and 11 PCs', net: 'Works offline. Emailing an invoice needs the internet and your email settings.',
     account: 'Not needed.', hw: 'Any printer Windows can print to.', countries: 'Any country: pick yours at set-up and it fills in a starting point (tax name, rate and tax number label, currency, financial year, date format, time zone) for you to check and confirm. Rates are a starting point: check them with your accountant or tax office.' },
-  pdf: { version: '0.25.0', runs: 'Windows 10 and 11 PCs', net: 'Works offline.', account: 'Not needed.', hw: 'Any PC that runs Windows 10 or 11.', countries: 'Any country.' },
+  pdf: { version: '0.26.0', runs: 'Windows 10 and 11 PCs', net: 'Works offline.', account: 'Not needed.', hw: 'Any PC that runs Windows 10 or 11.', countries: 'Any country.' },
   'accounting-basics': { version: '2.10.1', runs: 'Windows 10 and 11 PCs', net: 'Works offline. Online orders and bookings from your website need the internet.',
     account: 'Not needed for the 90-day trial. A free Riyeser account is needed to buy.', hw: 'Any printer Windows can print to.',
     countries: 'Any country: pick yours at set-up and it fills in a starting point (tax name, rate and tax number label, currency, financial year, date format, time zone) for you to check and confirm. Australian files get the BAS / GST report; other countries a tax summary under their own tax name. Not confirmed compliance: check with your accountant.' },
-  accounting: { version: '2.10.1', runs: 'Windows 10 and 11 PCs', net: 'Works offline. Online orders and bookings from your website need the internet.',
+  accounting: { version: '2.11.0', runs: 'Windows 10 and 11 PCs', net: 'Works offline. Online orders and bookings from your website need the internet.',
     account: 'Not needed for the 90-day trial. A free Riyeser account is needed to buy.', hw: 'Any printer Windows can print to.',
     countries: 'Any country: pick yours at set-up and it fills in a starting point (tax name, rate and tax number label, currency, financial year, date format, time zone) for you to check and confirm. Australian files get the BAS / GST report; other countries a tax summary under their own tax name. Its own payroll is an Australian estimate only (see below).' },
-  bookings: { version: '2.10.1', runs: 'Windows 10 and 11 PCs; on-site sign-off on a phone or tablet on the same network',
+  bookings: { version: '2.11.0', runs: 'Windows 10 and 11 PCs; on-site sign-off on a phone or tablet on the same network',
     net: 'Works offline. Online bookings from your website or booking page need the internet.', account: 'Not needed for the 90-day trial. Online bookings need a Riyeser account.',
     hw: 'A phone or tablet camera for job photos and signatures.', countries: 'Any country: uses the company file\'s country settings (currency, date format, time zone and tax).' },
-  estimate: { version: '2.10.1', runs: 'Windows 10 and 11 PCs', net: 'Works offline, except measuring on the map (satellite imagery needs the internet).',
+  estimate: { version: '2.11.0', runs: 'Windows 10 and 11 PCs', net: 'Works offline, except measuring on the map (satellite imagery needs the internet).',
     account: 'Not needed for the 90-day trial (counted from the first time you use it).', hw: 'A laser measurer is optional: you type its readings in.',
     countries: 'Any country: metric or imperial, your own currency, tax name and date format.' },
   link: { version: '1.1.2', runs: 'Windows PCs (the Riyeser Link app), any web browser, and phones through the browser',
