@@ -554,7 +554,7 @@ sel(0);fromHash();addEventListener('hashchange',fromHash);state();})();</script>
 ${videoBox()}`;
 }
 /** Phones: a small "Start free" bar once the hero has scrolled away (closed with ×, for this visit). */
-const MBAR = `<div class="mbar" id="mbar" hidden><span><b>Riyeser</b><small>Free tools forever · paid programs free for 90 days</small></span><a class="btn p sm" href="/link/?signup">Start free</a><button type="button" class="mbar-x" aria-label="Close">×</button></div>
+const MBAR = `<div class="mbar" id="mbar" hidden><span><b>Riyeser</b><small>Free tools forever · paid programs free for 90 days</small></span><a class="btn p sm" href="/downloads.html">Start free</a><button type="button" class="mbar-x" aria-label="Close">×</button></div>
 <script>(function(){var b=document.getElementById('mbar'),h=document.querySelector('.hero4');if(!b||!h||!('IntersectionObserver' in window))return;var x=false;try{x=sessionStorage.getItem('mbar-x')==='1'}catch(e){}if(x)return;
 var past=false,foot=false,f=document.querySelector('footer');function show(){var on=past&&!foot&&!x&&matchMedia('(max-width: 760px)').matches;b.hidden=!on;document.body.classList.toggle('has-mbar',on)}
 new IntersectionObserver(function(es){past=!es[0].isIntersecting&&es[0].boundingClientRect.top<0;show()}).observe(h);
@@ -980,7 +980,7 @@ location.replace(${JSON.stringify(SERVICES_APP)}+'/'+s+h)})()</script>` : ''}
     <a href="${up}downloads.html"${active === 'downloads' ? ' class="on"' : ''}>Downloads</a>
     <a class="mob-only" href="/link/">Sign in / Create account</a>
   </nav>
-  <div class="right"><a class="signin" href="/link/">Sign in<span class="sx"> / Create account</span></a><a class="btn s hdl" href="${up}downloads.html" aria-label="Download for Windows">${WINLOGO}<span class="dlt"> Download</span></a><a class="btn p hstart" href="/link/?signup">Start free</a></div>
+  <div class="right"><a class="signin" href="/link/">Sign in<span class="sx"> / Create account</span></a><a class="btn s hdl" href="${up}downloads.html" aria-label="Download for Windows">${WINLOGO}<span class="dlt"> Download</span></a><a class="btn p hstart" href="${up}downloads.html">Start free</a></div>
   <button class="menu" aria-label="Menu" aria-expanded="false">☰</button>
 </div></header>
 <script>/* the phone menu button (no inline onclick: the Content-Security-Policy allows only these listed scripts) */
