@@ -75,13 +75,17 @@ def payment_details(company):
     """The 'How to pay' lines from Setup, Company details (S36); [] when none are set."""
     keys = company.keys() if hasattr(company, "keys") else company
     get = (lambda k: company[k] if k in keys else None)
+    from .countries import bank_labels
+    bl = bank_labels(company)   # BSB (Australia), one account number (New Zealand), branch / SWIFT / IBAN elsewhere
     lines = []
-    if get("bank_account_name") or get("bank_bsb") or get("bank_account_no"):
+    if get("bank_account_name") or get("bank_bsb") or get("bank_account_no") or get("bank_iban"):
         lines.append("Bank transfer: " + ", ".join(x for x in (
             get("bank_account_name") and f"Account name {get('bank_account_name')}",
             get("bank_name"),
-            get("bank_bsb") and f"BSB {get('bank_bsb')}",
-            get("bank_account_no") and f"Account {get('bank_account_no')}") if x))
+            get("bank_bsb") and f"{bl['branch'] or 'Bank / branch'} {get('bank_bsb')}",
+            get("bank_account_no") and f"Account {get('bank_account_no')}",
+            get("bank_swift") and f"SWIFT/BIC {get('bank_swift')}",
+            get("bank_iban") and f"IBAN {get('bank_iban')}") if x))
     if get("payment_instructions"):
         lines.append(get("payment_instructions"))
     return lines

@@ -10,7 +10,7 @@
 <div><label>Card (optional)</label><select name="contact_id"><option value="">—</option>{% for c in contacts %}<option value="{{ c.id }}">{{ c.name }} ({{ c.kind }})</option>{% endfor %}</select></div>
 <div><label>{{ 'Payee' if kind=='spend' else 'Payor' }}</label><input name="payee" value="{{ request.args.payee or '' }}"></div>
 <div><label>Reference</label><input name="reference"></div><div><label>Memo</label><input name="memo"></div>
-<label class="check"><input type="checkbox" name="tax_inclusive" value="1" checked> Amounts include {{ tl.tax }}</label></div>
+<label class="check"{% if not tl.has_tax %} style="display:none"{% endif %}><input type="checkbox" name="tax_inclusive" value="1" checked> Amounts include {{ tl.word }}</label></div>
 <h2>Allocation</h2>
 <table class="lines" id="ml"><thead><tr><th style="width:34%">Account</th><th class="n">Amount</th><th>Tax</th><th>Job</th><th>Memo</th><th></th></tr></thead>
 <tbody>{{ row() }}{{ row() }}</tbody><tfoot><tr><td class="right">Total</td><td class="n" id="m-total"></td><td colspan="4"></td></tr></tfoot></table>

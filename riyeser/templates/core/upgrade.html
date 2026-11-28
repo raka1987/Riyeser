@@ -6,7 +6,7 @@
 <div class="eds">
   <div class="card ed ed-basic{{ ' here' if here == 'basic' }}"><div class="edlogo">B</div><h2>{{ editions.basic.title }}</h2><p class="edprice">Free for 90 days, then {{ prices.basic }} a month per business</p>
     <ul><li>Quotes, invoices and receiving payments</li><li>Customers, suppliers and bills</li><li>Stock items, stocktake and reorder alerts</li>
-    <li>Simple money in and money out</li><li>Till sales from Riyeser POS show as paid invoices</li><li>Profit &amp; Loss, GST summary, who owes you, sales and stock reports</li></ul>
+    <li>Simple money in and money out</li><li>Till sales from Riyeser POS show as paid invoices</li><li>Profit &amp; Loss, {{ tl.summary ~ ', ' if tl.has_tax }}who owes you, sales and stock reports</li></ul>
     {% if here == 'basic' %}<p class="youare">✓ This is what you're using</p>{% endif %}</div>
   <div class="card ed ed-plus{{ ' here' if here != 'basic' }}"><div class="edlogo">P</div><h2>{{ editions.enterprise.title }}</h2><p class="edprice">Free for 90 days, then {{ prices.plus }} a month per business, instead of Basics</p>
     <ul><li>Everything in {{ editions.basic.title }}</li><li>Bank reconciliation and bank statement import</li><li>Payroll and pay runs</li>

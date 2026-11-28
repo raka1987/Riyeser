@@ -31,7 +31,7 @@
 {% if rcv.bills %}<p class="muted" style="margin:8px 0 0">Bills: {% for b in rcv.bills %}<a href="{{ url_for('documents.view', doc_id=b.id) }}">{{ b.number }}</a>{{ ' (void)' if b.status == 'void' }}{{ ', ' if not loop.last }}{% endfor %}</p>{% endif %}</div>{% endif %}
 {% if source_doc %}<p class="muted">Goods received on purchase order <a href="{{ url_for('documents.view', doc_id=source_doc.id) }}">{{ source_doc.number }}</a>.</p>{% endif %}
 {% if qoptions %}{% include "documents/_quote_options.html" %}<h3 class="qopts-on">Lines on the quote now: {{ (qoptions|selectattr('on_quote')|first).name }}</h3>{% endif %}
-<div class="tbl"><table><tr><th>Item</th><th>Description</th><th class="n">Qty</th><th class="n">Price</th><th class="n">Disc</th><th>Account</th><th>Tax</th><th>Job</th><th class="n">Net</th><th class="n">GST</th></tr>
+<div class="tbl"><table><tr><th>Item</th><th>Description</th><th class="n">Qty</th><th class="n">Price</th><th class="n">Disc</th><th>Account</th><th>Tax</th><th>Job</th><th class="n">Net</th><th class="n">{{ tl.tax }}</th></tr>
 {% for l in lines %}<tr><td>{{ l.sku or '' }}</td><td>{{ l.description or '' }}</td><td class="n">{{ '%g'|format(l.qty) }}</td><td class="n">{{ l.unit_price|money }}</td>
 <td class="n">{{ '%g%%'|format(l.discount_pct) if l.discount_pct }}</td><td>{{ l.acode }}</td><td>{{ l.tcode or '' }}</td><td>{{ l.jcode or '' }}</td><td class="n">{{ l.net_amount|money }}</td><td class="n">{{ l.tax_amount|money }}</td></tr>{% endfor %}
 </table></div>

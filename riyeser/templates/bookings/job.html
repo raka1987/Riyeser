@@ -17,7 +17,7 @@
   <div><label>Job name <small>(optional)</small></label><input name="title" value="{{ v.title or '' }}" placeholder="e.g. Wi-Fi fault, level 2"></div>
   <div class="wide"><label>Job address</label><input name="address" id="bk-addr" value="{{ v.address or '' }}"></div>
   <div><label>How it's charged</label><select name="billing">{% for k, label in billing %}<option value="{{ k }}" {{ 'selected' if (v.billing or 'fixed') == k }}>{{ label }}</option>{% endfor %}</select></div>
-  <div><label>Agreed price <small>(fixed price jobs, inc GST)</small></label><input name="price" id="bk-price" inputmode="decimal" placeholder="{{ (j.service_price|cents) if j and j.service_price else '0.00' }}" value="{{ v.price|cents if v.price is not none and v.price is defined else '' }}"></div>
+  <div><label>Agreed price <small>(fixed price jobs{{ ', ' ~ tl.inc if tl.has_tax }})</small></label><input name="price" id="bk-price" inputmode="decimal" placeholder="{{ (j.service_price|cents) if j and j.service_price else '0.00' }}" value="{{ v.price|cents if v.price is not none and v.price is defined else '' }}"></div>
   {% if j %}<div><label>Status</label><select name="status">{% for k, label in jstatuses %}<option value="{{ k }}" {{ 'selected' if j.status == k }}>{{ label }}</option>{% endfor %}</select></div>{% endif %}
   <div class="wide"><label>Office notes <small>(not shown to the customer)</small></label><textarea name="notes" rows="2">{{ v.notes or '' }}</textarea></div>
 </div></fieldset>{% if can('bookings', 2) and not locked %}<p><button class="btn pri">Save</button>{% if not j %} <a class="btn" href="{{ url_for('bookings.jobs') }}">Back to jobs</a>{% endif %}</p>{% elif locked %}<p class="muted small">Invoiced, so the charges are locked. Void the invoice to change them.</p>{% endif %}</form>
@@ -52,7 +52,7 @@
 <div class="tbl"><table class="bk-cmp"><tr><th>Line</th><th class="n">Qty</th><th class="n">Price</th><th class="n">Amount</th></tr>
 {% for l in lines %}<tr><td>{{ l.description }}</td><td class="n">{{ '%g' % l.qty }}</td><td class="n">{{ l.unit_price|money }}</td><td class="n">{{ l.amount|money }}</td></tr>
 {% else %}<tr><td colspan="4" class="muted">{% if j.billing == 'time' %}Nothing to charge yet.{% else %}No price yet. Type the agreed price above and press Save.{% endif %}</td></tr>{% endfor %}
-<tr class="tot"><td>Total (including GST)</td><td></td><td></td><td class="n">{{ sm.total|money }}</td></tr></table></div></div>
+<tr class="tot"><td>Total{% if tl.has_tax %} ({{ tl.incl }}){% endif %}</td><td></td><td></td><td class="n">{{ sm.total|money }}</td></tr></table></div></div>
 </div>
 {% endif %}
 {% endblock %}

@@ -29,7 +29,7 @@
   <div class="perm-wrap" {% if u.role == 'admin' %}hidden{% endif %}>
     <div class="presets"><span class="muted">Quick set:</span>{% for key, (name, _) in presets.items() %}<button type="button" class="btn sm" data-preset="{{ key }}">{{ name }}</button>{% endfor %}</div>
     <table class="perm-grid"><tr><th>Area</th>{% for v, name in level_names %}<th class="c">{{ name }}</th>{% endfor %}</tr>
-    {% for a, name, desc in areas %}<tr><td><b>{{ name }}</b><div class="muted small">{{ desc }}</div></td>
+    {% for a, name, desc in areas %}<tr><td><b>{{ name }}</b><div class="muted small">{{ desc if tl.bas or 'GST/BAS' not in desc else desc.replace('GST/BAS', tl.report if tl.has_tax else 'tax reports') }}</div></td>
       {% for v, _ in level_names %}<td class="c"><input type="radio" name="perm_{{ a }}" value="{{ v }}" {{ 'checked' if L[a] == v }} {{ 'disabled' if u.role == 'viewer' and v > 1 }} aria-label="{{ name }}: {{ level_names[v][1] }}"></td>{% endfor %}</tr>{% endfor %}
     </table>
   </div>

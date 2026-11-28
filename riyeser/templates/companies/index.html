@@ -19,7 +19,7 @@
 <div class="tbl"><table>
 <tr><th>Company</th><th class="n">Cash at bank</th><th class="n">Customers owe</th><th class="n">Overdue</th><th class="n">You owe</th><th class="n">Net profit (year)</th><th>Locked to</th><th></th></tr>
 {% for c in rows %}<tr class="{{ 'co-current' if c.current }}">
-  <td><b>{{ c.name }}</b>{% if c.current %} <span class="badge paid">open now</span>{% endif %}{% if c.abn %}<div class="muted small">ABN {{ c.abn }}</div>{% endif %}</td>
+  <td><b>{{ c.name }}</b>{% if c.current %} <span class="badge paid">open now</span>{% endif %}{% if c.abn %}<div class="muted small">{{ c.tax_id or 'ABN' }} {{ c.abn }}</div>{% endif %}</td>
   {% if c.f %}
   <td class="n">{{ c.f.cash|money if c.f.cash is defined else '—' }}</td>
   <td class="n">{{ c.f.owed|money if c.f.owed is defined else '—' }}</td>
@@ -39,7 +39,7 @@
   <form class="card" method="post" action="{{ url_for('companies.add') }}">
     <h3>Add a company</h3><p class="muted">A new, empty set of books — for another company, trust or client. You'll be its administrator with your current sign-in.</p>
     <div class="fields"><div class="wide"><label>Company name</label><input name="name" required placeholder="e.g. Harbourview Holdings Pty Ltd"></div>
-      <div><label>ABN (optional)</label><input name="abn"></div>
+      <div><label>{{ tl.tax_id }} (optional)</label><input name="abn"></div>
       {% if not product.separate %}<div><label>Edition</label><select name="edition"><option value="enterprise">{{ editions.enterprise.name }} (licence)</option><option value="basic">{{ editions.basic.name }} ({{ prices.basic }} a month, 90 days free)</option></select></div>{% endif %}
       <div class="wide picks two">
         <label class="pick"><input type="radio" name="start" value="blank" checked> <b>Start blank (recommended)</b><small>Your own company. Nothing is filled in.</small></label>

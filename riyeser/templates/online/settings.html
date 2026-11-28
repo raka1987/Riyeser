@@ -34,7 +34,7 @@
 <div id="pick-items" class="ol-pick" {{ 'hidden' if s.publish_items != 'chosen' }}>{% for i in items %}<label><input type="checkbox" name="item" value="{{ i.id }}" {{ 'checked' if i.id in s.chosen_items }}>{{ i.name }} <span class="muted small">{{ i.sku }}</span></label>{% else %}<span class="muted">No items for sale yet.</span>{% endfor %}</div>
 <div id="pick-svcs" class="ol-pick" {{ 'hidden' if s.publish_services != 'chosen' }}>{% for v in svcs %}<label><input type="checkbox" name="service" value="{{ v.id }}" {{ 'checked' if v.id in s.chosen_services }}>{{ v.name }} <span class="muted small">{{ v.minutes }} min</span></label>{% else %}<span class="muted">No services in Bookings yet.</span>{% endfor %}</div>
 <label style="margin-top:10px;display:flex;gap:8px;align-items:center;font-weight:400"><input type="checkbox" name="publish_stock" value="1" {{ 'checked' if s.publish_stock }}> Show how many are in stock (stocked items only)</label>
-<p class="muted small">Cost prices are never sent. Prices include GST, as at the till.</p></div>
+<p class="muted small">Cost prices are never sent. {% if tl.has_tax %}Prices include {{ tl.word }}, as at the till.{% else %}Prices are as at the till.{% endif %}</p></div>
 
 <div class="card"><h3>Free times for online bookings</h3>
 <div class="fields"><div><label for="timezone">Time zone</label><select id="timezone" name="timezone">{% for z in timezones %}<option {{ 'selected' if z == s.timezone }}>{{ z }}</option>{% endfor %}</select>{% if tz_fallback %}<div class="muted small" id="ol-tznote">This PC has no time-zone data, so standard time is used (no daylight saving). Update this program to get it.</div>{% endif %}</div>

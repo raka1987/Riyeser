@@ -11,7 +11,7 @@
 {% include "help/_pos_card.html" %}
 <div class="card"><h2 id="accounting">Riyeser POS and Riyeser Accounting</h2><ul>
 <li>POS and Accounting are separate apps that open the <b>same company file</b> (in your <b>.riyeser</b> folder). Install either, or both.</li>
-<li>Each till sale is saved as a paid tax invoice to the <b>Walk-in Customer</b> (or the customer you picked), so Accounting's reports, stock and GST include it straight away.</li>
+<li>Each till sale is saved as a paid tax invoice to the <b>Walk-in Customer</b> (or the customer you picked), so Accounting's reports, stock{{ ' and ' ~ tl.word if tl.has_tax }} include it straight away.</li>
 <li>Products, stock and customers are shared: change a price in either app and the other sees it.</li>
 <li>Managers see a <b>low on stock</b> note on the till when products reach their reorder level, and after a sale that takes one there. It never stops a sale. Tap it for the list; purchase orders are made in Riyeser Accounting.</li>
 <li>Bank accounts, bills, payroll and the reports live in Riyeser Accounting.</li></ul></div>

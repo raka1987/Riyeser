@@ -15,8 +15,8 @@
 <div><label>Pay frequency</label><select name="pay_frequency">{% for f in ['weekly','fortnightly','monthly'] %}<option {{ 'selected' if e and e.pay_frequency==f }}>{{ f }}</option>{% endfor %}</select></div>
 <div><label>Super guarantee %</label><input name="super_rate" value="{{ e.super_rate if e else 12 }}"></div>
 <div><label>Super fund</label><input name="super_fund" value="{{ e.super_fund or '' if e }}"></div>
-<div><label>BSB</label><input name="bank_bsb" value="{{ e.bank_bsb or '' if e }}"></div>
-<div><label>Account number</label><input name="bank_account" value="{{ e.bank_account or '' if e }}"></div>
+{% if bank_labels.branch or (e and e.bank_bsb) %}<div><label>{{ bank_labels.branch or 'Branch code' }}</label><input name="bank_bsb" value="{{ e.bank_bsb or '' if e }}"></div>{% endif %}
+<div><label>{{ bank_labels.account }}</label><input name="bank_account" value="{{ e.bank_account or '' if e }}"{% if bank_labels.account_hint %} placeholder="{{ bank_labels.account_hint }}"{% endif %}></div>
 <div><label>Default job</label>{{ job_select('job_id', jobs, e.job_id if e) }}</div>
 <label class="check"><input type="checkbox" name="tax_free_threshold" value="1" {{ 'checked' if not e or e.tax_free_threshold }}> Claims tax-free threshold</label>
 <label class="check"><input type="checkbox" name="active" value="1" {{ 'checked' if not e or e.active }}> Active</label>

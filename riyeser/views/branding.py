@@ -13,7 +13,7 @@ from . import guarded
 bp = Blueprint("branding", __name__, url_prefix="/setup/branding")
 
 TEXT = ("name", "legal_name", "abn", "address", "phone", "email", "website")
-PAY = ("bank_account_name", "bank_name", "bank_bsb", "bank_account_no", "payment_instructions")
+PAY = ("bank_account_name", "bank_name", "bank_bsb", "bank_account_no", "bank_swift", "bank_iban", "payment_instructions")
 FOOTER_HINTS = {"invoice": "e.g. Thank you for your business. Payment within 14 days, please.",
                 "quote": "e.g. This quote is valid for 30 days.", "credit": "", "statement": "",
                 "receipt": "e.g. Thank you! Returns within 14 days with your receipt.", "purchase": "",
@@ -50,7 +50,8 @@ def save():
     name = (f.get("name") or "").strip()
     if not name:
         raise ValueError("Enter your business name.")
-    vals = {k: (f.get(k) or "").strip()[:500] or None for k in TEXT + PAY}
+    # a bank field the country doesn't ask for isn't on the form: what's saved in it is kept (riyeser/countries.py)
+    vals = {k: (f.get(k) or "").strip()[:500] or None for k in TEXT + PAY if k in TEXT or k in f}
     vals["name"] = name[:200]
     email = vals["email"]
     if email and ("@" not in email or " " in email):

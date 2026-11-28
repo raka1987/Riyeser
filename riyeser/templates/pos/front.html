@@ -185,7 +185,7 @@ body{overflow:hidden;user-select:none}
         <button class="btn" id="nosale" hidden title="Open the cash drawer without a sale">No sale</button>
         <button class="btn danger" id="clear">Clear</button>
       </div>
-      <div class="gst"><span>Includes GST</span><span class="n" id="gst">$0.00</span></div>
+      <div class="gst"{% if not tl.has_tax %} style="display:none"{% endif %}><span>Includes {{ tl.word }}</span><span class="n" id="gst">$0.00</span></div>
       <div class="ttl"><span>Total</span><span class="n" id="total">$0.00</span></div>
       <button class="pay n" id="pay" disabled>Pay</button>
     </div>
@@ -211,7 +211,7 @@ body{overflow:hidden;user-select:none}
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><h2 style="margin:0;font-size:26px">Payment</h2><span class="badge g" id="payTag"></span></div>
     <div><div class="lbl">Amount due</div><div class="due n" id="due">$0.00</div></div>
     <div id="sumlines"></div>
-    <div class="gst"><span>Includes GST</span><span class="n" id="dueGst"></span></div>
+    <div class="gst"{% if not tl.has_tax %} style="display:none"{% endif %}><span>Includes {{ tl.word }}</span><span class="n" id="dueGst"></span></div>
     <div class="paid" id="paidList"></div>
     <div class="leftpay" id="leftBox" hidden><span>Left to pay</span><span class="n" id="leftAmt"></span></div>
   </div>

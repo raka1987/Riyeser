@@ -2,7 +2,7 @@
 <body><div class="doc-print">
 <p class="muted" style="border:1px solid #f8d9a8;background:#fff4e5;padding:6px 10px;border-radius:6px">{{ payroll_warning }}</p>
 {% import "_brand.html" as brand %}{{ brand.letterhead('Payslip', None, [('Period', s.period_start ~ ' – ' ~ s.period_end), ('Paid', s.pay_date)]) }}
-<p><b>{{ s.first_name }} {{ s.last_name }}</b><br><span class="muted">{{ s.pay_basis|title }} · {{ s.pay_frequency }}{% if s.bank_bsb %} · Paid to BSB {{ s.bank_bsb }} Acc {{ s.bank_account }}{% endif %}</span></p>
+<p><b>{{ s.first_name }} {{ s.last_name }}</b><br><span class="muted">{{ s.pay_basis|title }} · {{ s.pay_frequency }}{% if bank_labels.scheme == 'au' %}{% if s.bank_bsb %} · Paid to BSB {{ s.bank_bsb }} Acc {{ s.bank_account }}{% endif %}{% elif s.bank_bsb or s.bank_account %} · Paid to{% if s.bank_bsb %} {{ bank_labels.short_branch }} {{ s.bank_bsb }}{% endif %}{% if s.bank_account %} {{ bank_labels.short_account }} {{ s.bank_account }}{% endif %}{% endif %}</span></p>
 <table><tr><th></th><th class="n">This pay</th><th class="n">Year to date</th></tr>
 <tr><td>Hours</td><td class="n">{{ s.hours }}</td><td></td></tr>
 <tr><td>Gross earnings</td><td class="n">{{ s.gross|money }}</td><td class="n">{{ ytd.g|money }}</td></tr>

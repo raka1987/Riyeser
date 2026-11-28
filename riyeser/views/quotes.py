@@ -13,6 +13,7 @@ from datetime import date, datetime, timedelta
 from flask import request, redirect, url_for, flash, g, abort
 
 from ..db import get_db, audit, fmt_money
+from ..countries import labels
 from ..ledger import PostingError
 from .. import perms
 from . import guarded
@@ -178,7 +179,8 @@ def make_job(db, doc_id):
     notes = [f"From quote {doc['number']}" + (f", accepted by {doc['accepted_name']}" if doc["accepted_name"] else "")
              + (f", option {picked['name']}" if picked else "") + ":"]
     notes += [f"- {l['qty']:g} x {l['description'] or ''}" for l in lines]
-    notes.append(f"Quoted total {fmt_money(doc['total'])} including GST.")
+    tl = labels(g.company or {})
+    notes.append(f"Quoted total {fmt_money(doc['total'])}{' ' + tl['incl'] if tl['has_tax'] else ''}.")
     if doc["notes"]:
         notes += ["", doc["notes"]]
     invoice = None

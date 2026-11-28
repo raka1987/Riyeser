@@ -12,6 +12,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 from .. import perms
 from ..db import get_db, audit, to_cents, fmt_money, linked, round_cents
 from ..ledger import save_document, bank_transaction, PostingError
+from ..countries import labels, request_money
 from . import guarded, once, opt_int
 
 bp = Blueprint("expenses", __name__, url_prefix="/expenses")
@@ -83,7 +84,7 @@ def index():
     from ..listing import ListSpec, Col, from_request
     lst = from_request(ListSpec(f"expenses:{show}", [
         Col("date", "Date", "date"), Col("claimant", "Who"), Col("supplier", "Supplier"), Col("aname", "What for"),
-        Col("status", "Status"), Col("gst", "GST", "num"), Col("amount", "Amount", "num")],
+        Col("status", "Status"), Col("gst", labels(g.company or {})["tax"], "num"), Col("amount", "Amount", "num")],
         sort="date", dir="desc", date_col="date", search=("supplier", "aname", "note", "claimant"),
         search_hint="Supplier, what for or note", noun="claims"), keep=dict(show=show, who=who))
     rows = lst.fetch(db, "SELECT x.*, a.name aname, (SELECT 1 FROM expense_receipts r WHERE r.claim_id=x.id) has_receipt"
@@ -103,6 +104,7 @@ def new():
     co = db.execute("SELECT gst_registered FROM company WHERE id=1").fetchone()
     return render_template("expenses/new.html", accounts=expense_accounts(db), default_account=linked(db, "default_expense"),
                            manager=is_manager(), me=me(), gst=bool(co["gst_registered"]),
+                           rate=(_gst_rate(db) or {"rate": 10.0})["rate"],
                            people=[r[0] for r in db.execute("SELECT DISTINCT claimant FROM expense_claims ORDER BY claimant")]
                            if is_manager() else [])
 
@@ -124,16 +126,18 @@ def _save():
         raise ValueError("Enter the date you paid, like 2026-11-24.")
     amount = to_cents(f.get("amount"))
     if amount <= 0:
-        raise ValueError("Enter how much you paid, including GST.")
+        tl = labels(g.company or {})
+        raise ValueError(f"Enter how much you paid{', ' + tl['incl'] if tl['has_tax'] else ''}.")
     co = db.execute("SELECT gst_registered FROM company WHERE id=1").fetchone()
     gst = to_cents(f.get("gst")) if co["gst_registered"] else 0
     if gst < 0:
-        raise ValueError("GST can't be below $0.")
+        raise ValueError(f"{labels(g.company or {})['tax']} can't be below {request_money(0).replace('.00', '')}.")
     tc = _gst_rate(db)
     rate = tc["rate"] if tc else 10.0
     if gst and gst > round_cents(amount * rate / (100 + rate)) + 1:
-        raise ValueError(f"The GST can't be more than {fmt_money(round_cents(amount * rate / (100 + rate)))} "
-                         f"on {fmt_money(amount)}. Check the receipt.")
+        most = round_cents(amount * rate / (100 + rate))
+        raise ValueError(f"The {labels(g.company or {})['word']} can't be more than {request_money(most)} "
+                         f"on {request_money(amount)}. Check the receipt.")
     acct = opt_int(f.get("account_id"))
     if not acct or acct not in {a["id"] for a in expense_accounts(db)}:
         raise ValueError("Choose what it was for (the category).")

@@ -41,9 +41,9 @@ table.t td.r,table.t th.r{text-align:right}table.t tr.void td{color:#94a3b8}tabl
     <form method="get"><input type="date" name="date" value="{{ day }}" aria-label="Day"><button class="btn sm">Show</button>
       <button type="button" class="btn sm" onclick="print()">Print summary</button><a class="btn sm" href="{{ url_for('pos.sales_history') }}">All sales</a><a class="btn sm" href="{{ url_for('help.index') }}#pos">Help</a></form></div>
   <div class="k4">
-    <div class="card kpi"><span class="bx"><svg class="ic" viewBox="0 0 24 24"><path d="M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></span><div><div class="lbl">Sales inc {{ tl.tax }}</div><div class="v n">{{ total|money }}</div><div class="nt">After refunds; voided sales left out</div></div></div>
+    <div class="card kpi"><span class="bx"><svg class="ic" viewBox="0 0 24 24"><path d="M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></span><div><div class="lbl">Sales{{ ' ' ~ tl.inc if tl.has_tax }}</div><div class="v n">{{ total|money }}</div><div class="nt">After refunds; voided sales left out</div></div></div>
     <div class="card kpi"><span class="bx" style="background:#eaf1ff;color:#2563eb"><svg class="ic" viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z"/><path d="M9 8h6M9 12h6"/></svg></span><div><div class="lbl">Sales</div><div class="v n">{{ count }}</div><div class="nt">{% if count %}Average {{ (total // count)|money }}{% else %}None yet{% endif %}</div></div></div>
-    <div class="card kpi"><span class="bx" style="background:var(--warn-bg);color:var(--warn)"><svg class="ic" viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h5"/></svg></span><div><div class="lbl">{{ tl.tax }} collected</div><div class="v n">{{ gst|money }}</div><div class="nt">Goes to your BAS</div></div></div>
+    {% if tl.has_tax %}<div class="card kpi"><span class="bx" style="background:var(--warn-bg);color:var(--warn)"><svg class="ic" viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h5"/></svg></span><div><div class="lbl">{{ tl.tax }} collected</div><div class="v n">{{ gst|money }}</div><div class="nt">Goes to your {{ 'BAS' if tl.bas else tl.word ~ ' return' }}</div></div></div>{% endif %}
     {% if mode == 'restaurant' %}<div class="card kpi"><span class="bx" style="background:#f3e8ff;color:#7c3aed"><svg class="ic" viewBox="0 0 24 24"><path d="M3 9h18M5 9v11M19 9v11M7 5h10l2 4H5l2-4Z"/></svg></span><div><div class="lbl">Open orders</div><div class="v n">{{ open_orders }}</div><div class="nt">Not paid yet</div></div></div>
     {% else %}<div class="card kpi"><span class="bx" style="background:#f3e8ff;color:#7c3aed"><svg class="ic" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/></svg></span><div><div class="lbl">Cash in drawer</div><div class="v n">{{ cash|money }}</div><div class="nt">Cash sales, after change</div></div></div>{% endif %}
   </div>
@@ -72,14 +72,14 @@ table.t td.r,table.t th.r{text-align:right}table.t tr.void td{color:#94a3b8}tabl
       <div class="pm"><div><span><i style="background:var(--green)"></i>{{ methods.card }}</span><b class="n">{{ card|money }}</b></div>
         <div><span><i style="background:var(--mint)"></i>{{ methods.cash }}</span><b class="n">{{ cash|money }}</b></div>
         <div><span>Change given (already taken off)</span><span class="n">{{ cash_out|money }}</span></div>
-        <div><span>GST included</span><span class="n">{{ gst|money }}</span></div></div></div>
+        {% if tl.has_tax %}<div><span>{{ tl.tax }} included</span><span class="n">{{ gst|money }}</span></div>{% endif %}</div></div>
   </div>
 </div>
 {% endblock %}
 {% block scripts %}
 {% include "pos/_terminal.html" %}
 <div class="modal" id="mRefund"><div class="box"><h2><span id="rfTitle">Refund</span><button class="x" data-rclose>&times;</button></h2>
-  <p style="margin:-6px 0 10px;color:var(--muted)">Choose what the customer is bringing back. Stock goes back and GST comes off.</p>
+  <p style="margin:-6px 0 10px;color:var(--muted)">Choose what the customer is bringing back. Stock goes back{{ ' and ' ~ tl.word ~ ' comes off' if tl.has_tax }}.</p>
   <div id="rfLines"></div>
   <div class="lbl" style="margin:14px 0 8px">Pay back by</div>
   <div class="seg" id="rfMethod">{% for k, v in methods.items() %}<button data-m="{{ k }}">{{ v }}</button>{% endfor %}</div>

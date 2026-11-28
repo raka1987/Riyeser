@@ -60,7 +60,7 @@
 {% if items %}<div class="wide"><label>From stock</label><select name="item_id"><option value="">Choose a stock item…</option>{% for i in items %}<option value="{{ i.id }}">{{ i.name }}{% if i.sell_price %} · {{ i.sell_price|money }}{% endif %}</option>{% endfor %}</select></div>{% endif %}
 <div class="wide"><label>{{ '…or type a part that isn\'t in stock' if items else 'Part or material' }}</label><input name="description" placeholder="e.g. 20 mm elbow"></div>
 <div><label>How many</label><input name="qty" value="1" inputmode="decimal"></div>
-<div><label>Price each <small>(inc GST, optional)</small></label><input name="unit_price" inputmode="decimal" placeholder="{{ 'stock price' if items else '0.00' }}"></div>
+<div><label>Price each <small>({{ tl.inc ~ ', ' if tl.has_tax }}optional)</small></label><input name="unit_price" inputmode="decimal" placeholder="{{ 'stock price' if items else '0.00' }}"></div>
 <div class="wide"><button class="btn pri">Add part</button></div></form>
 <p class="muted small">Stock items use their price. Leave the price empty on a one-off part and the office adds it before invoicing.</p>{% endif %}
 </div>
@@ -115,7 +115,7 @@
 {% elif j.contact_id and can('sales', 2) %}
 <p class="muted small">{% if j.billing == 'time' %}Time on site at {{ 'the labour rate' if sm.labour|length <= 1 else 'each rate' }}{% if sm.labour|length == 1 and sm.rate %} ({{ sm.rate|money }} an hour){% endif %}, plus parts.{% else %}Fixed price: the agreed price only. Change "How it's charged" on the job to charge time and parts.{% endif %} All visits on the job go on one invoice.</p>
 <div class="tbl"><table class="bk-cmp">{% for l in lines %}<tr><td>{{ l.description }}</td><td class="n">{{ '%g' % l.qty }}</td><td class="n">{{ l.amount|money }}</td></tr>{% else %}<tr><td class="muted">Nothing to charge yet.</td></tr>{% endfor %}
-<tr class="tot"><td>Total (including GST)</td><td></td><td class="n">{{ sm.total|money }}</td></tr></table></div>
+<tr class="tot"><td>Total{% if tl.has_tax %} ({{ tl.incl }}){% endif %}</td><td></td><td class="n">{{ sm.total|money }}</td></tr></table></div>
 <form method="post" action="{{ url_for('bookings.invoice_job', jid=j.id) }}"><p><button class="btn pri">Invoice this job</button></p></form>
 {% elif not j.contact_id %}<p class="muted small">Choose the customer on the <a href="{{ url_for('bookings.job', jid=j.id) }}">job</a> to invoice it.</p>
 {% else %}<p class="muted small">The office invoices this job.</p>{% endif %}
