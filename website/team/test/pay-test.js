@@ -122,7 +122,7 @@ const noScroll = async (pg) => { const r = await pg.evaluate(() => [document.doc
   const rows = await web.$$eval('tr[data-row]', (rs) => rs.map((r) => [r.dataset.row, [...r.querySelectorAll('.buybtns a')].map((a) => [a.textContent, a.getAttribute('href')])]));
   // Riyeser Estimate (US$20 a month after its 90 days) has Start free + Buy now like every other paid program
   check(rows.some(([m, l]) => m === 'estimate' && l.length === 2), 'Riyeser Estimate: Start free + Buy now');
-  check(rows.length >= 6 && rows.filter(([m]) => m !== 'link-office').every(([m, l]) => l.length === 2 && l[0][0] === 'Start free for 90 days' && l[0][1] === `/link/?signup&add=${m}` && l[1][0] === 'Buy now' && l[1][1] === `/link/?signup&add=${m}&buy=1`),
+  check(rows.length >= 6 && rows.filter(([m]) => m !== 'link-office').every(([m, l]) => l.length === 2 && l[0][0] === 'Start free for 90 days' && l[0][1] === `/link/?signup&add=${m}` && l[1][0] === 'Buy now' && l[1][1] === `/link/?signup&add=${m}&buy=now`),
     `pricing rows: Start free + Buy now on every paid program (${rows.map((r) => r[0]).join(', ')})`);
   const eds = await web.$$eval('#accounting .plan .buybtns', (x) => x.map((d) => d.dataset.buy));
   check(eds.join() === 'basic,plus', `pricing checklists: Basics and Plus cards have the buttons (${eds})`);
@@ -142,7 +142,7 @@ const noScroll = async (pg) => { const r = await pg.evaluate(() => [document.doc
   for (const [pagePath, m] of [['programs/pos.html', 'pos'], ['programs/accounting.html', 'plus'], ['programs/link.html', 'calls'], ['programs/payroll.html', 'payroll']]) {
     await web.goto(`${BASE}/${pagePath}`);
     const l = await web.$$eval(`.buybtns[data-buy="${m}"] a`, (as) => as.map((a) => a.getAttribute('href')));
-    check(l.length >= 2 && l.includes(`/link/?signup&add=${m}&buy=1`) && l.includes(`/link/?signup&add=${m}`), `${pagePath}: price box buttons for ${m}`);
+    check(l.length >= 2 && l.includes(`/link/?signup&add=${m}&buy=now`) && l.includes(`/link/?signup&add=${m}`), `${pagePath}: price box buttons for ${m}`);
   }
   await web.goto(`${BASE}/programs/pos.html`); await shot(web, 'program-price-box.png', '.hero');
 
@@ -152,9 +152,13 @@ const noScroll = async (pg) => { const r = await pg.evaluate(() => [document.doc
   await pg.waitForSelector('#gf'); check((await pg.textContent('#gf h1')).includes('Create your Riyeser account'), 'Buy now -> Create your Riyeser account');
   await pg.fill('input[name=you]', 'Alex Sample'); await pg.fill('input[name=email]', user.email); await pg.fill('input[name=password]', 'a-good-password'); await pg.fill('input[name=password2]', 'a-good-password');
   await pg.click('button[type=submit]'); await pg.waitForSelector('#gf .ok');
-  check(st.signup && st.signup.redirectTo === `${BASE}/link/?signup&add=calls&buy=1`, `the confirmation email comes back with the program (${st.signup && st.signup.redirectTo})`);
+  check(st.signup && st.signup.redirectTo === `${BASE}/link/?signup&add=calls&buy=now`, `the confirmation email comes back with the program (${st.signup && st.signup.redirectTo})`);
   await signIn(pg); await pg.waitForSelector('#apf');
   check(await pg.isChecked('#apf input[value=calls]') && !(await pg.isChecked('#apf input[value=plus]')), 'after sign-in: Add to my plan, Riyeser Link ticked');
+  // PAYPAL-LIVE: riyeser.com's Buy now ticks "Buy now: start my paid plan today"; this walk-through then chooses the trial-end start
+  await pg.waitForSelector('#apstart:not([hidden])');
+  check(await pg.isChecked('#apstart input[value=now]'), 'Buy now from riyeser.com: "Buy now: start my paid plan today" ticked');
+  await pg.check('#apstart input[value=later]'); await pg.waitForTimeout(150);
   check(!(await pg.evaluate(() => location.search)).includes('add='), 'the address is tidied');
   // ---- 3. the total
   const total = () => pg.textContent('#aptotal');

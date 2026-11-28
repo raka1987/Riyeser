@@ -5126,5 +5126,230 @@ reset role;
 do $$ begin
   assert (select count(*) from public.hq_audit where action = 'account.kind') = 2, 'each change of kind is in the HQ history once';
 end $$;
+-- ================================================================ PAYPAL-LIVE: practice (sandbox) payments once PayPal is live, Buy now
+-- Practice Co (Pita, owner) paid by PayPal's practice site (sandbox) before PayPal went live, and paid POS by bank transfer.
+-- Then PayPal goes live: the practice subscription must not block a real one, never links to PayPal's practice site, can be
+-- removed on Riyeser's side only, and only the HQ Owner clears the practice paid time (audited, reversible, live untouched).
+-- Buy Now Co (Bree) buys now: charged today, the trial ends when PayPal confirms the first payment.
+reset role;
+insert into auth.users (id, email) values ('d1d1d1d1-0000-4000-8000-000000000001', 'pita@practice.test'), ('d1d1d1d1-0000-4000-8000-000000000002', 'bree@buynow.test');
+do $$ declare a uuid; b uuid; begin
+  insert into public.workspaces (name) values ('Practice Co') returning id into a;
+  insert into public.workspaces (name) values ('Buy Now Co') returning id into b;
+  insert into public.members (workspace_id, user_id, display_name, role) values (a, 'd1d1d1d1-0000-4000-8000-000000000001', 'Pita', 'owner'),
+    (b, 'd1d1d1d1-0000-4000-8000-000000000002', 'Bree', 'owner');
+  perform set_config('pl.a', a::text, false), set_config('pl.b', b::text, false), set_config('pl.te', (current_date + 90)::text, false);
+  insert into public.hq_settings (key, value) values ('paypal.env', 'sandbox') on conflict (key) do update set value = excluded.value;
+end $$;
+set role authenticated;
+select pg_temp.as_user('d1d1d1d1-0000-4000-8000-000000000001');
+do $$ declare a uuid := current_setting('pl.a')::uuid; o json; begin
+  o := public.billing_start(a, array['pos'], 3, 'monthly', 'bank');
+  perform set_config('pl.bank', o ->> 'ref', false), set_config('pl.banktotal', o ->> 'total', false);
+  o := public.billing_start(a, array['basic', 'payroll'], 3, 'monthly', 'paypal');
+  perform set_config('pl.op', o ->> 'id', false), set_config('pl.opref', o ->> 'ref', false), set_config('pl.optotal', o ->> 'total', false);
+end $$;
+reset role; set role service_role;
+select public.billing_paypal_created(current_setting('pl.op')::uuid, 'I-PRACTICE00001', 'sandbox');
+select public.billing_paypal_event('PL-1', 'BILLING.SUBSCRIPTION.ACTIVATED', '{"id": "I-PRACTICE00001", "status": "ACTIVE"}', 'sandbox');
+select public.billing_paypal_event('PL-2', 'PAYMENT.SALE.COMPLETED', json_build_object('id', 'SALE-PRAC-1', 'billing_agreement_id', 'I-PRACTICE00001',
+  'amount', json_build_object('total', current_setting('pl.optotal'), 'currency', 'USD'))::jsonb, 'sandbox');
+reset role;
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999'); set role authenticated;
+select public.hq_billing_mark_paid(current_setting('pl.bank'), 'PRACTICE CO BANK 1', current_setting('pl.banktotal')::numeric);
+reset role;
+do $$ declare a uuid := current_setting('pl.a')::uuid; te date := current_setting('pl.te')::date; begin
+  assert (select paid_until from public.company_modules where workspace_id = a and module = 'basic') = (te + interval '1 month')::date, 'practice payment: basic paid from the trial end';
+  assert (select trial_ends_before ->> 'basic' from public.billing_orders where id = current_setting('pl.op')::uuid) = te::text, 'PAYPAL-LIVE the trial end before paying is kept';
+  assert (select status from public.company_modules where workspace_id = a and module = 'pos') = 'active', 'POS paid by bank';
+end $$;
+-- still practice mode: the practice subscription is the subscription (and blocks a second one), with the practice site's link
+set role authenticated; select pg_temp.as_user('d1d1d1d1-0000-4000-8000-000000000001');
+do $$ declare a uuid := current_setting('pl.a')::uuid; b json := public.my_billing(a); begin
+  assert b -> 'subscription' ->> 'ref' = current_setting('pl.opref') and b ->> 'practice_subscription' is null, 'sandbox: the practice subscription is the subscription';
+  assert b ->> 'paypal_manage_url' like 'https://www.sandbox.paypal.com/%', 'sandbox: the practice site';
+  begin perform public.billing_start(a, array['bookings'], 3, 'monthly', 'paypal'); raise exception 'two in sandbox';
+  exception when others then assert sqlerrm like 'You already pay by PayPal%', sqlerrm; end;
+end $$;
+-- PayPal goes live: the paypal function tells the database (service role only)
+do $$ begin
+  begin perform public.billing_paypal_env_now('live'); raise exception 'a signed-in person set the PayPal env';
+  exception when insufficient_privilege then null; end;
+end $$;
+reset role; set role service_role;
+do $$ begin
+  begin perform public.billing_paypal_env_now('pretend'); raise exception 'bad env taken'; exception when others then assert sqlerrm = 'bad env', sqlerrm; end;
+end $$;
+select public.billing_paypal_env_now('live');
+reset role;
+do $$ declare a uuid := current_setting('pl.a')::uuid; begin
+  assert public.billing_paypal_live(), 'PAYPAL-LIVE the database knows PayPal is live';
+  perform set_config('pl.live_before', (select md5(string_agg(o::text, '|' order by o.id)) from public.billing_orders o where o.workspace_id = a and o.paypal_env is distinct from 'sandbox'), false);
+end $$;
+set role authenticated; select pg_temp.as_user('d1d1d1d1-0000-4000-8000-000000000001');
+do $$ declare a uuid := current_setting('pl.a')::uuid; b json := public.my_billing(a); q json; o json; o2 json; te date := current_setting('pl.te')::date; c json; begin
+  assert b ->> 'subscription' is null, 'PAYPAL-LIVE a practice subscription is not "you already pay by PayPal" once live: ' || coalesce(b ->> 'subscription', 'null');
+  assert b -> 'practice_subscription' ->> 'ref' = current_setting('pl.opref') and (b -> 'practice_subscription' ->> 'practice')::boolean, 'PAYPAL-LIVE it comes as the practice subscription';
+  assert b ->> 'paypal_manage_url' not like '%sandbox%' and b::text not like '%sandbox.paypal.com%', 'PAYPAL-LIVE never a link to PayPal''s practice site once live';
+  assert b ->> 'paypal_env' = 'live', 'the env';
+  assert (select count(*) from json_array_elements_text(b -> 'practice_modules') x where x in ('basic', 'payroll')) = 2
+     and not exists (select 1 from json_array_elements_text(b -> 'practice_modules') x where x = 'pos'), 'PAYPAL-LIVE practice-only programs listed (not the bank-paid POS)';
+  assert (select bool_and((x ->> 'practice')::boolean) from json_array_elements(b -> 'payments') x where x ->> 'method' = 'paypal')
+     and (select bool_and(not (x ->> 'practice')::boolean) from json_array_elements(b -> 'payments') x where x ->> 'method' = 'bank'), 'PAYPAL-LIVE practice payments labelled in the history';
+  -- quotes: the practice paid time doesn't delay a real first charge (option A, for paying), the bank-paid POS still does
+  q := public.billing_quote(a, array['basic'], 3, 'monthly');
+  assert (q ->> 'charge_from')::date = te and not (q ->> 'charged_today')::boolean, 'PAYPAL-LIVE real first charge at the trial end, not after the practice paid time: ' || q::text;
+  q := public.billing_quote(a, array['pos'], 3, 'monthly');
+  assert (q ->> 'charge_from')::date = (b -> 'licence' -> 'modules' -> 'pos' ->> 'paid_until')::date, 'bank-paid time still counts';
+  -- the owner's own small real test: subscribe to one program (default: the first payment when its trial ends)
+  o := public.billing_start(a, array['bookings'], 3, 'monthly', 'paypal');
+  o2 := public.billing_start(a, array['bookings'], 3, 'monthly', 'paypal');   -- a double click: the same order (one PayPal subscription)
+  assert o ->> 'id' = o2 ->> 'id', 'PAYPAL-LIVE a double click gives one order';
+  assert (o ->> 'starts_on')::date = te and not (o ->> 'buy_now')::boolean, 'PAYPAL-LIVE default: the first payment waits for the trial end';
+  perform set_config('pl.ol', o ->> 'id', false), set_config('pl.olref', o ->> 'ref', false), set_config('pl.oltotal', o ->> 'total', false);
+  c := public.billing_cancel_start(a);
+  assert c ->> 'env' = 'sandbox' and (c ->> 'practice')::boolean, 'only the practice one to cancel yet: the function is told it''s practice';
+end $$;
+reset role; set role service_role;
+select public.billing_paypal_created(current_setting('pl.ol')::uuid, 'I-LIVEPAYCO0001', 'live');
+select public.billing_paypal_created(current_setting('pl.ol')::uuid, 'I-LIVEPAYCO0001', 'live');   -- the double click's second call: fine
+select public.billing_paypal_event('PL-3', 'BILLING.SUBSCRIPTION.ACTIVATED', '{"id": "I-LIVEPAYCO0001", "status": "ACTIVE"}', 'live');
+reset role;
+set role authenticated; select pg_temp.as_user('d1d1d1d1-0000-4000-8000-000000000001');
+do $$ declare a uuid := current_setting('pl.a')::uuid; b json := public.my_billing(a); c json; begin
+  assert b -> 'subscription' ->> 'ref' = current_setting('pl.olref') and b -> 'subscription' ->> 'status' = 'active', 'the real subscription is the subscription';
+  assert b ->> 'paypal_manage_url' = 'https://www.paypal.com/myaccount/autopay/', 'the real PayPal';
+  c := public.billing_cancel_start(a);
+  assert c ->> 'env' = 'live' and c ->> 'subscription_id' = 'I-LIVEPAYCO0001', 'cancel picks the real one first';
+  -- removing the practice subscription: Riyeser's side only (no PayPal call: this isn't the paypal function)
+  begin perform public.billing_practice_cancel(current_setting('pl.b')::uuid); raise exception 'removed another business''s';
+  exception when others then assert sqlerrm like 'Only the business owner%', sqlerrm; end;
+  perform public.billing_practice_cancel(a);
+  assert (select x ->> 'status' from json_array_elements(public.my_billing(a) -> 'orders') x where x ->> 'id' = current_setting('pl.op')) = 'cancelled', 'PAYPAL-LIVE practice subscription removed';
+  assert (select x ->> 'status' from json_array_elements(public.my_billing(a) -> 'orders') x where x ->> 'id' = current_setting('pl.ol')) = 'active', 'the live one untouched';
+  assert public.my_billing(a) ->> 'practice_subscription' is null, 'gone from billing';
+  begin perform public.billing_practice_cancel(a); raise exception 'removed twice';
+  exception when others then assert sqlerrm like 'There''s no practice subscription%', sqlerrm; end;
+end $$;
+select pg_temp.as_user_password_only('d1d1d1d1-0000-4000-8000-000000000001');
+do $$ begin begin perform public.billing_practice_cancel(current_setting('pl.a')::uuid); raise exception 'no two-step';
+  exception when others then assert sqlerrm like 'Turn on two-step sign-in%', sqlerrm; end; end $$;
+reset role;
+do $$ declare a uuid := current_setting('pl.a')::uuid; begin
+  perform set_config('pl.live_before', (select md5(string_agg(o::text, '|' order by o.id)) from public.billing_orders o where o.workspace_id = a and o.paypal_env is distinct from 'sandbox'), false);
+  perform set_config('pl.pos_before', (select row(c.*)::text from public.company_modules c where c.workspace_id = a and c.module = 'pos'), false);
+  perform set_config('pl.basic_before', (select row(c.*)::text from public.company_modules c where c.workspace_id = a and c.module = 'basic'), false);
+end $$;
+-- HQ: practice businesses listed for the Owner; only the HQ Owner clears (Finance, Sales, the Owner without two-step: no)
+set role authenticated; select pg_temp.as_user('99999999-9999-9999-9999-999999999999');
+do $$ declare h json := public.hq_billing(); n json := public.hq_attention(); c json := public.hq_company_billing(current_setting('pl.a')::uuid); begin
+  assert exists (select 1 from json_array_elements(h -> 'practice_businesses') x where x ->> 'business' = 'Practice Co'), 'PAYPAL-LIVE HQ lists businesses with practice payments';
+  assert (h ->> 'can_clear_practice')::boolean and (c -> 'practice' ->> 'can_clear')::boolean and json_array_length(c -> 'practice' -> 'orders') = 1, 'the Owner can clear';
+  assert (n ->> 'practice_to_clear')::int >= 1 and n ->> 'bank_missing' = 'false', 'Needs attention: practice payments to clear; bank details are in: ' || n::text;
+end $$;
+select pg_temp.as_user('b1b1b1b1-0000-4000-8000-000000000005');   -- Fina (finance)
+do $$ declare n json := public.hq_attention(); begin
+  begin perform public.hq_billing_clear_practice(current_setting('pl.a')::uuid); raise exception 'finance cleared';
+  exception when others then assert sqlerrm like 'Your HQ role can''t do that.%', sqlerrm; end;
+  begin perform public.hq_billing_restore_practice(current_setting('pl.a')::uuid); raise exception 'finance restored';
+  exception when others then assert sqlerrm like 'Your HQ role can''t do that.%', sqlerrm; end;
+  assert n ->> 'bank_missing' is null and n ->> 'practice_to_clear' is null and not (public.hq_billing() ->> 'can_clear_practice')::boolean, 'not the Owner: no such items';
+end $$;
+select pg_temp.as_user_password_only('99999999-9999-9999-9999-999999999999');
+do $$ begin begin perform public.hq_billing_clear_practice(current_setting('pl.a')::uuid); raise exception 'owner without two-step';
+  exception when others then assert sqlerrm like 'Riyeser HQ is for%', sqlerrm; end; end $$;
+select pg_temp.as_user('d1d1d1d1-0000-4000-8000-000000000001');   -- the business owner isn't HQ
+do $$ begin begin perform public.hq_billing_clear_practice(current_setting('pl.a')::uuid); raise exception 'customer cleared';
+  exception when others then assert sqlerrm like 'Riyeser HQ is for%', sqlerrm; end; end $$;
+reset role;
+do $$ begin assert not exists (select 1 from public.hq_audit where action = 'billing.practice_cleared'), 'nothing cleared by the refusals'; end $$;
+-- the Owner clears: practice orders void (test), practice-paid programs back to their free trial, live and bank untouched
+set role authenticated; select pg_temp.as_user('99999999-9999-9999-9999-999999999999');
+do $$ declare a uuid := current_setting('pl.a')::uuid; r json; te date := current_setting('pl.te')::date; begin
+  r := public.hq_billing_clear_practice(a);
+  assert (r -> 'orders' ->> 0) = current_setting('pl.opref'), 'cleared the practice order: ' || r::text;
+  assert r -> 'licence' -> 'basic' ->> 'status' = 'trial' and (r -> 'licence' -> 'basic' ->> 'trial_ends')::date = te, 'PAYPAL-LIVE basic back on its free trial to ' || te;
+  assert r -> 'licence' -> 'payroll' ->> 'status' = 'trial', 'payroll too';
+  begin perform public.hq_billing_clear_practice(a); raise exception 'cleared twice';
+  exception when others then assert sqlerrm like 'This business has no practice%', sqlerrm; end;
+end $$;
+reset role;
+do $$ declare a uuid := current_setting('pl.a')::uuid; begin
+  assert (select status from public.billing_orders where id = current_setting('pl.op')::uuid) = 'void'
+     and (select practice_status_before from public.billing_orders where id = current_setting('pl.op')::uuid) = 'cancelled', 'PAYPAL-LIVE practice order void (test), its status kept';
+  assert (select md5(string_agg(o::text, '|' order by o.id)) from public.billing_orders o where o.workspace_id = a and o.paypal_env is distinct from 'sandbox') = current_setting('pl.live_before'),
+    'PAYPAL-LIVE live and bank orders untouched';
+  assert (select row(c.*)::text from public.company_modules c where c.workspace_id = a and c.module = 'pos') = current_setting('pl.pos_before'), 'bank-paid POS untouched';
+  assert (select count(*) from public.billing_payments where workspace_id = a) = 2, 'payments kept (never deleted)';
+  assert exists (select 1 from public.hq_audit where action = 'billing.practice_cleared' and workspace_id = a and actor = '99999999-9999-9999-9999-999999999999'
+     and details -> 'orders' ->> 0 = current_setting('pl.opref') and details -> 'before' -> 'basic' ->> 'status' = 'cancelled' and details -> 'before' -> 'basic' ->> 'paid_until' is not null and details -> 'after' -> 'basic' ->> 'status' = 'trial'),
+    'PAYPAL-LIVE in the HQ history: who, which orders, before and after: ' || (select string_agg(actor::text || ' ' || details::text, ' / ') from public.hq_audit where action = 'billing.practice_cleared');
+end $$;
+set role authenticated; select pg_temp.as_user('d1d1d1d1-0000-4000-8000-000000000001');
+do $$ declare b json := public.my_billing(current_setting('pl.a')::uuid); begin
+  assert json_array_length(b -> 'practice_modules') = 0 and b -> 'licence' -> 'modules' -> 'basic' ->> 'status' = 'trial', 'the owner sees the trial again';
+  assert exists (select 1 from json_array_elements(b -> 'orders') x where x ->> 'ref' = current_setting('pl.opref') and (x ->> 'practice')::boolean and x ->> 'practice_cleared_at' is not null),
+    'the cleared practice order still shows, as practice';
+end $$;
+-- the Owner can put it back exactly; and once a real payment has come in since, can't
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999');
+select public.hq_billing_restore_practice(current_setting('pl.a')::uuid);
+reset role;
+do $$ declare a uuid := current_setting('pl.a')::uuid; begin
+  assert (select (c.status, c.paid_until, c.trial_ends)::text from public.company_modules c where c.workspace_id = a and c.module = 'basic')
+     = (select (c.status, c.paid_until, c.trial_ends)::text from (select (current_setting('pl.basic_before')::public.company_modules).*) c), 'PAYPAL-LIVE put back exactly: basic as it was';
+  assert (select status from public.billing_orders where id = current_setting('pl.op')::uuid) = 'cancelled' and exists (select 1 from public.hq_audit where action = 'billing.practice_restored' and workspace_id = a), 'order back, in the history';
+end $$;
+set role authenticated; select pg_temp.as_user('99999999-9999-9999-9999-999999999999');
+select public.hq_billing_clear_practice(current_setting('pl.a')::uuid);
+reset role; set role service_role;
+select public.billing_paypal_event('PL-4', 'PAYMENT.SALE.COMPLETED', json_build_object('id', 'SALE-LIVE-1', 'billing_agreement_id', 'I-LIVEPAYCO0001',
+  'amount', json_build_object('total', current_setting('pl.oltotal'), 'currency', 'USD'))::jsonb, 'live');
+reset role;
+set role authenticated; select pg_temp.as_user('99999999-9999-9999-9999-999999999999');
+do $$ begin begin perform public.hq_billing_restore_practice(current_setting('pl.a')::uuid); raise exception 'restored over a real payment';
+  exception when others then assert sqlerrm like 'A real payment came in after%', sqlerrm; end; end $$;
+reset role;
+do $$ declare a uuid := current_setting('pl.a')::uuid; te date := current_setting('pl.te')::date; begin
+  assert (select paid_until from public.company_modules where workspace_id = a and module = 'bookings') = (te + interval '1 month')::date, 'the real payment: bookings from its trial end';
+  assert (select status from public.company_modules where workspace_id = a and module = 'basic') = 'trial', 'basic stays on its trial';
+end $$;
+-- Buy now (Buy Now Co): charged today; the trial ends only when PayPal confirms the first payment; the default still waits
+set role authenticated; select pg_temp.as_user('d1d1d1d1-0000-4000-8000-000000000002');
+do $$ declare b uuid := current_setting('pl.b')::uuid; q json; o json; begin
+  q := public.billing_quote(b, array['plus'], 3, 'monthly');
+  assert not (q ->> 'charged_today')::boolean and (q ->> 'charge_from')::date = current_setting('pl.te')::date, 'default: first payment when the trial ends';
+  q := public.billing_quote(b, array['plus'], 3, 'monthly', null, 1, true);
+  assert (q ->> 'charged_today')::boolean and (q ->> 'charge_from')::date = current_date and (q ->> 'buy_now')::boolean and (q ->> 'trial_days_left')::int = 90,
+    'PAYPAL-LIVE buy now: charged today, 90 free days end today: ' || q::text;
+  o := public.billing_start(b, array['plus'], 3, 'monthly', 'paypal', null, 1, true);
+  assert (o ->> 'starts_on')::date = current_date and (o ->> 'buy_now')::boolean, 'PAYPAL-LIVE buy now order starts today (the function sends no later start_time)';
+  perform set_config('pl.bn', o ->> 'id', false), set_config('pl.bntotal', o ->> 'total', false);
+end $$;
+reset role; set role service_role;
+select public.billing_paypal_created(current_setting('pl.bn')::uuid, 'I-BUYNOW0000001', 'live');
+select public.billing_paypal_event('PL-5', 'BILLING.SUBSCRIPTION.ACTIVATED', '{"id": "I-BUYNOW0000001", "status": "ACTIVE"}', 'live');
+reset role;
+do $$ begin assert public.module_state(current_setting('pl.b')::uuid, 'plus') ->> 'status' = 'trial', 'buy now: still the trial until PayPal confirms the money'; end $$;
+set role service_role;
+select public.billing_paypal_event('PL-6', 'PAYMENT.SALE.COMPLETED', json_build_object('id', 'SALE-BUYNOW-1', 'billing_agreement_id', 'I-BUYNOW0000001',
+  'amount', json_build_object('total', current_setting('pl.bntotal'), 'currency', 'USD'))::jsonb, 'live');
+reset role;
+do $$ declare b uuid := current_setting('pl.b')::uuid; o public.billing_orders; begin
+  select * into o from public.billing_orders where id = current_setting('pl.bn')::uuid;
+  assert public.module_state(b, 'plus') ->> 'status' = 'active' and (public.module_state(b, 'plus') ->> 'paid_until')::date = (current_date + interval '1 month')::date,
+    'PAYPAL-LIVE buy now: paid from today (the trial ended today): ' || (public.module_state(b, 'plus'))::text;
+  assert o.trial_ends_before ->> 'plus' = current_setting('pl.te') and o.paid_through = (current_date + interval '1 month')::date, 'the trial it ended is recorded';
+  assert (select trial_ends from public.company_modules where workspace_id = b and module = 'basic') is null
+     and public.module_state(b, 'basic') ->> 'status' = 'trial', 'PAYPAL-LIVE only the programs bought now: Basics still on its trial';
+end $$;
+set role authenticated; select pg_temp.as_user('b1b1b1b1-0000-4000-8000-000000000005');
+do $$ declare c json := public.hq_company_billing(current_setting('pl.b')::uuid); begin
+  assert (select (x ->> 'buy_now')::boolean and x -> 'trial_ends_before' ->> 'plus' is not null from json_array_elements(c -> 'orders') x where x ->> 'method' = 'paypal'), 'HQ sees Bought now (ended trial early)';
+end $$;
+reset role;
+-- back to practice mode for anything after this
+update public.hq_settings set value = 'sandbox' where key = 'paypal.env';
+
 select 'ALL CHAT DATABASE TESTS PASSED' as result;
 select tablename from pg_publication_tables where pubname = 'supabase_realtime';
