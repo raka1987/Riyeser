@@ -53,8 +53,8 @@ function cdp(wsUrl) {
 
 (async () => {
   note('starting Central', { exe });
-  const child = spawn(exe, [`--remote-debugging-port=${port}`], { detached: true, stdio: 'ignore' });
-  child.unref();
+  // --attach: Central was started already (e.g. with the standard-user token through runas) with the same port
+  if (!process.argv.includes('--attach')) spawn(exe, [`--remote-debugging-port=${port}`], { detached: true, stdio: 'ignore' }).unref();
   const target = await pageTarget();
   if (!target) { report.result = { ok: false, why: 'Central\'s window never appeared on the debugging port' }; save(); process.exit(1); }
   const c = cdp(target.webSocketDebuggerUrl); await c.ready;
