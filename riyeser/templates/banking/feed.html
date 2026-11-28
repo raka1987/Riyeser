@@ -10,7 +10,7 @@
 {% for role, label in [('date','Date'),('description','Description'),('amount','Amount'),('debit','Debit (money out)'),('credit','Credit (money in)')] %}<div><label for="col_{{ role }}">{{ label }} column</label><input id="col_{{ role }}" name="col_{{ role }}" inputmode="numeric" style="width:70px" placeholder="auto" value="{{ (mapping[role] + 1) if role in mapping else '' }}"></div>{% endfor %}
 <div><label for="date_order">Dates are</label><select id="date_order" name="date_order">{% for k, v in [('dmy','Day/month/year'),('mdy','Month/day/year (US)')] %}<option value="{{ k }}" {{ 'selected' if date_order == k }}>{{ v }}</option>{% endfor %}</select></div></div></details></form>
 <div class="tbl"><table><tr><th>Date</th><th>Description</th><th class="n">Amount</th><th>Allocate to</th><th>Tax</th><th></th></tr>
-{% for r in rows %}<tr><td>{{ r.date }}</td><td>{{ r.description }}</td><td class="n {{ 'neg' if r.amount < 0 }}">{{ r.amount|money }}</td>
+{% for r in rows %}<tr><td>{{ r.date }}</td><td>{{ r.description }}{% if r.check_note and not r.entry_id %}<br><span class="badge open">{{ r.check_note }}</span>{% endif %}</td><td class="n {{ 'neg' if r.amount < 0 }}">{{ r.amount|money }}</td>
 {% if r.entry_id %}<td colspan="3"><a href="{{ url_for('core.entry', eid=r.entry_id) }}">Allocated → #{{ r.entry_id }}</a></td>
 {% else %}<td>{{ account_select('account_id', accounts, form='f' ~ r.id, required=True) }}</td><td>{{ tax_select('tax_code_id', tax_codes, form='f' ~ r.id) }}</td>
 <td style="white-space:nowrap"><form id="f{{ r.id }}" method="post" class="inline" action="{{ url_for('banking.allocate', fid=r.id) }}"><button class="btn sm pri">Allocate</button></form>

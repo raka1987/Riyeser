@@ -364,6 +364,8 @@ def migrate(db):
         created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))""")
     if "line_id" not in {r["name"] for r in db.execute("PRAGMA table_info(bank_feed_lines)")}:
         db.execute("ALTER TABLE bank_feed_lines ADD COLUMN line_id INTEGER REFERENCES journal_lines(id)")  # S24
+    if "check_note" not in {r["name"] for r in db.execute("PRAGMA table_info(bank_feed_lines)")}:
+        db.execute("ALTER TABLE bank_feed_lines ADD COLUMN check_note TEXT")  # identical lines in one statement file
     db.execute("""CREATE TABLE IF NOT EXISTS bank_import_maps (
         account_id INTEGER PRIMARY KEY REFERENCES accounts(id), mapping TEXT NOT NULL, date_order TEXT)""")
     from . import mailer

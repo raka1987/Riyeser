@@ -400,9 +400,13 @@ def rpt_inventory_valuation(db, p):
     rows.append(R(["", "Total inventory value", "", "", tot], "grand"))
     rows.append(R(["", "Inventory GL account balance", "", "", gl], "total"))
     rep = dict(columns=["SKU", "Item", "On hand", "Avg cost", "Value"], rows=rows, subtitle="Current", filters=[])
-    if gl != tot:
+    from ..ledger import STOCK_ROUNDING_MAX
+    if abs(gl - tot) > STOCK_ROUNDING_MAX:
         rep["warning"] = (f"The stock value ({fmt_money(tot)}) doesn't match the Inventory account ({fmt_money(gl)}): "
                           f"{fmt_money(gl - tot)} out. Check journals or bills posted to the Inventory account.")
+    elif gl != tot:
+        rep["note"] = (f"{fmt_money(gl - tot)} of average-cost rounding: it is cleared to Stock Rounding when an item "
+                       "sells out or at the next stocktake.")
     return rep
 
 

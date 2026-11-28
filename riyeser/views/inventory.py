@@ -184,6 +184,8 @@ def _save_count(items):
         if diff:
             stock_adjust(db, it["id"], request.form["date"], diff, None, "Stocktake")
             n += 1
+    from ..ledger import settle_stock_rounding
+    settle_stock_rounding(db, request.form["date"], "stocktake")   # a stocktake also clears leftover cents
     flash(f"Stocktake posted: {n} adjustments.", "ok")
     return redirect(url_for("inventory.index"))
 

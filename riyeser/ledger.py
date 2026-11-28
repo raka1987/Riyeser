@@ -194,7 +194,75 @@ def stock_adjust(db, item_id, date, qty_change, unit_cost=None, memo="Inventory 
         stock_out(db, item_id, -qty_change, date, "stock_adj", eid, memo)
     db.execute("UPDATE journal_entries SET source_id=? WHERE id=?", (eid, eid))
     audit(db, "stock_adjust", f"{item['sku']} {qty_change:+g}")
+    _settle_if_sold_out(db, {item_id}, date, memo)
     return eid
+
+
+# ------------------------------------------------------------ stock rounding (APP-012)
+# Average cost keeps an unrounded average while every posting is rounded to the cent, so the Inventory account can
+# drift a few cents from the stock's value. A drift this small (or less) is cleared by a labelled journal to
+# "Stock Rounding"; anything bigger is left alone and shown as a warning on the Inventory Valuation report.
+STOCK_ROUNDING_MAX = 5           # cents (in the books' currency)
+STOCK_ROUNDING = ("5-1250", "Stock Rounding")
+
+
+def stock_value_gaps(db):
+    """{inventory account id: (account balance, stock value)} for every account that holds stock."""
+    inv = linked(db, "inventory")
+    value = defaultdict(int)
+    value[inv] += 0
+    for i in db.execute("SELECT qty_on_hand, avg_cost, asset_account_id FROM items WHERE is_inventoried=1"):
+        value[i["asset_account_id"] or inv] += round(i["qty_on_hand"] * i["avg_cost"])
+    b = balances(db)
+    return {a: (b.get(a, 0), v) for a, v in value.items()}
+
+
+def _stock_rounding_account(db):
+    row = db.execute("SELECT account_id FROM linked_accounts WHERE key='stock_rounding'").fetchone()
+    if row:
+        return row[0]
+    acct = db.execute("SELECT id FROM accounts WHERE code=?", (STOCK_ROUNDING[0],)).fetchone()
+    if acct:
+        aid = acct["id"]
+    else:
+        ntc = db.execute("SELECT id FROM tax_codes WHERE code='N-T'").fetchone()
+        aid = db.execute("INSERT INTO accounts (code, name, type, is_bank, tax_code_id) VALUES (?,?,'cost_of_sales',0,?)",
+                         STOCK_ROUNDING + (ntc["id"] if ntc else None,)).lastrowid
+    db.execute("INSERT INTO linked_accounts (key, account_id) VALUES ('stock_rounding',?)", (aid,))
+    return aid
+
+
+def settle_stock_rounding(db, date, why):
+    """Clear a drift of up to STOCK_ROUNDING_MAX cents between the Inventory account and the stock's value, dated
+    `date`. Never in a locked period. Returns the journal ids posted."""
+    lock = db.execute("SELECT lock_date FROM company WHERE id=1").fetchone()
+    if not date or (lock and lock["lock_date"] and date <= lock["lock_date"]):
+        return []
+    out = []
+    for acct, (gl, value) in stock_value_gaps(db).items():
+        gap = gl - value                     # above 0: the account is higher than the stock is worth
+        if not gap or abs(gap) > STOCK_ROUNDING_MAX:
+            continue
+        memo = f"Stock rounding: average-cost cents ({why})"
+        other = _stock_rounding_account(db)
+        lines = [dict(account_id=other, debit=max(gap, 0), credit=max(-gap, 0), memo=memo),
+                 dict(account_id=acct, debit=max(-gap, 0), credit=max(gap, 0), memo=memo)]
+        eid = post_entry(db, date, memo, "stock_rounding", lines)
+        db.execute("UPDATE journal_entries SET source_id=? WHERE id=?", (eid, eid))
+        audit(db, "stock_rounding", f"#{eid} {fmt_money(-gap)} to the Inventory account ({why})")
+        out.append(eid)
+    return out
+
+
+def _settle_if_sold_out(db, item_ids, date, why):
+    """When an item's stock reaches 0 (or a stocktake is done), its leftover cents are cleared."""
+    ids = [i for i in item_ids if i]
+    if not ids:
+        return
+    sold_out = db.execute(f"SELECT 1 FROM items WHERE is_inventoried=1 AND ABS(qty_on_hand) < 1e-9 AND id IN"
+                          f" ({','.join('?' * len(ids))})", ids).fetchone()
+    if sold_out:
+        settle_stock_rounding(db, date, why)
 
 
 # ================================================================== documents
@@ -405,6 +473,7 @@ def post_document(db, doc_id):
                        " VALUES (?,?,?,?,?,?)", (eid, cl["account_id"], cl.get("debit", 0), cl.get("credit", 0),
                                                  cl.get("job_id"), cl["memo"]))
     db.execute("UPDATE documents SET entry_id=?, status='open' WHERE id=?", (eid, doc_id))
+    _settle_if_sold_out(db, {l["item_id"] for l in cogs}, doc["date"], doc["number"])
     return eid
 
 

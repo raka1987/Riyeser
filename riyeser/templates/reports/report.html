@@ -8,6 +8,7 @@
 {% if 'job' in rep.filters %}<div><label>Job</label><select name="job"><option value="">All</option>{% for j in jobs %}<option value="{{ j.id }}" {{ 'selected' if p.job==j.id }}>{{ j.code }} {{ j.name }}</option>{% endfor %}</select></div>{% endif %}
 <div><button class="btn pri">Run report</button></div></form>{% endif %}
 {% if rep.warning %}<div class="flash error" role="alert">{{ rep.warning }}</div>{% endif %}
+{% if rep.note %}<p class="muted small">{{ rep.note }}</p>{% endif %}
 {# money columns (any amount in them) line up on the right, heading and blanks too; text columns stay on the left #}
 {% set ns = namespace(num=[]) %}{% for r in rep.rows %}{% for c in r.cells %}{% if c is number and loop.index0 not in ns.num %}{% set ns.num = ns.num + [loop.index0] %}{% endif %}{% endfor %}{% endfor %}
 <div class="tbl"><table><tr>{% for c in rep.columns %}<th class="{{ 'n' if loop.index0 in ns.num }}">{{ c }}</th>{% endfor %}</tr>

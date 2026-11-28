@@ -49,7 +49,7 @@ def seed(db):
     return acc, tc, cust, sup, item
 
 
-def books_consistent(db, asof=None):
+def books_consistent(db, asof=None, strict_stock=False):
     """The invariants every posting must keep. Returns a list of problems (empty = all good)."""
     from riyeser.views import reports as R
     asof = asof or TODAY
@@ -77,7 +77,7 @@ def books_consistent(db, asof=None):
     # average cost: each posting is rounded to the cent while the average isn't, so the two can differ by up to
     # half a cent per stock movement (APP-012 in the QA register); anything more is a real difference
     moves = db.execute("SELECT COUNT(*) FROM stock_movements").fetchone()[0]
-    if abs(inv - stock) > max(1, moves / 2):
+    if abs(inv - stock) > (0 if strict_stock else max(1, moves / 2)):
         bad.append(f"Inventory account {inv} != stock value {stock}")
     from flask import current_app
     with current_app.test_request_context(f"/reports/x?asof={asof}&start={L.fy_start(db, asof)}&end={asof}"):
@@ -512,3 +512,98 @@ def test_markup_is_on_cost_and_margin_is_on_the_selling_price():
     p = engine.profit(lines)
     assert (p["sell"], p["cost"], p["profit"]) == (12500, 10000, 2500)
     assert p["margin_pct"] == 20.0          # 25% markup = 20% margin
+
+
+# ---------------------------------------------------------------- bank import: identical lines in one file
+def test_identical_lines_in_one_statement_are_all_kept_and_flagged(app, client):
+    with app.app_context():
+        bank = linked(get_db(), "default_bank")
+    csv = ("Date,Description,Amount\n05/11/2026,Coffee,-4.50\n05/11/2026,Coffee,-4.50\n"
+           "06/11/2026,Rent,-800.00\n")
+    post = lambda: client.post("/banking/feed", data={"account_id": bank, "file": (io.BytesIO(csv.encode()), "s.csv")},
+                               content_type="multipart/form-data", follow_redirects=True).get_data(as_text=True)
+    page = post()
+    assert "Imported 3 statement lines" in page and "2 lines look the same as another line" in page
+    with app.app_context():
+        rows = get_db().execute("SELECT amount, check_note FROM bank_feed_lines ORDER BY id").fetchall()
+    assert [r["amount"] for r in rows] == [-450, -450, -80000]
+    assert [bool(r["check_note"]) for r in rows] == [True, True, False]
+    assert "Looks the same as another line" in client.get(f"/banking/feed?account={bank}").get_data(as_text=True)
+    page = post()                                   # the same file again: nothing new
+    assert "Imported 0 statement lines" in page and "3 were already imported" in page
+    bigger = csv + "05/11/2026,Coffee,-4.50\n"       # a later statement with a third coffee that day: just that one
+    client.post("/banking/feed", data={"account_id": bank, "file": (io.BytesIO(bigger.encode()), "s3.csv")},
+                content_type="multipart/form-data")
+    with app.app_context():
+        assert get_db().execute("SELECT COUNT(*) FROM bank_feed_lines").fetchone()[0] == 4
+
+
+# ---------------------------------------------------------------- stock rounding (APP-012)
+def _drifting_item(db):
+    """Buy 3 at $10.00, sell 1, buy 1 at $10.01: the average is $10.00333 and each sale is rounded to $10.00, so
+    selling the last 3 leaves 1c in the Inventory account with nothing on hand."""
+    acc, tc, cust, sup, item = seed(db)
+    buy = lambda p, q: L.save_document(db, "purchase", dict(contact_id=sup, date=TODAY),
+                                       [dict(item_id=item, qty=q, unit_price=p)], "open")
+    sell = lambda q: L.save_document(db, "sale", dict(contact_id=cust, date=TODAY),
+                                     [dict(item_id=item, qty=q, unit_price=2000)], "open")
+    buy(1000, 3)
+    sell(1)
+    buy(1001, 1)
+    sell(1)
+    sell(1)
+    return item, sell
+
+
+def test_cents_left_when_an_item_sells_out_are_cleared_to_stock_rounding(app):
+    with app.app_context():
+        db = get_db()
+        item, sell = _drifting_item(db)
+        assert not db.execute("SELECT 1 FROM journal_entries WHERE source_type='stock_rounding'").fetchone()
+        sell(1)                                        # sold out
+        e = db.execute("SELECT * FROM journal_entries WHERE source_type='stock_rounding'").fetchall()
+        assert len(e) == 1 and "Stock rounding" in e[0]["memo"]
+        lines = db.execute("SELECT a.code, l.debit, l.credit FROM journal_lines l JOIN accounts a ON a.id=l.account_id"
+                           " WHERE entry_id=? ORDER BY a.code", (e[0]["id"],)).fetchall()
+        assert [tuple(r) for r in lines] == [("1-1300", 0, 1), ("5-1250", 1, 0)]
+        assert db.execute("SELECT type FROM accounts WHERE code='5-1250'").fetchone()[0] == "cost_of_sales"
+        assert db.execute("SELECT 1 FROM audit_log WHERE action='stock_rounding'").fetchone()
+        assert books_consistent(db, strict_stock=True) == []
+
+
+def test_stock_rounding_never_posts_in_a_locked_period(app):
+    with app.app_context():
+        db = get_db()
+        _drifting_item(db)
+        # 1 on hand at $10.00333 (value $10.00) and $10.01 in the account: 1c of rounding
+        db.execute("UPDATE company SET lock_date=?", (TODAY,))
+        assert L.settle_stock_rounding(db, TODAY, "test") == []
+        db.execute("UPDATE company SET lock_date=NULL")
+        assert len(L.settle_stock_rounding(db, TODAY, "test")) == 1
+
+
+def test_a_bigger_stock_difference_is_left_alone_and_shown_as_a_warning(app, client):
+    with app.app_context():
+        db = get_db()
+        item, sell = _drifting_item(db)
+        db.execute("UPDATE items SET avg_cost=avg_cost+10 WHERE id=?", (item,))   # now 10c out (1 on hand)
+        db.commit()
+        assert L.settle_stock_rounding(db, TODAY, "test") == []
+        db.commit()
+    page = client.get("/reports/inventory_valuation").get_data(as_text=True)
+    assert "doesn&#39;t match the Inventory account" in page or "doesn't match the Inventory account" in page
+
+
+def test_stocktake_clears_small_rounding(app, client):
+    with app.app_context():
+        db = get_db()
+        item, sell = _drifting_item(db)
+        db.commit()
+        gl, value = L.stock_value_gaps(db)[db.execute("SELECT asset_account_id FROM items WHERE id=?",
+                                                      (item,)).fetchone()[0]]
+        assert 0 < abs(gl - value) <= L.STOCK_ROUNDING_MAX
+    client.post("/inventory/count", data={"date": TODAY, f"count_{item}": "1"})   # counted what's there
+    with app.app_context():
+        db = get_db()
+        assert db.execute("SELECT COUNT(*) FROM journal_entries WHERE source_type='stock_rounding'").fetchone()[0] == 1
+        assert books_consistent(db, strict_stock=True) == []

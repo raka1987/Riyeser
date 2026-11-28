@@ -201,18 +201,35 @@ def _import_feed():
         db.execute("INSERT OR REPLACE INTO bank_import_maps (account_id, mapping, date_order) VALUES (?,?,?)",
                    (aid, json.dumps(used), order))
     write_txn(db)
-    n = dup = 0
+    # A line already imported (the same file again, or statements that overlap) is skipped; it's matched by count,
+    # so two identical coffees on one day are two lines. Identical lines within this file are all kept and marked
+    # for a look, never merged.
+    key = lambda l: (l["date"], l["amount"], l["description"])
+    in_file = {}
     for l in lines:
-        if db.execute("SELECT 1 FROM bank_feed_lines WHERE account_id=? AND date=? AND amount=? AND"
-                      " COALESCE(description,'')=?", (aid, l["date"], l["amount"], l["description"])).fetchone():
+        in_file[key(l)] = in_file.get(key(l), 0) + 1
+    had, seen = {}, {}
+    n = dup = same = 0
+    for l in lines:
+        k = key(l)
+        if k not in had:
+            had[k] = db.execute("SELECT COUNT(*) FROM bank_feed_lines WHERE account_id=? AND date=? AND amount=? AND"
+                                " COALESCE(description,'')=?", (aid,) + k).fetchone()[0]
+        seen[k] = seen.get(k, 0) + 1
+        if seen[k] <= had[k]:
             dup += 1
             continue
-        db.execute("INSERT INTO bank_feed_lines (account_id, date, description, amount) VALUES (?,?,?,?)",
-                   (aid, l["date"], l["description"], l["amount"]))
+        note = "Looks the same as another line — check" if in_file[k] > 1 else None
+        db.execute("INSERT INTO bank_feed_lines (account_id, date, description, amount, check_note) VALUES (?,?,?,?,?)",
+                   (aid, l["date"], l["description"], l["amount"], note))
         n += 1
+        same += bool(note)
     audit(db, "bank_import", f"{n} lines, {dup} already imported, {len(skipped)} skipped")
     flash(f"Imported {n} statement lines." + (f" {dup} were already imported, so they were skipped." if dup else ""),
           "ok" if n or dup else "error")
+    if same:
+        flash(f"{same} lines look the same as another line in this file (same date, amount and description). All "
+              "are kept: check each against your statement before allocating it.", "warn")
     if skipped:
         flash("Not imported: " + "; ".join(f"row {r}: {why}" if r else why for r, why in skipped[:15])
               + (f"; and {len(skipped) - 15} more" if len(skipped) > 15 else "") + ".", "warn")
