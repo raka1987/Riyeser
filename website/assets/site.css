@@ -1480,3 +1480,9 @@ section.endband-sec { padding-top: 8px; padding-bottom: 0; }
   .tpoints li, .tpoints li:nth-child(odd) { padding: 0; border-left: 0 !important; }
   .endband .ctas { flex: 1 1 100%; } .endband .ctas .btn { flex: 1 1 100%; } .endband .btn.big { padding-left: 14px; padding-right: 14px; font-size: 17px; }
 }
+
+/* countries.html: choosing your country */
+.ctry-set { max-width: 900px; }
+.ctry-set p { margin: 0 0 14px; }
+.ctry-set ul.ticks { margin: 8px 0 18px; }
+.ctry-set ul.ticks li { margin-bottom: 6px; }

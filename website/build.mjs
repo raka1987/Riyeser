@@ -47,7 +47,7 @@ const ALL_PROGRAMS = [
     one: `Complete double-entry accounting: everything in Basics plus bank reconciliation, journals, jobs, budgets and the full set of reports. Free for 90 days, no card. You pay for Plus instead of Basics, never both.`,
     pitch: 'Know who owes you, and who you owe.',
     shot: 'accounting.webp',
-    note: 'Set up for Australian GST and BAS by default. Its built-in payroll is an Australian estimate only (not the ATO tax tables, and no Single Touch Payroll), so don\'t use it for real pay runs yet: use Riyeser Payroll, or your current payroll. Have your accountant check your setup before relying on it for tax.' },
+    note: 'Pick your country when you set up: it fills in your tax, currency and financial year for you to check and confirm. Its built-in payroll is an Australian estimate only (not the ATO tax tables, and no Single Touch Payroll), so don\'t use it for real pay runs yet: use Riyeser Payroll, or your current payroll. Have your accountant check your setup before relying on it for tax.' },
   { id: 'pos', name: 'Riyeser POS', short: 'POS', icon: '🧾', file: 'RiyeserPOS-Setup.exe',
     one: `Point-of-sale software for retail shops, cafés and restaurants: a touch-friendly till, with cash and card on your own EFTPOS machine. Every sale goes straight into your books. Free for 90 days, no card.`,
     pitch: 'Sell at the counter. Your accounting records update automatically.',
@@ -183,7 +183,7 @@ const INCLUDES = {
     'Users and roles, and an audit trail', 'More than one company with one sign-in (extra companies charged separately)'],
   accounting: ['Everything in Accounting Basics', 'The Today screen, customer pages, expense claims and stock reordering, as in Basics', 'Bank reconciliation, with undo', 'Bank statement import (CSV): allocate or split each line in one click',
     'Transfer money between accounts', 'Payroll in your books: employees, pay runs and payslips (an Australian estimate for now: not for real pay runs until the ATO tax tables and Single Touch Payroll are in)',
-    'General journal, reversing entries and search transactions', 'Jobs (job costing) and monthly budgets', 'Tax codes and a BAS / GST summary (G1, 1A, 1B, W1, W2 and more)',
+    'General journal, reversing entries and search transactions', 'Jobs (job costing) and monthly budgets', 'Tax codes and a tax report: the BAS / GST summary (G1, 1A, 1B, W1, W2 and more) in Australia, a VAT or GST summary elsewhere',
     'Lock a period once it is lodged', 'Every report: Balance Sheet, Trial Balance, General Ledger, Budget vs Actual, cash movement, Job P&L and payroll summary'],
   pos: ['Retail or restaurant setup', 'Product tiles with photos, categories, Favourites, search and barcode scanning', 'Hold a sale and come back to it',
     'Tables, kitchen dockets and takeaway (restaurant setup)', 'Cash with the change worked out, or card',
@@ -1548,15 +1548,23 @@ infoPage({
 // ---------- countries: what the programs set up, not confirmed compliance ----------
 infoPage({
   path: 'countries.html', title: 'Countries: Fiji, Australia, New Zealand and worldwide — Riyeser', h1: 'Countries', eyebrow: 'Worldwide',
-  lead: 'Riyeser is for small businesses anywhere, priced in US dollars. Here is what each program sets up for you in Fiji, Australia, New Zealand and other countries.',
-  description: 'What Riyeser sets up for Fiji, Australia, New Zealand and other countries: currency, sales tax, payroll and phones. Settings to check with your accountant, not confirmed compliance.',
+  lead: 'Riyeser is for small businesses anywhere, priced in US dollars. Pick your country when you set up, and Riyeser fills in a starting point for your tax, currency and dates.',
+  description: 'Choose your country in Riyeser: tax name, rate and tax number label, currency, financial year, date format and time zone filled in for you to check. Not confirmed compliance.',
   body: (up) => `<section class="c blk first">
   <p class="note"><b>These are settings, not a promise that your tax or payroll is right.</b> Tax and payroll rules in the programs have not been independently checked against each country's current rules. Have your accountant check your setup before you rely on it, and check pay rates before you pay staff.</p>
-  <p style="margin-top:16px"><b>Accounting, Invoices and POS are set up for Australian tax only.</b> They have a fixed ABN label and an Australian BAS / GST report, with GST worked out and rounded on each line. Fiji VAT and TIN, and New Zealand GST, IRD number and NZBN, aren't set up for you: you can add your own tax codes by hand, but the reports stay Australian.</p>
+  <div class="ctry-set">
+  <h2 class="h2" style="margin-top:28px">Choose your country when you set up</h2>
+  <p>In Riyeser Accounting, Invoices, POS and Bookings (they share one company file), you pick your business's country when you set up, from 249 countries, or <b>Other / set up myself</b>. Riyeser fills in a starting point:</p>
+  <ul class="ticks"><li>tax name, rate and tax number label</li><li>currency</li><li>financial year</li><li>date format and time zone</li></ul>
+  <p>Nothing is saved until you have reviewed it and pressed <b>Confirm these settings</b>. You can change anything later under <b>Setup → Country &amp; tax</b>, and add your own tax codes. <b>Rates are a starting point only: check them with your accountant or tax office.</b> Invoices you have already made keep the tax they were saved with.</p>
+  <ul class="ticks"><li><b>United States:</b> there is no national sales tax rate, so you add your state and local sales tax rates yourself.</li>
+    <li><b>Fiji:</b> VAT is filled in at 12.5% (the rate from 1 August 2025). If a rate changes, you can move your tax code to the new rate for new transactions, and an older quote asks how to invoice it: today's rate with the extra tax, today's rate with the same total, or the rate it was quoted at.</li>
+    <li><b>Payroll hasn't changed:</b> Riyeser Payroll is built for Fiji's PAYE and FNPF only.</li></ul>
+  <p class="muted">New in the November 2026 release: update through Riyeser Central. A company file made before it keeps its Australian set-up until you choose a country.</p></div>
   <div class="ptable-wrap" tabindex="0" role="region" aria-label="Countries" style="margin-top:22px"><table class="ptable ctable stack"><thead><tr><th scope="col">Area</th><th scope="col">Fiji</th><th scope="col">Australia</th><th scope="col">New Zealand</th><th scope="col">Other countries</th></tr></thead>
   <tbody>${COUNTRIES.map(([a, ...v]) => `<tr><th scope="row">${esc(a)}</th>${v.map((x, i) => `<td data-label="${['Fiji', 'Australia', 'New Zealand', 'Other countries'][i]}">${esc(x)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
   <h2 class="h2" style="margin-top:40px">Everywhere else</h2>
-  <p>Every program works in any country: you choose your currency code, tax codes and time zone, and the free programs have no limits. The programs and help are in English (Australian spelling). Riyeser Link and Link Office never call outside phone numbers, so they don't depend on your country's phone network. See <a class="more" href="${up}features.html">what works today</a> for each program.</p>
+  <p>Every program works in any country, and the free programs have no limits. The programs and help are in English (Australian spelling). Riyeser Link and Link Office never call outside phone numbers, so they don't depend on your country's phone network. See <a class="more" href="${up}features.html">what works today</a> for each program.</p>
 </section>`,
 });
 
