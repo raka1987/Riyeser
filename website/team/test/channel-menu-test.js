@@ -314,23 +314,24 @@ const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
     assert.ok(!/archived=eq\.false/.test(fs.chanQuery), 'archived channels are asked for too');
     assert.ok(await fp.$(`[data-ch="${J}"].muted`), 'muted on the server: muted here'); assert.strictEqual(await fp.getAttribute('[data-sect="archived"]', 'aria-expanded'), 'false');
     await fp.click('[data-sect="archived"]'); await fp.click(`[data-ch="${A}"]`); await fp.waitForSelector('#archbar'); assert.ok(!(await fp.isVisible('#comp')));
-    await fp.click('#unarch'); await fp.waitForSelector('#comp:not([hidden])');
-    assert.deepStrictEqual(fs.rpc.filter(([f]) => f === 'channel_archive').pop()[1], { ch: A, archive: false });
-    await fp.click(`[data-ch="${J}"]`); await fp.click('#morebtn'); await fp.click('#mrename'); await fp.fill('#rnv', 'Site Jobs'); await fp.click('#rngo');
-    await fp.waitForFunction(() => /site-jobs/.test(document.querySelector('#mhead h2').textContent));
-    assert.deepStrictEqual(fs.rpc.filter(([f]) => f === 'channel_rename').pop()[1], { ch: J, new_name: 'site-jobs', new_topic: null });
+    // the server's answer can arrive a moment after the screen changes: wait for the call itself
+    const seen = (fn) => fs.rpc.filter(([f]) => f === fn);
+    const called = async (fn, act) => { const n = seen(fn).length; await act(); for (let i = 0; i < 100 && seen(fn).length <= n; i++) await new Promise((r) => setTimeout(r, 50)); return (seen(fn).pop() || [])[1]; };
+    assert.deepStrictEqual(await called('channel_archive', async () => { await fp.click('#unarch'); await fp.waitForSelector('#comp:not([hidden])'); }), { ch: A, archive: false });
+    assert.deepStrictEqual(await called('channel_rename', async () => {
+      await fp.click(`[data-ch="${J}"]`); await fp.click('#morebtn'); await fp.click('#mrename'); await fp.fill('#rnv', 'Site Jobs'); await fp.click('#rngo');
+      await fp.waitForFunction(() => /site-jobs/.test(document.querySelector('#mhead h2').textContent));
+    }), { ch: J, new_name: 'site-jobs', new_topic: null });
     await fp.click('#morebtn'); await fp.click('#mrename'); await fp.fill('#rnv', 'oops'); await fp.click('#rngo');
     await fp.waitForSelector('#rne:not([hidden])'); assert.match(await text(fp, '#rne'), /^Only whoever made this channel/, 'the database\'s refusal, in its own words'); await fp.click('.modal #cl');
     assert.ok(!(await fp.$(`[data-ch="${G}"].muted`)), 'muted until a time that has passed: not muted');
-    await fp.click('#morebtn'); await fp.click('#mmute'); assert.deepStrictEqual(fs.rpc.filter(([f]) => f === 'channel_mute').pop()[1], { ch: J, mute_on: false });
-    await fp.click('#morebtn'); await fp.click('#mmute'); await fp.click('#mute-week');
-    const mu = fs.rpc.filter(([f]) => f === 'channel_mute_until').pop()[1]; assert.strictEqual(mu.ch, J);
+    assert.deepStrictEqual(await called('channel_mute', async () => { await fp.click('#morebtn'); await fp.click('#mmute'); }), { ch: J, mute_on: false });
+    const mu = await called('channel_mute_until', async () => { await fp.click('#morebtn'); await fp.click('#mmute'); await fp.click('#mute-week'); }); assert.strictEqual(mu.ch, J);
     assert.ok(Math.abs(Date.parse(mu.until_at) - Date.now() - 7 * 86400e3) < 60e3, 'muted for a week: ' + mu.until_at);
-    await fp.click('#morebtn'); await fp.click('#mmute'); await fp.click('#morebtn'); await fp.click('#mmute'); await fp.click('#mute-ever');
-    assert.deepStrictEqual(fs.rpc.filter(([f]) => f === 'channel_mute_until').pop()[1], { ch: J, until_at: null }, 'until I turn it back on');
     await fp.click('#morebtn'); await fp.click('#mmute');
-    await fp.click('#morebtn'); await fp.click('#marchive'); await fp.click('#askyes'); await fp.waitForFunction(() => /general/.test(document.querySelector('#mhead h2').textContent));
-    assert.deepStrictEqual(fs.rpc.filter(([f]) => f === 'channel_archive').pop()[1], { ch: J, archive: true });
+    assert.deepStrictEqual(await called('channel_mute_until', async () => { await fp.click('#morebtn'); await fp.click('#mmute'); await fp.click('#mute-ever'); }), { ch: J, until_at: null }, 'until I turn it back on');
+    await fp.click('#morebtn'); await fp.click('#mmute');
+    assert.deepStrictEqual(await called('channel_archive', async () => { await fp.click('#morebtn'); await fp.click('#marchive'); await fp.click('#askyes'); await fp.waitForFunction(() => /general/.test(document.querySelector('#mhead h2').textContent)); }), { ch: J, archive: true });
     await fp.click('#morebtn'); assert.ok(!(await menuIds(fp)).includes('marchive'), 'no Archive on #general'); await fp.keyboard.press('Escape');
     console.log('pretend server: rename, mute, archive and unarchive: ok');
 
