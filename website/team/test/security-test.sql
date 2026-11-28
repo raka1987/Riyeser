@@ -269,25 +269,30 @@ do $$ declare bad text; begin
   -- developers: versions, downloads and diagnostics only; no customers, tickets, emails, licences, billing or history
   bad := pg_temp.refused('developer', array['hq_company', 'hq_companies', 'hq_company_page', 'hq_business_list', 'hq_tickets', 'hq_ticket',
     'hq_support_inbox', 'hq_emails', 'hq_licences', 'hq_billing', 'hq_company_billing', 'hq_payments_received', 'hq_refunds', 'hq_audit_search',
-    'hq_history', 'hq_reset_2fa', 'hq_change_owner', 'hq_edit_business', 'hq_set_module', 'hq_message_customer', 'hq_company_link']);
+    'hq_history', 'hq_reset_2fa', 'hq_change_owner', 'hq_edit_business', 'hq_set_module', 'hq_message_customer', 'hq_company_link',
+    'hq_billing_clear_practice', 'hq_billing_restore_practice']);
   assert bad is null, 'developer not refused: ' || bad;
   -- support: no money (refund decisions/payments, plans, marking paid, billing details), staff, settings, history or removals
   bad := pg_temp.refused('support', array['hq_refund_decide', 'hq_refund_paid', 'hq_refund_second', 'hq_set_plan', 'hq_set_module',
     'hq_billing_mark_paid', 'hq_set_billing_entity', 'hq_set_staff', 'hq_set_staff_perms', 'hq_add_staff', 'hq_set_setting', 'hq_audit_search',
-    'hq_history', 'hq_remove_accounts', 'hq_change_owner', 'hq_close_duplicate', 'hq_grant_storage', 'hq_billing_resend', 'hq_billing_entity_decide']);
+    'hq_history', 'hq_remove_accounts', 'hq_change_owner', 'hq_close_duplicate', 'hq_grant_storage', 'hq_billing_resend', 'hq_billing_entity_decide',
+    'hq_billing_clear_practice', 'hq_billing_restore_practice']);
   assert bad is null, 'support not refused: ' || bad;
   -- sales: no diagnostics, help-request replies, refunds, emails, 2FA resets, edits or history
   bad := pg_temp.refused('sales', array['hq_billing_resend', 'hq_billing_entity_decide', 'hq_diagnostic', 'hq_ticket_reply', 'hq_message_customer', 'hq_refunds', 'hq_emails', 'hq_reset_2fa',
-    'hq_edit_business', 'hq_change_owner', 'hq_audit_search', 'hq_set_module', 'hq_set_staff']);
+    'hq_edit_business', 'hq_change_owner', 'hq_audit_search', 'hq_set_module', 'hq_set_staff', 'hq_billing_clear_practice', 'hq_billing_restore_practice']);
   assert bad is null, 'sales not refused: ' || bad;
   -- finance: no diagnostics, account fix-ups, staff, or Riyeser's own bank details (only the HQ Owner: SEC-011)
-  bad := pg_temp.refused('finance', array['hq_diagnostic', 'hq_reset_2fa', 'hq_change_owner', 'hq_edit_business', 'hq_set_staff', 'hq_set_billing_entity']);
+  -- PAYPAL-LIVE: clearing practice payments (and putting them back) is the HQ Owner's alone, Finance included
+  bad := pg_temp.refused('finance', array['hq_diagnostic', 'hq_reset_2fa', 'hq_change_owner', 'hq_edit_business', 'hq_set_staff', 'hq_set_billing_entity',
+    'hq_billing_clear_practice', 'hq_billing_restore_practice']);
   assert bad is null, 'finance not refused: ' || bad;
   -- admin (HQ V2): runs the team, settings and history, but no money, no licences or billing, no bank details (SEC-011),
   -- no emailing invoices (SEC-010), no diagnostics or customer fix-ups, no removing accounts
   bad := pg_temp.refused('admin', array['hq_licences', 'hq_billing', 'hq_company_billing', 'hq_payments_received', 'hq_refunds', 'hq_refund_decide',
     'hq_refund_paid', 'hq_refund_second', 'hq_set_plan', 'hq_set_module', 'hq_quick_licence', 'hq_billing_mark_paid', 'hq_set_billing_entity',
-    'hq_billing_resend', 'hq_diagnostic', 'hq_reset_2fa', 'hq_change_owner', 'hq_edit_business', 'hq_grant_offer', 'hq_ticket_reply', 'hq_remove_accounts']);
+    'hq_billing_resend', 'hq_diagnostic', 'hq_reset_2fa', 'hq_change_owner', 'hq_edit_business', 'hq_grant_offer', 'hq_ticket_reply', 'hq_remove_accounts',
+    'hq_billing_clear_practice', 'hq_billing_restore_practice']);
   assert bad is null, 'admin not refused: ' || bad;
   -- the HQ owner without two-step sign-in, and a customer: nothing at all (hq_me only says who you are)
   select string_agg(fn, ', ') into bad from pg_temp.out where who in ('owner without 2FA', 'customer') and fn not in ('hq_me')
@@ -862,6 +867,68 @@ do $$ begin
           and details -> 'before' ? 'perms' and details -> 'after' ? 'perms') >= 6, 'access changes with before and after';
   assert exists (select 1 from public.hq_audit where action = 'role.created' and details ->> 'name' = 'Team helper' and actor = 'c0c0c0c0-0000-4000-8000-000000000006'), 'role created, by whom';
   assert not exists (select 1 from public.hq_audit where action like 'role.%' and details::text like '%@%'), 'no email addresses in the role history';
+end $$;
+
+-- ===== PAYPAL-LIVE: practice (sandbox) payments once PayPal is live
+-- only the paypal function (service role) says which PayPal is in use; nobody signed in or out can
+do $$ begin
+  assert not has_function_privilege('authenticated', 'public.billing_paypal_env_now(text)', 'execute')
+     and not has_function_privilege('anon', 'public.billing_paypal_env_now(text)', 'execute'), 'only the service role sets the PayPal env';
+  assert not has_function_privilege('authenticated', 'public.billing_module_state(uuid, text)', 'execute')
+     and not has_function_privilege('authenticated', 'public.billing_practice_info(uuid)', 'execute'), 'the practice helpers are internal';
+end $$;
+-- A has a practice (sandbox) PayPal subscription that paid Payroll, and a live PayPal one for Bookings; PayPal is live
+do $$ declare a uuid := current_setting('test.ws_a')::uuid; begin
+  insert into public.billing_orders (workspace_id, method, modules, people, billing, amount, status, paypal_subscription_id, paypal_env, paid_through, starts_on)
+    values (a, 'paypal', array['payroll'], 3, 'monthly', 25, 'active', 'I-SECPRACTICE01', 'sandbox', current_date + 120, current_date + 90),
+           (a, 'paypal', array['bookings'], 3, 'monthly', 25, 'active', 'I-SECLIVE000001', 'live', current_date + 30, current_date);
+  perform public.licence_set_module(a, 'payroll', 'active', null, current_date + 120);
+  perform public.licence_set_module(a, 'bookings', 'active', null, current_date + 30);
+  insert into public.hq_settings (key, value) values ('paypal.env', 'live') on conflict (key) do update set value = excluded.value;
+  perform set_config('test.live_orders', (select md5(string_agg(o::text, '|' order by o.id)) from public.billing_orders o where o.workspace_id = a and o.paypal_env = 'live'), false);
+  perform set_config('test.bookings', (select (c.status, c.paid_until)::text from public.company_modules c where c.workspace_id = a and c.module = 'bookings'), false);
+end $$;
+set role authenticated;
+-- business B's owner can't remove A's practice subscription; A's staff can't either
+select pg_temp.as_user('33333333-3333-3333-3333-333333333333');
+do $$ begin begin perform public.billing_practice_cancel(current_setting('test.ws_a')::uuid); raise exception 'B removed A''s practice subscription';
+  exception when others then assert sqlerrm like 'Only the business owner%', sqlerrm; end; end $$;
+select pg_temp.as_user('22222222-2222-2222-2222-222222222222');
+do $$ begin begin perform public.billing_practice_cancel(current_setting('test.ws_a')::uuid); raise exception 'staff removed it';
+  exception when others then assert sqlerrm like 'Only the business owner%', sqlerrm; end; end $$;
+-- every HQ role but the Owner is refused, and the Owner without two-step sign-in too
+do $$ declare u text; begin
+  foreach u in array array['c0c0c0c0-0000-4000-8000-000000000001', 'c0c0c0c0-0000-4000-8000-000000000002', 'c0c0c0c0-0000-4000-8000-000000000003',
+                           'c0c0c0c0-0000-4000-8000-000000000004', 'c0c0c0c0-0000-4000-8000-000000000006'] loop
+    perform pg_temp.as_user(u);
+    begin perform public.hq_billing_clear_practice(current_setting('test.ws_a')::uuid); raise exception 'cleared by %', u;
+    exception when others then assert sqlerrm like 'Your HQ role can''t do that.%', sqlerrm; end;
+    assert public.hq_attention() ->> 'bank_missing' is null, 'only the Owner is asked for the bank details';
+  end loop;
+end $$;
+select pg_temp.as_user_aal1('c0c0c0c0-0000-4000-8000-000000000005');
+do $$ begin begin perform public.hq_billing_clear_practice(current_setting('test.ws_a')::uuid); raise exception 'owner without 2FA cleared';
+  exception when others then assert sqlerrm like 'Riyeser HQ is for%', sqlerrm; end; end $$;
+reset role;
+do $$ begin assert not exists (select 1 from public.hq_audit where action = 'billing.practice_cleared'), 'the refusals cleared nothing'; end $$;
+-- the Owner: Needs attention asks for Riyeser's bank details (none here) and lists the practice payments; then clears them
+set role authenticated; select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000005');
+do $$ declare n json := public.hq_attention(); r json; begin
+  assert (n ->> 'bank_missing')::boolean and (n ->> 'practice_to_clear')::int = 1, 'Owner: add the bank details; 1 business to clear: ' || n::text;
+  r := public.hq_billing_clear_practice(current_setting('test.ws_a')::uuid);
+  assert r -> 'licence' -> 'payroll' ->> 'status' in ('trial', 'ended') and r -> 'licence' -> 'bookings' is null, 'practice-paid Payroll back to its trial; Bookings not touched: ' || r::text;
+end $$;
+reset role;
+do $$ declare a uuid := current_setting('test.ws_a')::uuid; begin
+  assert (select md5(string_agg(o::text, '|' order by o.id)) from public.billing_orders o where o.workspace_id = a and o.paypal_env = 'live') = current_setting('test.live_orders'), 'live orders untouched';
+  assert (select (c.status, c.paid_until)::text from public.company_modules c where c.workspace_id = a and c.module = 'bookings') = current_setting('test.bookings'), 'live-paid Bookings untouched';
+  assert (select status from public.billing_orders where paypal_subscription_id = 'I-SECPRACTICE01') = 'void', 'the practice order is void (test)';
+  assert exists (select 1 from public.hq_audit where action = 'billing.practice_cleared' and workspace_id = a and actor = 'c0c0c0c0-0000-4000-8000-000000000005'), 'audited, with who';
+  begin update public.hq_audit set details = '{}' where action = 'billing.practice_cleared'; raise exception 'history edited';
+  exception when others then assert sqlerrm like 'The HQ history can''t be changed%', sqlerrm; end;
+  begin delete from public.billing_practice_clears; raise exception 'clear record deleted';
+  exception when others then assert sqlerrm like 'Rows in billing_practice_clears are never deleted%', sqlerrm; end;
+  update public.hq_settings set value = 'sandbox' where key = 'paypal.env';
 end $$;
 
 select 'ALL SECURITY TESTS PASSED' as result;

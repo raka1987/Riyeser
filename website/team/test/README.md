@@ -168,6 +168,18 @@
   `people-test.js` also covers help without signing in (S3): `?help` signed out offers it first, the sign-in page links to it,
   `?contact` (Contact support on riyeser.com) opens it, the request number shows; `rules-test.sql` (end) covers `guest_ticket`
   (the auto-reply with the number, the limits, HQ sees who to reply to, HQ's reply is emailed).
+- `paypal-live-test.js` (PAYPAL-LIVE): Add to my plan / Pay once PayPal is live, for an owner with a practice (PayPal sandbox)
+  subscription, at 1366 and 390: "Pay with PayPal" shows (no "You already pay by PayPal", no "opening soon", no bank wording
+  without Riyeser's bank details); on the free trial "Start paying when my free trial ends" (ticked: "Nothing is charged
+  today. With PayPal, your first payment is on …") or "Buy now: start my paid plan today" (charged today, "Your remaining
+  free days (N) end today"), sent once on a double click; Billing's "Practice payment (test): not a real subscription" with no
+  link to PayPal's practice site and Remove on Riyeser's side only; Buy now on Your plan's trial rows and `?buy=now`.
+  `rules-test.sql` and `security-test.sql` (PAYPAL-LIVE sections): a sandbox subscription doesn't block live, never a
+  sandbox link once live, the HQ Owner's Clear practice payments (Owner only, audited, reversible, live orders untouched),
+  Buy now (charged today, the trial ended when PayPal confirms the first payment), a double click gives one order.
+  HQ: `../../hq/test-hq-practice.js` (demo with `?pplive`: Needs attention's "Add Riyeser's bank details to offer bank
+  transfer" and "Practice payments to clear" for the Owner only, Clear practice payments and Put back on the Money tab,
+  "Bought now (ended trial early)"). The paypal function's side: `supabase/functions/paypal/paypal_test.ts` on main.
 - `payoff-test.js` (OWNER-PAYOFF): the ways to pay in Add to my plan against a pretend paypal function like the deployed one:
   a customer while PayPal is in sandbox (no PayPal; bank transfer only with details), HQ's owner in sandbox ("Pay with PayPal
   (practice: only you see this)", the status call carries the sign-in), live mode, bank transfer with and without details,

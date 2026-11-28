@@ -786,6 +786,11 @@ select.chtime { appearance: auto; cursor: pointer; padding: 4px 8px; font: inher
 .apm:has(input:checked) { border-color: var(--brand); background: var(--brand-l); }
 .apm input { margin-top: 3px; } .apm small { display: block; color: var(--muted); font-size: 12.5px; }
 .apopts { margin-top: 10px; } .apopts .opt.sm { margin: 0 0 6px; }
+/* PAYPAL-LIVE: when to start paying (on a free trial), Buy now on the plan list, a practice (test) subscription */
+.apstart { margin: 10px 0 4px; } .apstart .opt.sm { margin: 0 0 6px; } .apstart .opt small { margin-left: 22px; }
+.hplan .hpst { display: inline-flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 6px 8px; text-align: right; }
+.hplan .hpst .btn.sm { padding: 4px 10px; }
+.hbill .hbsub.hbprac { background: rgba(100, 116, 139, .07); }
 .mcard .brk { list-style: none; margin: 10px 0 4px; padding: 0; font-size: 14px; }
 .mcard .brk li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px dashed var(--line); color: var(--text); }
 .aptotal { font-size: 15px; color: var(--muted); margin: 8px 0 2px; } .aptotal b { font-size: 26px; color: var(--ink); }

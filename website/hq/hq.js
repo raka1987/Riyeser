@@ -248,6 +248,8 @@
       // payments: PayPal subscriptions and bank transfer invoices (team-chat.sql), and the paypal function's status
       billing: () => rpc('hq_billing'), markPaid: (ref, bankRef, amount) => rpc('hq_billing_mark_paid', { invoice_ref: ref, bank_reference: bankRef, paid_amount: amount }),
       setBillingEntity: (d) => rpc('hq_set_billing_entity', { details: d }),
+      // PAYPAL-LIVE (HQ Owner): practice (PayPal sandbox) payments for one business, cleared once PayPal is live, or put back
+      clearPractice: (ws) => rpc('hq_billing_clear_practice', { ws }), restorePractice: (ws) => rpc('hq_billing_restore_practice', { ws }),
       resendDoc: (ref, to, update) => rpc('hq_billing_resend', { doc_ref: ref, to_email: to || null, update_contact: !!update }),
       // payments received in the last few days; an older database: worked out from the latest payments
       async paymentsReceived(days) {
@@ -423,6 +425,11 @@
     const contactsOf = (ws) => { const c = cos.find((x) => x.id === ws) || {}; return [...new Set([c.owner_email, c.email].filter(Boolean).map((x) => x.toLowerCase()))]; };
     const maskEmail = (e) => `${e.split('@')[0].slice(0, 2)}…@${e.split('@')[1]}`;
     const paypalSeen = { env: 'sandbox', last_webhook_at: h(3), last_webhook_type: 'PAYMENT.SALE.COMPLETED' };
+    // PAYPAL-LIVE demo (?demo&pplive): PayPal is live; Harbour Cafe pays with live PayPal; RI-10001 is a practice payment left over
+    const PPLIVE = new URLSearchParams(location.search).has('pplive'); const clears = [];
+    if (PPLIVE) { paypalSeen.env = 'live'; bOrders.forEach((o) => { if (o.ref === 'RI-10002') o.paypal_env = 'live'; });
+      bOrders.push({ id: 'o4', workspace_id: 'w1', ref: 'RI-10004', method: 'paypal', modules: ['bookings'], module_names: ['Bookings'], people: 3, billing: 'monthly', amount: 25, total: 25, status: 'active', paypal_id: '…B7N0W1', paypal_env: 'live', buy_now: true, trial_ends_before: { bookings: t(-60).slice(0, 10) }, paid_through: t(-30).slice(0, 10), next_charge_at: t(-30), created_at: t(0.2) }); }
+    const practiceOf = (ws) => bOrders.filter((o) => o.workspace_id === ws && o.method === 'paypal' && o.paypal_env === 'sandbox' && !o.practice_cleared_at);
     const today = () => new Date(new Date().toISOString().slice(0, 10));
     const dd = (a) => Math.round((new Date(a) - today()) / 864e5);
     const addDays = (d, n) => new Date(new Date(d).getTime() + n * 864e5).toISOString().slice(0, 10);
@@ -598,7 +605,8 @@
           requests_waiting: 1, notes: notes[ws] || [],
           extra: { credit: credits[ws] || {}, tickets: P.includes('support.view') ? tickets.filter((x) => x.workspace_id === ws) : null,
             refunds: P.includes('refunds.view') ? refunds.filter((f) => f.workspace_id === ws).map(rowOf) : null, offers: offers.filter((o) => o.workspace_id === ws),
-            billing: P.includes('licences.view') ? { orders: bOrders.filter((o) => o.workspace_id === ws).map(orderOut), payments: bPays.filter((x) => x.workspace_id === ws).map(payOut), can_mark_paid: P.includes('licences.manage'), contacts: contactsOf(ws) } : null,
+            billing: P.includes('licences.view') ? { orders: bOrders.filter((o) => o.workspace_id === ws).map(orderOut), payments: bPays.filter((x) => x.workspace_id === ws).map(payOut), can_mark_paid: P.includes('licences.manage'), contacts: contactsOf(ws),
+              practice: { live: paypalSeen.env === 'live', can_clear: me().role === 'owner', orders: practiceOf(ws).map((o) => o.ref), last_clear: (() => { const c = clears.filter((x) => x.ws === ws).pop(); return c ? { id: c.id, at: c.at, by: c.by, restored_at: c.restored_at || null } : null; })() } } : null,
             history: P.includes('audit.view') ? hist.filter((x) => x.workspace_id === ws) : null } }; },
       async setCallsPaid(ws, until) { cos.find((x) => x.id === ws).calls_paid_until = until + 'T23:59:59Z'; log('calls.paid_until', { workspace_id: ws, until }); },
       async addNote(ws, body) { return this.noteAdd(ws, { kind: 'note', body }); },
@@ -718,6 +726,8 @@
         return { failed: bOrders.filter((o) => ['payment_failed', 'suspended'].includes(o.status)).map(orderOut).map(bizOf), unpaid: bOrders.filter((o) => o.method === 'bank' && o.status === 'pending').map(orderOut).map(bizOf),
           payments: bPays.slice().sort((a, b) => b.at.localeCompare(a.at)).map(payOut).map(bizOf), paypal: { ...paypalSeen, events_7d: 14, subscriptions: bOrders.filter((o) => o.method === 'paypal' && o.status !== 'cancelled').length },
           entity: JSON.parse(JSON.stringify(entity)), bank_ready: !!entity.bank.account_number, grace_days: settings['billing.grace_days'],
+          practice_businesses: paypalSeen.env === 'live' ? [...new Set(bOrders.filter((o) => o.method === 'paypal' && o.paypal_env === 'sandbox' && !o.practice_cleared_at).map((o) => o.workspace_id))]
+            .map((w) => ({ workspace_id: w, business: (cos.find((c) => c.id === w) || {}).name, orders: practiceOf(w).map((o) => o.ref) })) : [], can_clear_practice: me().role === 'owner',
           can_mark_paid: P.includes('licences.manage'), can_edit_entity: me().role === 'owner', entity_pending: null,
           can_send_docs: P.includes('licences.manage') }; },
       async markPaid(ref, bankRef, amount) { need('licences.manage'); const o = bOrders.find((x) => x.ref === String(ref).trim().toUpperCase() && x.method === 'bank');
@@ -749,7 +759,18 @@
         if (JSON.stringify(entity) === JSON.stringify(details)) return;
         const before = entity; entity = details;
         log('billing.entity_changed', { name: details.name, before, after: details, bank_set: !!details.bank.account_number }); },
-      async paypalStatus() { return { ready: false, credentials: true, webhooks: false, env: 'sandbox', message: 'Webhooks aren\'t verified yet: add PAYPAL_WEBHOOK_ID and deploy again.' }; },
+      async paypalStatus() { return PPLIVE ? { ready: true, credentials: true, webhooks: true, env: 'live', message: 'PayPal is set up.' } : { ready: false, credentials: true, webhooks: false, env: 'sandbox', message: 'Webhooks aren\'t verified yet: add PAYPAL_WEBHOOK_ID and deploy again.' }; },
+      async clearPractice(ws) { if (me().role !== 'owner') throw new Error('Your HQ role can\'t do that. Only the Riyeser HQ Owner can clear practice payments.');
+        const os = practiceOf(ws); if (!os.length) throw new Error('This business has no practice (test) payments to clear.');
+        const before = JSON.parse(JSON.stringify(mods[ws] || {})); const ms = [...new Set(os.flatMap((o) => o.modules))];
+        ms.forEach((m) => { (mods[ws] = mods[ws] || {})[m] = { status: 'trial', trial_ends: null }; });
+        os.forEach((o) => { o.practice_status_before = o.status; o.status = 'void'; o.practice_cleared_at = now(); });
+        const c = { id: clears.length + 1, ws, before, orders: os.map((o) => o.id), at: now(), by: me().display_name }; clears.push(c);
+        log('billing.practice_cleared', { workspace_id: ws, orders: os.map((o) => o.ref), programs: ms }); return { clear: c.id, orders: os.map((o) => o.ref), programs: ms }; },
+      async restorePractice(ws) { if (me().role !== 'owner') throw new Error('Your HQ role can\'t do that. Only the Riyeser HQ Owner can put practice payments back.');
+        const c = clears.filter((x) => x.ws === ws && !x.restored_at).pop(); if (!c) throw new Error('There are no cleared practice payments to put back for this business.');
+        mods[ws] = c.before; bOrders.filter((o) => c.orders.includes(o.id)).forEach((o) => { o.status = o.practice_status_before; o.practice_cleared_at = null; });
+        c.restored_at = now(); log('billing.practice_restored', { workspace_id: ws, clear: c.id }); return { restored: c.id }; },
       // support
       async tickets(box = 'open', q = '') { need('support.view'); const od = settings['support.overdue_hours']; const s = q.toLowerCase();
         const all = tickets.map((x) => ({ ...x, business: (cos.find((c) => c.id === x.workspace_id) || {}).name || null, assignee_name: nameOf(x.assignee), escalated: x.escalations.length > 0,
@@ -1104,7 +1125,9 @@
           emails_failed: P.includes('emails.view') ? emails.filter((e) => ['failed', 'held'].includes(e.status)).length : null,
           trials_3d: cos.filter((c) => c.status === 'active' && real(c.id) && !Object.values(L(c).modules).some((v) => v.status === 'active')).map((c) => { const tr = Object.entries(L(c).modules).filter(([, v]) => v.status === 'trial' && v.days_left <= 3);
             return tr.length ? { id: c.id, name: c.name, company_code: c.company_code, days_left: Math.min(...tr.map(([, v]) => v.days_left)), modules: tr.map(([m]) => m) } : null; }).filter(Boolean).sort((a, b) => a.days_left - b.days_left),
-          follow_ups: myFollowUps() }; },
+          follow_ups: myFollowUps(),
+          bank_missing: me().role === 'owner' ? !entity.bank.account_number : null,
+          practice_to_clear: me().role === 'owner' && paypalSeen.env === 'live' ? new Set(bOrders.filter((o) => o.method === 'paypal' && o.paypal_env === 'sandbox' && !o.practice_cleared_at).map((o) => o.workspace_id)).size : null }; },
     };
   }
   const api = DEMO ? demo() : online();
@@ -1597,16 +1620,16 @@
   const ordersTable = (list, id, biz, mark) => `<table class="tbl" id="${id}"><tr>${biz ? '<th>Business</th>' : ''}<th>Invoice</th><th>What</th><th>Amount</th><th>How</th><th>State</th>${mark ? '<th></th>' : ''}</tr>
     ${list.map((o) => `<tr>${biz ? `<td><button class="lnk" data-goco="${esc(o.workspace_id)}" data-cptab="money"><b>${esc(o.business || '')}</b></button></td>` : ''}<td class="nowrap">${docRef(o.ref, o.doc, { ws: o.workspace_id, paid: o.status === 'paid', paidAt: o.paid_at })}<small>${day(o.created_at)}</small></td>
       <td>${esc(orderWhat(o))}</td><td>${orderAmount(o)}</td>
-      <td>${o.method === 'paypal' ? `PayPal${o.paypal_id ? `<small class="code">${esc(o.paypal_id)}</small>` : ''}` : 'Bank transfer'}</td>
-      <td>${orderPill(o)}<small>${o.status === 'pending' && o.due_date ? `due ${day(o.due_date)}` : o.status === 'payment_failed' && o.grace_until ? `works until ${day(o.grace_until)}` : o.paid_through ? `paid to ${day(o.paid_through)}` : ''}${o.paid_reference ? ` · ref ${esc(o.paid_reference)}` : ''}${o.marked_paid_by ? ` · by ${esc(o.marked_paid_by)}` : ''}</small></td>
+      <td>${o.method === 'paypal' ? `${o.practice || o.paypal_env === 'sandbox' ? '<span class="pill">Practice payment (test)</span>' : 'PayPal'}${o.paypal_id ? `<small class="code">${esc(o.paypal_id)}</small>` : ''}` : 'Bank transfer'}${o.buy_now ? '<small class="pill ok" data-buynow>Bought now (ended trial early)</small>' : ''}</td>
+      <td>${o.practice_cleared_at ? '<span class="pill">Cleared (test)</span>' : orderPill(o)}<small>${o.status === 'pending' && o.due_date ? `due ${day(o.due_date)}` : o.status === 'payment_failed' && o.grace_until ? `works until ${day(o.grace_until)}` : o.paid_through ? `paid to ${day(o.paid_through)}` : ''}${o.paid_reference ? ` · ref ${esc(o.paid_reference)}` : ''}${o.marked_paid_by ? ` · by ${esc(o.marked_paid_by)}` : ''}</small></td>
       ${mark ? `<td>${o.method === 'bank' && o.status === 'pending' ? `<button class="btn sm p" data-markpaid="${esc(o.ref)}" data-amount="${esc(o.total)}">Mark bank transfer paid</button>` : ''}</td>` : ''}</tr>`).join('')}</table>`;
   // What a payment was for: "Accounting Basics, Payroll · 3 people · monthly · 22 Feb – 22 Mar 2027"
   const payFor = (p) => [(p.module_names || []).join(', '), p.people ? people(p.people) : '', p.billing || '', dayRange(p.period_from, p.period_to)].filter(Boolean).join(' · ');
   const paysTable = (list, id, biz) => `<table class="tbl" id="${id}"><tr><th>When</th>${biz ? '<th>Business</th>' : ''}<th>Receipt</th><th>For</th><th>Amount</th><th>How</th><th>State</th></tr>
     ${list.map((p) => `<tr><td class="nowrap">${day(p.at)}</td>${biz ? `<td><button class="lnk" data-goco="${esc(p.workspace_id)}" data-cptab="money">${esc(p.business || '')}</button></td>` : ''}<td class="nowrap">${docRef(p.ref, p.doc, { ws: p.workspace_id })}<small class="code">${esc(p.order_ref || '')}</small></td>
       <td class="forc">${esc(payFor(p))}</td>
-      <td>${p.amount != null ? money(p.amount) : ''}</td><td>${p.method === 'paypal' ? 'PayPal' : 'Bank transfer'}${p.provider_ref ? `<small class="code">${esc(p.provider_ref)}</small>` : ''}</td>
-      <td>${p.status === 'completed' ? '<span class="pill ok">Paid</span>' : `<span class="pill bad">Failed</span>${p.note ? `<small>${esc(p.note)}</small>` : ''}`}</td></tr>`).join('')}</table>`;
+      <td>${p.amount != null ? money(p.amount) : ''}</td><td>${p.practice ? 'Practice payment (test)' : p.method === 'paypal' ? 'PayPal' : 'Bank transfer'}${p.provider_ref ? `<small class="code">${esc(p.provider_ref)}</small>` : ''}</td>
+      <td>${p.practice ? '<span class="pill">Test: not charged</span>' : p.status === 'completed' ? '<span class="pill ok">Paid</span>' : `<span class="pill bad">Failed</span>${p.note ? `<small>${esc(p.note)}</small>` : ''}`}</td></tr>`).join('')}</table>`;
   // The customer's copy of an invoice or receipt, exactly as they see it, with Print / Save as PDF and Resend.
   function docView(ref) {
     const x = (S.docs || {})[ref]; if (!x) return; const d = x.doc; const R = window.RiyeserBillDoc;
@@ -1651,6 +1674,19 @@
         catch (err) { btn.disabled = false; d.querySelector('#rserr').innerHTML = `<div class="err">${esc(plain(err))}</div>`; } };
     });
   }
+  // PAYPAL-LIVE: the Owner clears (or puts back) one business's practice payments, after saying exactly what happens
+  function practiceDlg(ws, clear) {
+    dlg(clear ? `<h3>Clear practice payments?</h3><p class="small">Every practice (PayPal sandbox) payment of this business is marked void (test). Programs paid only by them go back to their free trial, or to unpaid if the trial is over. Live PayPal and bank transfer payments, and their paid time, stay exactly as they are. Receipts are kept, labelled practice.</p>
+        <p class="muted small">It's written in the HQ history (who, when, before and after), and you can put it back.</p><div id="pxerr"></div>
+        <div class="mfoot"><button type="button" class="btn" data-close>Cancel</button><button type="button" class="btn p" id="pxGo">Clear practice payments</button></div>`
+      : `<h3>Put practice payments back?</h3><p class="small">The practice payments and the programs' paid time go back exactly as they were before you cleared them. This is refused if a real payment has come in since.</p><div id="pxerr"></div>
+        <div class="mfoot"><button type="button" class="btn" data-close>Cancel</button><button type="button" class="btn p" id="pxGo">Put them back</button></div>`, (d, close) => {
+      d.querySelector('#pxGo').onclick = async (e) => { e.target.disabled = true;
+        try { const r = clear ? await api.clearPractice(ws) : await api.restorePractice(ws); close();
+          flash(clear ? `Practice payments cleared (${(r.orders || []).join(', ')}). ${(r.programs || []).length ? 'Back on their free trial: ' + r.programs.map((m) => (MODULES.find((x) => x[0] === m) || [m, m])[1]).join(', ') + '.' : ''}` : 'Practice payments put back.'); await reloadCompany(); }
+        catch (err) { e.target.disabled = false; d.querySelector('#pxerr').innerHTML = `<div class="err">${esc(plain(err))}</div>`; } };
+    });
+  }
   function markPaidDlg(ref, amount, after) {
     dlg(`<h3>Mark bank transfer paid</h3><p class="muted small">Only when the money is in Riyeser's bank account. This switches the programs on straight away, emails the owner a receipt, and goes in the HQ history.</p>
       <form id="mp"><label class="f"><span>Invoice</span><input name="ref" value="${esc(ref)}" readonly></label>
@@ -1682,11 +1718,20 @@
         ${ed ? '<div><button class="btn p">Save billing entity</button></div>' : '<p class="muted small" id="entOwnerOnly">Only the Owner can change these.</p>'}</form>
       <p class="muted small">Each change is in the HQ history (who, when, before and after) and kept as a new version: invoices and receipts already made keep the details they were made with.</p></div>`;
   }
+  // PAYPAL-LIVE: businesses that still have practice (PayPal sandbox) payments now PayPal is live. The Owner clears them on
+  // each business's Money tab (practice-paid programs go back to their free trial; live orders are never touched).
+  function practiceCard(b) {
+    const list = b.practice_businesses || []; if (!list.length) return '';
+    return `<div class="card" id="practiceCard"><h3>Practice payments to clear <small>· made with PayPal's practice site before PayPal went live: not real money</small></h3>
+      <p class="small">They don't stop anyone paying for real. Clear them so the programs they paid for go back to their free trial.${b.can_clear_practice ? '' : ' Only the Owner can clear them.'}</p>
+      <div class="alrow">${list.map((x) => `<button class="lnk" data-goco="${esc(x.workspace_id)}" data-cptab="money">${esc(x.business || 'A business')} <small>${esc((x.orders || []).join(', '))}</small></button>`).join('')}</div></div>`;
+  }
   async function payments() {
     main('<p class="muted">Loading…</p>');
     const [b, st] = await Promise.all([api.billing(), api.paypalStatus()]);
     const m = main(`<h2>Invoices &amp; payments</h2><p class="sub">PayPal subscriptions and bank transfers. All amounts in US dollars. PayPal ids show only their last 6 characters.</p>
       <div class="grid g2">${paypalCard(st, b.paypal)}<div class="card"><h3>At a glance</h3><div class="tiles mtiles">${tile('Failed payments', num(b.failed.length), `grace ${num(b.grace_days)} days`)}${tile('Unpaid invoices', num(b.unpaid.length), 'bank transfer')}${tile('Payments', num(b.payments.filter((p) => p.status === 'completed').length), 'latest 100')}</div></div></div>
+      ${practiceCard(b)}
       <div class="card scroll" id="failedCard"><h3>Failed payments <small>· PayPal couldn't take the money; the programs work until the date shown</small></h3>${b.failed.length ? ordersTable(b.failed, 'failedTbl', true, false) : '<p class="muted small">None. 🎉</p>'}</div>
       <div class="card scroll" id="unpaidCard"><h3>Unpaid invoices <small>· bank transfer; mark paid when the money is in the bank</small></h3>${b.unpaid.length ? ordersTable(b.unpaid, 'unpaidTbl', true, b.can_mark_paid) : '<p class="muted small">None.</p>'}</div>
       <div class="card scroll" id="paysCard"><h3>Payments</h3>${b.payments.length ? paysTable(b.payments, 'paysTbl', true) : '<p class="muted small">No payments yet.</p>'}</div>
@@ -1734,10 +1779,12 @@
     const items = [[a.unassigned, 'Unassigned tickets', 'support:unassigned'], [a.overdue, 'Overdue tickets', 'support:overdue', 'bad'], [a.updates_overdue, 'Overdue updates to customers', 'support:overdue', 'bad'], [a.mine, 'My open tickets', 'support:mine'],
       [a.approvals, 'Approvals waiting', 'approvals'], [a.refunds_waiting, 'Refunds waiting', 'refunds'], [(a.trials_3d || []).length, 'Trials ending in 3 days', 'trials'],
       [(a.follow_ups || []).filter((f) => f.due).length, 'My follow-ups due', 'followups'], [a.emails_failed, 'Failed or held emails', 'emails', 'bad'],
-      [Array.isArray(off) ? off.length : null, 'Link Offices offline', 'linkoff', 'bad']].filter((x) => x[0] != null);
+      [Array.isArray(off) ? off.length : null, 'Link Offices offline', 'linkoff', 'bad'],
+      [a.practice_to_clear == null ? null : a.practice_to_clear, 'Practice payments to clear', 'payments']].filter((x) => x[0] != null);
     const fu = a.follow_ups || [];
     return `<div class="card attn" id="attn"><h3>Queue at a glance <small>· overdue and unassigned work, for ${esc(S.me.name)}</small></h3>
       <div class="alist" style="--cols:${[3, 4, 2].find((c) => items.length % c === 0) || 3}">${items.map(([n, l, g, bad]) => `<button class="aitem${n ? ` on${bad ? ' bad' : ''}` : ''}" data-go="${g}"><b>${num(n)}</b><span>${l}</span></button>`).join('')}</div>
+      ${a.bank_missing ? '<div class="alrow" id="attnBank"><h4>Needs attention</h4><button class="lnk" data-go="payments">Add Riyeser\'s bank details to offer bank transfer <small>Invoices &amp; payments → Billing entity</small></button></div>' : ''}
       ${(a.trials_3d || []).length ? `<div class="alrow" id="attnTrials"><h4>Trials ending in 3 days</h4>${a.trials_3d.slice(0, 12).map((t) => `<button class="lnk" data-goco="${esc(t.id)}" data-cptab="programs">${esc(t.name)} <small>${t.days_left === 0 ? 'today' : `in ${t.days_left} day${t.days_left === 1 ? '' : 's'}`}</small></button>`).join('')}</div>` : ''}
       ${Array.isArray(off) && off.length ? `<div class="alrow"><h4>Link Offices offline</h4>${off.slice(0, 12).map((t) => `<button class="lnk" data-goco="${esc(t.id || t.workspace_id)}" data-cptab="link">${esc(t.name || t.business || 'A business')}</button>`).join('')}</div>` : ''}
       </div>
@@ -1841,7 +1888,7 @@
   }
 
   function closePanel() { document.querySelectorAll('.modal').forEach((x) => x.remove()); }
-  const HIST_ACTS = { 'account.kind': 'marked an account as test, demo, internal or customer', 'billing.bank_paid': 'marked a bank transfer paid', 'billing.doc_resent': 'sent an invoice or receipt again', 'billing.entity_changed': 'changed the billing entity (bank details)',
+  const HIST_ACTS = { 'account.kind': 'marked an account as test, demo, internal or customer', 'billing.bank_paid': 'marked a bank transfer paid', 'billing.practice_cleared': 'cleared practice (test) payments', 'billing.practice_restored': 'put practice (test) payments back', 'billing.doc_resent': 'sent an invoice or receipt again', 'billing.entity_changed': 'changed the billing entity (bank details)',
     'billing.entity_proposed': 'proposed a billing entity change (old two-person rule)', 'billing.entity_rejected': 'turned down a billing entity change (old two-person rule)',
     'billing.entity_replaced': 'replaced a waiting billing entity change (old two-person rule)', 'link.new_password': 'asked Link Office for a new phone password (nobody sees it)', 'customer.viewed': 'opened the company', 'company.viewed': 'opened the company', 'note.added': 'added a note', 'calls.paid_until': 'changed Riyeser Link paid-until',
     'licence.module': 'changed a licence', 'licence.plan': 'changed a plan', 'licence.storage': 'granted extra file storage', 'staff.added': 'added HQ staff', 'staff.changed': 'changed HQ staff', 'staff.permissions': 'changed HQ permissions',
@@ -2260,9 +2307,19 @@
     return out.sort((a, b) => String(b.at).localeCompare(String(a.at)));
   }
   // --- Money: refunds, credit, free periods
+  // PAYPAL-LIVE: practice (sandbox) payments on this business, and the Owner's Clear / Put back
+  function practiceBox(B) {
+    const p = B.practice; if (!p) return '';
+    const last = p.last_clear; const has = (p.orders || []).length;
+    if (!has && !(last && !last.restored_at)) return '';
+    return `<div class="card" id="coPractice" style="margin-top:14px"><h3>Practice payments (test) <small>· PayPal's practice site, not real money</small></h3>
+      ${has ? `<p class="small">${esc(p.orders.join(', '))}: made with PayPal's practice site${p.live ? ' before PayPal went live' : ''}. They don't stop a real payment. Clearing marks them void (test) and puts the programs they paid for back on their free trial (or unpaid if it's over). Live PayPal and bank transfer payments are never touched. It's in the HQ history, and you can put it back.</p>
+        ${p.can_clear ? '<button class="btn p sm" id="clearPractice">Clear practice payments for this business</button>' : '<p class="muted small" id="practiceOwnerOnly">Only the Owner can clear practice payments.</p>'}`
+        : `<p class="small">Practice payments cleared ${day(last.at)}${last.by ? ` by ${esc(last.by)}` : ''}.</p>${p.can_clear ? '<button class="btn sm" id="restorePractice">Put practice payments back</button>' : ''}`}</div>`;
+  }
   function billingCards(X) {
     const B = X.billing; if (!B) return '';
-    return `<div class="card scroll" id="coBilling" style="margin-top:14px"><h3>Invoices and subscriptions <small>· ${B.orders.length} · PayPal ids show only their last 6 characters</small></h3>${B.orders.length ? ordersTable(B.orders, 'coOrders', false, B.can_mark_paid) : '<p class="muted small">None yet: they haven\'t paid online.</p>'}</div>
+    return `${practiceBox(B)}<div class="card scroll" id="coBilling" style="margin-top:14px"><h3>Invoices and subscriptions <small>· ${B.orders.length} · PayPal ids show only their last 6 characters</small></h3>${B.orders.length ? ordersTable(B.orders, 'coOrders', false, B.can_mark_paid) : '<p class="muted small">None yet: they haven\'t paid online.</p>'}</div>
       <div class="card scroll" id="coPays" style="margin-top:14px"><h3>Payments <small>· ${B.payments.length}</small></h3>${B.payments.length ? paysTable(B.payments, 'coPayTbl', false) : '<p class="muted small">None yet.</p>'}</div>`;
   }
   function tabMoney(c) {
@@ -2291,6 +2348,8 @@
     el.querySelectorAll('[data-cpgo]').forEach((b) => b.onclick = () => { const x = document.querySelector(`#cptabs [data-cptab="${b.dataset.cpgo}"]`); if (x) x.click(); });
     el.querySelectorAll('[data-gotab]').forEach((b) => b.onclick = () => go('#/' + b.dataset.gotab));
     el.querySelectorAll('[data-markpaid]').forEach((b) => b.onclick = () => markPaidDlg(b.dataset.markpaid, b.dataset.amount, reloadCompany));
+    const cpx = el.querySelector('#clearPractice'); if (cpx) cpx.onclick = () => practiceDlg(id, true);
+    const rpx = el.querySelector('#restorePractice'); if (rpx) rpx.onclick = () => practiceDlg(id, false);
     el.querySelectorAll('[data-q]').forEach((b) => b.onclick = () => quickAction(b.dataset.mod, b.dataset.q, Number(b.dataset.days) || null));
     el.querySelectorAll('[data-manage]').forEach((b) => b.onclick = () => manageProgram(b.dataset.manage));
     el.querySelectorAll('[data-pcsfor]').forEach((b) => b.onclick = () => {

@@ -37,7 +37,7 @@ const LO_DL = 'download/link-office.html';
   check(bundles.map((x) => x[0]).join() === 'bundle-shop,bundle-office,bundle-business' && bundles.map((x) => x[1].replace(/\s/g, '')).join() === 'US$59/month,US$59/month,US$99/month', `bundles: Shop 59, Office 59, Business 99 (${bundles.map((x) => x[1]).join(' | ')})`);
   check(bundles[2][2] && bundles[2][3].includes('Most popular') && bundles[0][3].includes('US$74') && bundles[1][3].includes('US$70') && bundles[2][3].includes('US$138'), 'Business is "Most popular"; separate prices 74, 70, 138');
   check(bundles[2][3].includes('US$990 a year'), 'bundles show the yearly price');
-  check(await pg.$eval('#bundle-shop .buybtns a.btn.p', (a) => a.getAttribute('href')) === '/link/?signup&add=basic,pos,calls&buy=1', 'Shop bundle: Buy now adds its three programs');
+  check(await pg.$eval('#bundle-shop .buybtns a.btn.p', (a) => a.getAttribute('href')) === '/link/?signup&add=basic,pos,calls&buy=now', 'Shop bundle: Buy now adds its three programs');
   const free = await pg.$$eval('tr[data-free]', (rs) => rs.map((r) => [r.dataset.free, r.querySelector('.freeinfo') ? r.querySelector('.freeinfo').textContent.replace(/\s+/g, ' ') : '', !!r.querySelector('.nolim')]));
   check(free.map((x) => x[0]).join() === FREE.join() && free.every(([, t, n]) => t.includes('Included free:') && n), `What's free: ${free.map((x) => x[0]).join(', ')}, all with no limits`);
   check(free.some(([id, t]) => id === 'invoices' && t.includes('Accounting Basics (US$25/month)')), 'Invoices: the upgrade note with the Basics price');
