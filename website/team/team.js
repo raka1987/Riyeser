@@ -31,6 +31,11 @@
   // This page's own folder (/link/ or the old /team/), so signing out and the demo stay where they are.
   const HERE = location.pathname.replace(/[^/]*$/, '') || '/link/';
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  // The Riyeser wordmark (assets/logo-wordmark.svg, the same paths, drawn inline): the letters take the text colour,
+  // the swoosh is brand blue (lighter on dark backgrounds, see .wm-sw in the CSS). wordmark(false) when a link around it carries the name.
+  const WM_SW = 'M2 29C62 15 172 8 266 11C178 15 78 23 7 41Z';
+  const WM_WORD = 'M-0.3 0H20L23.7 -22.8H33.2L40.3 0H61L52.1 -27.1C60 -31.3 65.2 -38.3 66.7 -47.4C69.2 -62.9 60 -72.8 42.6 -72.8H11.7ZM26.4 -38.5 29.3 -56.2H38.4C44.5 -56.2 47.8 -52.7 46.9 -47.4C46 -42 41.5 -38.5 35.4 -38.5ZM65 0H84.6L93.1 -51.6H73.6ZM84 -55.8C89.6 -55.8 94.7 -60 95.6 -65.3C96.5 -70.7 92.8 -74.9 87.2 -74.9C81.5 -74.9 76.5 -70.7 75.6 -65.3C74.7 -60 78.4 -55.8 84 -55.8ZM90.1 20.4H103.4C112.7 20.4 118.2 16.6 123.6 6.5L155 -51.6H134.1L123.8 -29.7C122.2 -26.4 120.7 -23 119.2 -19.6C118.9 -23 118.5 -26.4 118.1 -29.7L115.2 -51.6H95.7L106.9 0L106.5 0.8C104.7 4.3 104 5.6 100.4 5.6H92.6ZM176 1.2C191.1 1.2 200.6 -6.2 204.3 -17.6H186.5C185.5 -14.5 183 -12.5 177.6 -12.5C171.5 -12.5 169.8 -15.1 169.8 -19.6C192.2 -19.9 206.2 -21.8 206.2 -35.6C206.2 -47.4 196 -52.7 183.6 -52.7C166.7 -52.7 154.1 -42.7 151.3 -25.8C148.4 -8.1 158.4 1.2 176 1.2ZM171.2 -31.1C172.2 -35.4 174.5 -39 181.5 -39C185.9 -39 188.4 -37.6 188.4 -35.4C188.4 -33 185.7 -31.5 171.2 -31.1ZM231.1 1.3C247.3 1.3 259 -7.3 259 -18.6C259 -25.5 254.4 -29.4 244.5 -31.2L233.8 -33C231.4 -33.4 230.3 -34.3 230.3 -35.7C230.3 -38 233.1 -39.7 236.8 -39.7C240.7 -39.7 242.9 -37.7 242.6 -34.4H260.4C260.5 -35.3 260.6 -36.3 260.6 -37.1C260.6 -46.6 251.7 -52.6 237.4 -52.6C221.5 -52.6 210.5 -44.9 210.5 -33.6C210.5 -26.3 215.5 -21.5 224.9 -20L234.3 -18.4C237.5 -17.9 238.8 -17 238.8 -15.5C238.8 -13.3 235.8 -11.7 231.9 -11.7C227.8 -11.7 225.5 -13.5 225.6 -16.8H206.5V-16.4C206.5 -5.6 216.6 1.3 231.1 1.3ZM287.5 1.2C302.6 1.2 312.1 -6.2 315.9 -17.6H298C297.1 -14.5 294.5 -12.5 289.2 -12.5C283 -12.5 281.3 -15.1 281.3 -19.6C303.8 -19.9 317.7 -21.8 317.7 -35.6C317.7 -47.4 307.5 -52.7 295.1 -52.7C278.2 -52.7 265.6 -42.7 262.8 -25.8C259.9 -8.1 270 1.2 287.5 1.2ZM282.8 -31.1C283.7 -35.4 286 -39 293.1 -39C297.5 -39 300 -37.6 300 -35.4C300 -33 297.2 -31.5 282.8 -31.1ZM317.7 0H337.3L341.4 -24.7C342.5 -31.6 347.1 -35.9 353.2 -35.9H360.3L362.9 -51.6H358C350.9 -51.6 346.8 -49.1 343.8 -42.2H343.7L345.2 -51.6H326.3ZM369.8 0.9C374.9 0.9 379.6 -3 380.5 -8C381.5 -14.2 377.3 -19.4 371.2 -19.4C366.1 -19.4 361.4 -15.5 360.5 -10.5C359.5 -4.2 363.7 0.9 369.8 0.9Z';
+  const wordmark = (named = true) => `<svg class="wm" viewBox="-3 -78 388 121" ${named ? 'role="img" aria-label="Riyeser"' : 'aria-hidden="true"'} focusable="false"><path class="wm-sw" fill="#0b5cff" d="${WM_SW}"/><path fill="currentColor" d="${WM_WORD}"/></svg>`;
   const COLOURS = ['#2563eb', '#15803d', '#b45309', '#9333ea', '#dc2626', '#0e7490', '#be185d', '#4d7c0f', '#7c3aed', '#0f766e'];   // M21: white initials >= 4.5:1
   const colourOf = (id) => COLOURS[[...String(id)].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7) % COLOURS.length];
   const initials = (n) => (String(n || '').trim().split(/\s+/).map((w) => (w.match(/[\p{L}\p{N}]/u) || [''])[0]).join('').slice(0, 2) || '?').toUpperCase();   // M9: letters and numbers only
@@ -887,7 +892,7 @@
     const join = params.get('join');
     $app.className = 'acct'; document.title = 'Riyeser'; tabIcon(false);
     $app.innerHTML = `<div class="gate"><form class="gcard" id="gf">${/Electron/.test(navigator.userAgent) ? '' : '<a class="gback" href="/">← Back to riyeser.com</a>'}
-      <div class="glogo"><img src="/assets/logo-r.png" alt="">Riyeser</div>
+      <div class="glogo">${wordmark()}</div>
       ${mode !== 'reset' ? `<div class="gtabs" role="tablist"><button type="button" role="tab" data-go="in" class="${mode === 'in' ? 'on' : ''}" aria-selected="${mode === 'in'}">Sign in</button><button type="button" role="tab" data-go="up" class="${mode === 'up' ? 'on' : ''}" aria-selected="${mode === 'up'}">Create account</button></div>` : ''}
       <h1>${mode === 'up' ? 'Create your Riyeser account' : mode === 'reset' ? 'Reset your password' : 'Sign in to Riyeser'}</h1>
       ${join ? '<div class="ok ginv" id="ginv" hidden></div>' : ''}
@@ -931,7 +936,7 @@
     $app.className = 'acct'; document.title = 'Contact Riyeser support'; tabIcon(false);
     const val = (k) => esc(v[k] || '');
     $app.innerHTML = `<div class="gate"><form class="gcard" id="ctf" novalidate>
-      <div class="glogo"><img src="/assets/logo-r.png" alt="">Riyeser</div>
+      <div class="glogo">${wordmark()}</div>
       <h1>Contact Riyeser support</h1><p>No account or sign-in needed. We reply by email, usually within one business day.</p>${note}
       <label class="f"><span>Your name</span><input name="name" maxlength="80" autocomplete="name" value="${val('name')}"></label>
       <label class="f"><span>Your email</span><input name="email" type="email" maxlength="254" autocomplete="email" value="${val('email')}"></label>
@@ -958,7 +963,7 @@
   }
   function contactSent(ref, email) {
     $app.innerHTML = `<div class="gate"><div class="gcard" id="ctsent">
-      <div class="glogo"><img src="/assets/logo-r.png" alt="">Riyeser</div>
+      <div class="glogo">${wordmark()}</div>
       <h1>✅ Thanks, we've got it</h1><p>Your request number is <b class="code">${esc(ref)}</b>. We've emailed a copy to <b>${esc(email)}</b>, and we'll reply there, usually within one business day.</p>
       <button class="btn p w" id="ctdone">Back to sign in</button></div></div>`;
     $app.querySelector('#ctdone').onclick = () => { dropParams('contact', 'help'); gate('in'); };
@@ -971,7 +976,7 @@
     clearAuthLink();
     $app.className = 'acct'; document.title = 'Email confirmed · Riyeser'; tabIcon(false);
     $app.innerHTML = `<div class="gate"><div class="gcard" id="confirmed">
-      <div class="glogo"><img src="/assets/logo-r.png" alt="">Riyeser</div>
+      <div class="glogo">${wordmark()}</div>
       <h1>✅ Email confirmed</h1><p>Thanks. Your Riyeser account is ready and you're signed in as <b>${esc(S.user.email || '')}</b>.</p>
       <button class="btn p w" id="cgo">Continue</button></div></div>`;
     const b = $app.querySelector('#cgo'); b.focus(); b.onclick = () => start();
@@ -981,7 +986,7 @@
     clearAuthLink();
     $app.className = 'acct'; document.title = 'Choose a new password · Riyeser'; tabIcon(false);
     $app.innerHTML = `<div class="gate"><form class="gcard" id="npf">
-      <div class="glogo"><img src="/assets/logo-r.png" alt="">Riyeser</div>
+      <div class="glogo">${wordmark()}</div>
       <h1>Choose a new password</h1><p>For <b>${esc(S.user.email || '')}</b>. Your old password stops working, and you're signed out on your other devices.</p>${note}
       ${pwField('password', 'New password', 'new-password', 'At least 8 characters.')}${pwField('password2', 'Type it again', 'new-password', '')}
       <button class="btn p w" type="submit">Save my new password</button>
@@ -1082,7 +1087,7 @@
       <div class="or">Not joining anyone?</div>
       <button type="button" class="btn w" id="tonew">Set up my own account</button>`;
     $app.innerHTML = `<div class="gate"><div class="gcard">
-      <div class="glogo"><img src="/assets/logo-r.png" alt="">Riyeser</div>
+      <div class="glogo">${wordmark()}</div>
       ${note}${mode === 'join' ? joinForm : newForm}
       <div class="alt"><button class="linkbtn" id="so">Cancel and sign out</button></div></div></div>`;
     wireCountry($app);
@@ -1116,7 +1121,7 @@
     clearInterval(waitTimer);
     $app.className = 'acct'; document.title = 'Riyeser'; tabIcon(false);
     $app.innerHTML = `<div class="gate"><div class="gcard">
-      <div class="glogo"><img src="/assets/logo-r.png" alt="">Riyeser</div>
+      <div class="glogo">${wordmark()}</div>
       ${declined ? `<h1>${esc(company)} didn't approve this</h1><p>Check with them, or ask to join with a different Company ID.</p><button class="btn p w" id="again">Try another code</button>`
         : `<h1>Waiting for ${esc(company)}</h1><p>We've asked them to let you in. As soon as an owner or admin approves you, you're in: this page checks by itself.</p>
           <div class="waitdots" aria-hidden="true"><i></i><i></i><i></i></div><button class="btn w" id="chk">Check now</button>`}
@@ -1141,7 +1146,7 @@
   async function codeScreen(note = '') {
     $app.className = 'acct'; document.title = 'Riyeser'; tabIcon(false);
     $app.innerHTML = `<div class="gate"><form class="gcard" id="cs">
-      <div class="glogo"><img src="/assets/logo-r.png" alt="">Riyeser</div>
+      <div class="glogo">${wordmark()}</div>
       <h1>🔐 Enter your code</h1><p>Open your authenticator app and type the 6 numbers shown for Riyeser.</p>${note}
       <label class="f"><span>Code</span><input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required class="dpn"></label>
       <button class="btn p w">Continue</button>
@@ -1489,7 +1494,7 @@
     const unread = Object.values(S.unread || {}).reduce((a, b) => a + (b || 0), 0);
     const calls = lic && lic.modules && lic.modules.calls;
     $app.className = 'acct home'; if (top) window.scrollTo(0, 0);
-    $app.innerHTML = `<header class="htop"><a class="hbrand" href="/"><img src="/assets/logo-r.png" alt="">Riyeser</a>
+    $app.innerHTML = `<header class="htop"><a class="hbrand" href="/" aria-label="Riyeser">${wordmark(false)}</a>
         ${S.teams.length > 1 ? `<select id="hsw" aria-label="Switch company">${S.teams.map((x) => `<option value="${x.id}"${x.id === t.id ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select>` : ''}
         <span class="hme">${esc(me.display_name || S.user.email || '')}</span><button class="btn sm" id="hout">Sign out</button></header>
       <main class="hmain">
@@ -2024,7 +2029,7 @@
   // A business that Riyeser has closed (or suspended): a plain message at sign-in.
   function closedScreen(b) {
     $app.className = 'acct'; document.title = 'Riyeser'; tabIcon(false);
-    $app.innerHTML = `<div class="gate"><div class="gcard"><div class="glogo"><img src="/assets/logo-r.png" alt="">Riyeser</div>
+    $app.innerHTML = `<div class="gate"><div class="gcard"><div class="glogo">${wordmark()}</div>
       <h1>${esc(b.name)}</h1><p>This business is closed. Contact Riyeser support.</p>
       <button class="btn p w" id="gh">💬 Contact Riyeser support</button>
       <div class="alt"><button class="linkbtn" id="so">Sign out</button></div></div></div>`;
@@ -5704,7 +5709,7 @@
       if (goneNote) phMsg(goneNote.replace(/<\/?div[^>]*>/g, ''), 'warn');
       // S7: the link in "… asked to join" emails opens Join requests (two-step sign-in first)
       if (params.has('requests') && isAdmin()) { dropParams('requests'); if (!S.home) setNav('manage'); mg(joinRequests)(); }
-    } catch (e) { $app.className = 'acct'; $app.innerHTML = `<div class="gate"><div class="gcard"><div class="glogo"><img src="/assets/logo-r.png" alt="">Riyeser</div><div class="err">${esc(plainError(e))}</div><button class="btn p w" onclick="location.reload()">Try again</button></div></div>`; }
+    } catch (e) { $app.className = 'acct'; $app.innerHTML = `<div class="gate"><div class="gcard"><div class="glogo">${wordmark()}</div><div class="err">${esc(plainError(e))}</div><button class="btn p w" onclick="location.reload()">Try again</button></div></div>`; }
   }
   // Once per visit (at most hourly): tells Riyeser the account is in use, so it isn't closed for being inactive.
   function touchActivity() {

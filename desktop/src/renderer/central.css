@@ -39,6 +39,9 @@ body { display: flex; flex-direction: column; height: 100vh; }
 .brand .lg { width: 32px; height: 32px; border-radius: 9px; background: #1d4ed8; display: grid; place-items: center; }
 .brand .lg img { width: 19px; height: auto; filter: brightness(0) invert(1); }
 .brand b { font-size: 17px; font-weight: 700; letter-spacing: -.2px; }
+/* the Riyeser wordmark (central.html, company.js wordmark()): letters in the text colour, the swoosh brand blue */
+.wm { display: block; width: auto; flex: none; } .wm-sw { fill: #0b5cff; } :root[data-theme="dark"] .wm-sw { fill: #7fb0ff; }
+.brand .wm { height: 30px; } .brand { color: var(--text); padding: 4px 8px 4px 2px; }
 .search { flex: 1 1 240px; min-width: 0; max-width: 640px; margin: 0 auto; display: flex; align-items: center; gap: 8px; height: 40px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 0 6px 0 12px; color: var(--muted); }
 .search:focus-within { border-color: var(--accent); background: var(--panel); }
 .search .sic { display: grid; place-items: center; }
@@ -234,6 +237,7 @@ body { display: flex; flex-direction: column; height: 100vh; }
 .wcard { width: min(760px, 100%); background: var(--panel); border-radius: 20px; padding: 32px 36px; box-shadow: 0 30px 70px -30px rgba(15,33,71,.45); border: 1px solid var(--line); }
 .wlogo { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 18px; margin-bottom: 18px; color: var(--text); }
 .wlogo img { width: 30px; }
+.wlogo .wm { height: 34px; }
 .wcard h1 { margin: 0 0 6px; font-size: 26px; letter-spacing: -.4px; } .wsub { margin: 0 0 20px; color: var(--muted); font-size: 15px; line-height: 1.5; }
 .wchoices { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .wbig { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; text-align: left; padding: 18px; border-radius: 14px; border: 2px solid var(--line); background: var(--panel); }

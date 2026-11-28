@@ -133,6 +133,9 @@ textarea { min-height: 88px; resize: vertical; }
 .trust a { color: inherit; }
 .foot { text-align: center; color: var(--muted); font-size: .82rem; padding-top: 4px; }
 .foot a { color: inherit; }
+/* "Online booking by" + the Riyeser wordmark (book.js foot()): letters in the text colour, the swoosh brand blue */
+.foot-wm { display: inline-block; vertical-align: -.32em; margin-left: 2px; } .foot-wm .wm { display: block; height: 1.45em; width: auto; } .wm-sw { fill: #0b5cff; }
+@media (prefers-color-scheme: dark) { .wm-sw { fill: #7fb0ff; } }
 
 /* loading, closed and missing pages */
 .sk { background: linear-gradient(90deg, var(--soft), var(--line), var(--soft)); background-size: 200% 100%; animation: sk 1.2s infinite linear; border-radius: 10px; }
