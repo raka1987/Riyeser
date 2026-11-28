@@ -49,6 +49,11 @@ jobs:
         with: { ref: module/desk-assistant }
       - uses: actions/setup-node@v5
         with: { node-version: "22" }
+      - name: Install website build tools (terser and csso, to minify the built output)
+        run: |
+          # The build minifies its output only when terser/csso are present (website/minify.mjs); without them it still
+          # builds (comments stripped only). The devDependencies arrived with the going-private change.
+          if [ -f website/package-lock.json ]; then npm ci --prefix website; else echo "No website/package-lock.json yet; building without minify tools"; fi
       - id: pages
         if: inputs.target != 'downloads-repo'
         uses: actions/configure-pages@v5
@@ -58,6 +63,12 @@ jobs:
         env:
           # downloads-repo: the Pages step above is skipped, so this is "/" (riyeser.com, its custom domain, at the top)
           SITE_BASE: "${{ steps.pages.outputs.base_path }}/"
+      - name: Carry over the live releases.json
+        run: |
+          # versions.json is written by the build; releases.json is kept fresh per release by publish-release.yml. Carry
+          # the live copy into this rebuild so a site rebuild doesn't drop the recent-releases list (the page falls back
+          # to api.github.com if it's absent, so a failure here is harmless).
+          curl -fsS https://riyeser.com/releases.json -o website/public/releases.json || echo "No live releases.json to carry over (the page falls back to api.github.com)"
       - if: inputs.target != 'downloads-repo'
         uses: actions/upload-pages-artifact@v4
         with: { path: website/public }

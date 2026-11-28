@@ -17,11 +17,16 @@ import os
 
 # Releases are published in the public downloads repository (docs/GOING-PRIVATE.md): change its name here only.
 DOWNLOADS_REPO = "raka1987/riyeser-downloads"
-DOWNLOADS = f"https://github.com/{DOWNLOADS_REPO}/releases/latest/download"
 SETUP_FILES = {"basic": "RiyeserAccountingBasics-Setup.exe", "enterprise": "RiyeserAccountingPlus-Setup.exe",
                "pos": "RiyeserPOS-Setup.exe", "invoices": "RiyeserInvoices-Setup.exe",
                "bookings": "RiyeserBookings-Setup.exe", "estimate": "RiyeserEstimate-Setup.exe"}
-POS_PAGE = "https://riyeser.com/programs/pos.html"
+# The in-app "Download" buttons send people to riyeser.com's download hand-off page (the download counter), which
+# redirects to the newest installer. Going through riyeser.com means the app never shows a github.com link, and the
+# download is counted. The page ids match the website (website/build.mjs). The code repository can stay private.
+SITE = "https://riyeser.com"
+DOWNLOAD_PAGE = {"basic": "accounting-basics", "enterprise": "accounting", "pos": "pos",
+                 "invoices": "invoices", "bookings": "bookings", "estimate": "estimate"}
+POS_PAGE = f"{SITE}/programs/pos.html"
 
 
 def _norm(v):
@@ -74,4 +79,6 @@ def is_accounting_app():
 
 
 def download_url(edition):
-    return f"{DOWNLOADS}/{SETUP_FILES[edition]}"
+    """The riyeser.com download hand-off page for a program (counts the download, then redirects to the newest
+    installer). Going through riyeser.com keeps github.com out of the app's own buttons."""
+    return f"{SITE}/download/{DOWNLOAD_PAGE[edition]}.html"

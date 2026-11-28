@@ -66,7 +66,7 @@ def test_accounting_apps_send_the_till_to_riyeser_pos(tmp_path, monkeypatch, edi
         assert r.status_code == 302 and r.headers["Location"].endswith("/links/pos"), url
     assert sell(c, item).status_code == 302          # no selling from Accounting
     page = c.get("/links/pos").get_data(as_text=True)
-    assert "RiyeserPOS-Setup.exe" in page and "same company file" in page
+    assert "/download/pos.html" in page and "same company file" in page
 
 
 def test_pos_sales_show_in_accounting_as_paid_invoices(tmp_path, monkeypatch):

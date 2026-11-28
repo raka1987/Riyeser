@@ -155,7 +155,7 @@ def test_other_apps_link_to_bookings(tmp_path, monkeypatch, edition):
     r = c.get("/bookings/")
     assert r.status_code == 302 and r.headers["Location"].endswith("/setup/bookings-app")
     page = c.get("/setup/bookings-app").get_data(as_text=True)
-    assert "RiyeserBookings-Setup.exe" in page and "same company file" in page
+    assert "/download/bookings.html" in page and "same company file" in page
 
 
 def test_customer_page_lists_their_bookings(tmp_path, monkeypatch):

@@ -219,6 +219,59 @@ releases still count.
 
 ---
 
+## Keeping GitHub out of what the public sees (the "ship clean" change)
+
+So that nothing shipped to the public reveals where the code lives or that it's built on GitHub, three branches
+(`feat/ship-clean` on `main`, `feat/ship-clean-desk` on `module/desk-assistant`, `feat/ship-clean-payroll` on
+`module/payroll`) make these changes. They don't change prices, plans or any program's behaviour.
+
+**The website doesn't publish its own version information instead of asking GitHub.**
+
+- The build (`website/build.mjs`) writes `versions.json` into the site: the program versions in the newest release.
+- "Publish Riyeser release" writes `versions.json` and a small `releases.json` (recent releases, tag and date only)
+  to the root of the downloads repository's `gh-pages` branch after each release (best-effort: a problem there never
+  fails the release). "Publish website" carries the live `releases.json` across a site rebuild and installs the build
+  tools so the output is minified.
+- The Release notes page and the version checks read `/versions.json` and `/releases.json` first and only fall back to
+  `api.github.com` (the public downloads repository) if those aren't there yet, so the site keeps working throughout.
+
+**The built website is minified; the source stays readable.** `website/minify.mjs` strips HTML comments and minifies
+the inline and served JavaScript (terser) and CSS (csso) in `website/public` only — the software site, Riyeser HQ,
+Riyeser Link (`/link/`, `/team/`), As Built (`/app/`), the booking page and the widget. No source maps. `terser` and
+`csso` are `website/` devDependencies; without them the build still runs (comments stripped, JS/CSS left as-is).
+
+**The desktop and Payroll installers carry no readable source.** At packaging time the apps' own JavaScript is
+minified with terser (comments dropped, local names mangled, no source maps; `node_modules` untouched):
+`desktop/scripts/minify-app.js` (run by `package-win.js`, packed by `builder.config.js`) and
+`module/payroll` `desktop/minify-app.js` (run by `prepare.js`). The Accounting/POS/Invoices/Bookings/Estimate
+PyInstaller build (`packaging/build_desktop.py`) builds at optimisation level 2 (`--optimize 2`, same as `python -OO`):
+docstrings and asserts are stripped and only `.pyc` is bundled (nothing in `riyeser/` relies on them at runtime).
+
+**No github.com in anything the public sees (user-visible strings), except the technical update/download endpoints
+that need the public downloads repository.**
+
+- Website: the "Every release is published on GitHub" link and the "Latest releases on GitHub" heading are gone
+  (plain "Release notes" / "Recent releases"); Download buttons go to `riyeser.com/download/<program>.html` (the
+  download counter), never a github.com URL in the page; the code repository's name is never written into a shipped
+  page (the `OLD_REPO` fallback was dropped from the pages' own fetches).
+- Desktop: Riyeser Central's About box says "checks online for updates" instead of naming GitHub; the installers'
+  "URL info" is `https://riyeser.com` (electron-builder `homepage`), so it never falls back to the git remote.
+- The apps' in-app "Download" buttons (`riyeser/edition.py`) send people to `riyeser.com/download/<program>.html`
+  instead of a github.com installer URL.
+- Kept (technical, and pointing only at the **public** downloads repository): the update/download code's
+  `api.github.com` and `github.com/<downloads repo>/releases/...` URLs in Riyeser Central (`updates.js`), the download
+  counter (`supabase/functions/download`), and the download hand-off page's no-JS fallback.
+
+**What still, unavoidably, shows the public downloads repository.** When a browser actually downloads an installer it
+follows a redirect to `github.com/raka1987/riyeser-downloads/releases/...`, so that URL — and the GitHub username
+`raka1987` in it — is visible in the browser's network activity. Riyeser HQ (staff-only, at `/hq/`, not indexed) still
+links to the code repository's Actions for staff ("GitHub jobs"). To make these read `github.com/riyeser/…` instead of
+`github.com/raka1987/…`, the repositories can be moved to a free GitHub **organisation** named `riyeser` (Settings →
+transfer ownership; the downloads repository's name stays `riyeser-downloads`). Update `DOWNLOADS_REPO`/`OLD_REPO` in
+the places listed below after the move.
+
+---
+
 ## For the lead: where the repository name lives
 
 One constant per codebase, so the name is easy to change:
