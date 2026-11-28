@@ -113,8 +113,8 @@ def main():
                 sys.exit(f"{url} signed the admin out: the screens after it weren't checked.")
         print(f"Opened {len(urls)} addresses.")
 
-        st, _, page = c.req("/online/")
-        if st != 200 or b"Online orders &amp; bookings" not in page:
+        st, _, page = c.req("/online/")   # every app but Estimate has it under Setup
+        if a.edition != "estimate" and (st != 200 or b"Online orders &amp; bookings" not in page):
             failures.append(("/online/", f"Setup -> Online orders & bookings didn't open (HTTP {st})"))
         st, _, body = c.req("/help/diagnostics?download=1")
         d = json.loads(body)
