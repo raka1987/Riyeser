@@ -690,7 +690,7 @@ jobs:
             runas /trustlevel:0x20000 "C:\riy\central-limited.cmd"
             node scripts/central-update-all-check.js "--exe=$($exe.FullName)" --attach --out=C:\riy\out\update-all --minutes=30 --retry
           } else {
-            node scripts/central-update-all-check.js "--exe=$($exe.FullName)" --out=C:\riy\out\update-all --minutes=30
+            node scripts/central-update-all-check.js "--exe=$($exe.FullName)" --out=C:\riy\out\update-all --minutes=30 --retry
           }
           Write-Host "check exit code" $LASTEXITCODE
           # Central's own update: it closed, its installer runs, then it opens again. Wait for Windows' list to say so.
