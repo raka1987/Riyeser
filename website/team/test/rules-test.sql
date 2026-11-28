@@ -2900,6 +2900,8 @@ select pg_temp.as_user('b1b1b1b1-0000-4000-8000-000000000006');
 do $$ declare h json := public.hq_billing(); q json := public.hq_work_queue(); begin
   assert json_array_length(h -> 'unpaid') >= 1 and not (h ->> 'bank_ready')::boolean and not (h ->> 'can_mark_paid')::boolean, 'sales sees unpaid invoices';
   assert exists (select 1 from json_array_elements(q -> 'queue') x where x ->> 'kind' = 'invoice' and x ->> 'ref' = current_setting('pay.inv1')), 'unpaid invoice in the work queue';
+  -- "Assigned to": a person or nobody, never the team's name; the team says whose queue it's in
+  assert exists (select 1 from json_array_elements(q -> 'queue') x where x ->> 'kind' = 'invoice' and x ->> 'team' = 'Finance' and x ->> 'owner' <> 'Finance'), 'invoice: Finance team, not "Owner: Finance"';
   begin perform public.hq_billing_mark_paid(current_setting('pay.inv1'), 'BANK REF 1', 46); raise exception 'sales marked paid';
   exception when others then assert sqlerrm like 'Your HQ role can''t%', sqlerrm; end;
   begin perform public.hq_set_billing_entity('{"name": "Sol Pty Ltd"}'); raise exception 'sales changed the entity';
@@ -5113,6 +5115,11 @@ do $$ declare a json; b json; c json; ws uuid := current_setting('test.ws_c')::u
   assert (c ->> 'businesses')::int = (a ->> 'businesses')::int and (c ->> 'include_test')::boolean, 'and counted with the switch on: ' || c::text;
   assert (select count(*) from json_array_elements(public.hq_test_accounts()) x where (x ->> 'id')::uuid = ws) = 1, 'listed as a test account';
   assert (select count(*) from json_array_elements(public.hq_work_queue() -> 'queue') x where x::jsonb ? 'account_kind') = json_array_length(public.hq_work_queue() -> 'queue'), 'queue items say their kind';
+  -- the current Overview's "Riyeser at a glance" and "Queue at a glance" leave it out too, unless asked; the old calls count everything
+  assert (public.hq_overview(false) ->> 'companies')::int = (public.hq_overview() ->> 'companies')::int - 1
+    and (public.hq_overview(true) ->> 'companies')::int = (public.hq_overview() ->> 'companies')::int and not (public.hq_overview(false) ->> 'include_test')::boolean, 'overview without test accounts: ' || public.hq_overview(false)::text;
+  assert (public.hq_attention(false) ->> 'unassigned')::int <= (public.hq_attention(true) ->> 'unassigned')::int
+    and (public.hq_attention(true) ->> 'unassigned')::int = (public.hq_attention() ->> 'unassigned')::int, 'attention without test accounts';
   perform public.hq_set_account_kind(ws, 'customer', 'Back to a real customer');
 end $$;
 select pg_temp.as_user('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');   -- Help Desk (support): can't mark accounts; sees the figures it may see

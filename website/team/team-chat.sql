@@ -4779,19 +4779,19 @@ begin
         coalesce(public.staff_name(o.requested_by), 'Riyeser'), 'Approve', o.id::text, o.created_at
       from offers o where o.status = 'waiting' and hq_can('offers.approve')
       union all
-      select 3, 'refund', f.workspace_id, 'Refund waiting', f.currency || ' ' || f.amount || ' · ' || f.for_what, coalesce(public.staff_name(f.decided_by), 'Finance'), 'Review', f.id::text, f.created_at
+      select 3, 'refund', f.workspace_id, 'Refund waiting', f.currency || ' ' || f.amount || ' · ' || f.for_what, public.staff_name(f.decided_by), 'Review', f.id::text, f.created_at
       from refund_requests f where f.status in ('submitted', 'reviewing') and hq_can('refunds.approve')
       union all
       -- PayPal couldn't take a payment (in its grace period), or PayPal stopped trying
       select 2, 'payment', o.workspace_id, case when o.status = 'suspended' then 'Payments stopped' else 'Payment failed' end,
         o.ref || ' · ' || public.billing_money(o.amount) || coalesce(' · works until ' || to_char(o.grace_until, 'FMDD Mon YYYY'), ''),
-        'Finance', 'Review', o.ref, o.updated_at
+        null, 'Review', o.ref, o.updated_at
       from billing_orders o where o.status in ('payment_failed', 'suspended') and hq_can('licences.view')
       union all
       -- a bank transfer invoice not marked paid yet
       select 3, 'invoice', o.workspace_id, case when o.due_date < current_date then 'Invoice overdue' else 'Invoice unpaid' end,
         o.ref || ' · ' || public.billing_money(coalesce(o.first_amount, o.amount)) || ' · due ' || to_char(o.due_date, 'FMDD Mon YYYY'),
-        'Finance', 'Mark paid', o.ref, o.created_at
+        null, 'Mark paid', o.ref, o.created_at
       from billing_orders o where o.method = 'bank' and o.status = 'pending' and hq_can('licences.view')
       union all
       select 4, 'follow_up', n.workspace_id, 'Follow-up due', left(n.body, 120), coalesce(public.staff_name(n.author), 'Riyeser'), 'Follow up', n.id::text, n.follow_up::timestamptz
@@ -4816,6 +4816,9 @@ begin
       'open_complaints', case when hq_can('support.view') then (select count(*) from support_tickets where status <> 'done') end),
     'queue', (select coalesce(json_agg(json_build_object('kind', q.kind, 'workspace_id', q.ws, 'business', w.name, 'country', w.country, 'address', w.address,
         'account_kind', coalesce(w.account_kind, 'customer'),
+        -- the team whose queue it's in (HQ shows "Unassigned · <team> team" when no one person has it)
+        'team', case when q.kind in ('complaint', 'update') then 'Support' when q.kind in ('refund', 'payment', 'invoice') then 'Finance'
+          when q.kind = 'approval' then 'Approvers' when q.kind in ('renewal', 'signup') then 'Sales' end,
         'issue', q.issue, 'detail', q.detail, 'owner', coalesce(q.owner, public.staff_name(w.hq_owner), 'Unassigned'), 'action', q.action, 'ref', q.ref, 'at', q.at) order by q.prio, q.at), '[]')
       from q left join workspaces w on w.id = q.ws)) into r;
   return r;
@@ -10444,7 +10447,71 @@ create trigger refund_requests_usd before insert or update of currency on public
 drop trigger if exists account_credits_usd on public.account_credits;
 create trigger account_credits_usd before insert or update of currency on public.account_credits for each row execute function public.usd_only();
 
+-- The Overview's "Riyeser at a glance" and "Queue at a glance" with Riyeser's own test, demo and internal accounts left out
+-- unless include_test (HQ's "Include test accounts"). The versions without an argument (above) still count everything.
+create or replace function public.hq_overview(include_test boolean) returns json
+  language plpgsql stable security definer set search_path = public as $$
+declare inc boolean := coalesce(include_test, false); r json;
+begin
+  perform hq_need(array['overview.view']);
+  with w as (select * from workspaces x where inc or x.account_kind = 'customer'),
+    d as (select dv.* from devices dv join w on w.id = dv.workspace_id)
+  select json_build_object('include_test', inc,
+    'companies', (select count(*) from w),
+    'companies_7d', (select count(*) from w where created_at > now() - interval '7 days'),
+    'companies_30d', (select count(*) from w where created_at > now() - interval '30 days'),
+    'people', (select count(*) from members m join w on w.id = m.workspace_id),
+    'pcs', (select count(*) from devices dv join w on w.id = dv.workspace_id where public.pc_active(dv)),
+    'pcs_active_7d', (select count(*) from d where retired_at is null and last_seen > now() - interval '7 days'),
+    'pcs_active_30d', (select count(*) from d where retired_at is null and last_seen > now() - interval '30 days'),
+    'requests_waiting', (select count(*) from join_requests j join w on w.id = j.workspace_id where j.status = 'pending'),
+    'calls_paid', (select count(*) from w where calls_paid_until > now()),
+    'calls_trial', (select count(*) from w where created_at > now() - interval '90 days' and coalesce(calls_paid_until, '-infinity') <= now()),
+    'trials_ending', (select coalesce(json_agg(t order by t.days_left), '[]') from (
+        select w.id, w.name, w.company_code, 90 - extract(day from now() - w.created_at)::int as days_left from w
+        where w.created_at between now() - interval '90 days' and now() - interval '76 days' and coalesce(w.calls_paid_until, '-infinity') <= now()) t),
+    'versions', (select coalesce(json_agg(v order by v.pcs desc), '[]') from (
+        select coalesce(app_version, 'unknown') as version, count(*) as pcs from d where last_seen > now() - interval '30 days' group by 1) v),
+    'countries', (select coalesce(json_agg(c order by c.companies desc), '[]') from (
+        select coalesce(country, 'Not set') as country, count(*) as companies from w group by 1) c),
+    'signups_by_week', (select coalesce(json_agg(x order by x.week), '[]') from (
+        select date_trunc('week', created_at)::date as week, count(*) as companies from w
+        where created_at > now() - interval '12 weeks' group by 1) x)
+  ) into r;
+  return r;
+end $$;
+
+create or replace function public.hq_attention(include_test boolean) returns json
+  language plpgsql stable security definer set search_path = public as $$
+declare od numeric := hq_setting_num('support.overdue_hours', 24); inc boolean := coalesce(include_test, false);
+begin
+  perform hq_need(array['overview.view']);
+  return (with tw as (select id from workspaces where not inc and account_kind <> 'customer'),
+    t as (select * from support_tickets s where s.workspace_id is null or s.workspace_id not in (select id from tw))
+  select json_build_object(
+    'include_test', inc,
+    'unassigned', case when hq_can('support.view') then (select count(*) from t where status <> 'done' and assignee is null) end,
+    'overdue', case when hq_can('support.view') then (select count(*) from t where t.status <> 'done'
+        and (t.overdue_at is not null or (t.first_reply_at is null and t.created_at < now() - make_interval(secs => od * 3600)))) end,
+    'mine', case when hq_can('support.view') then (select count(*) from t where status in ('new', 'investigating', 'waiting_us') and assignee = auth.uid()) end,
+    'updates_overdue', case when hq_can('support.view') then (select count(*) from t where status <> 'done' and next_update_due < now()) end,
+    'approvals', case when hq_can('offers.approve') or hq_can('refunds.approve') then
+        (select count(*) from offers where status = 'waiting' and workspace_id not in (select id from tw)) + (select count(*) from refund_requests
+          where status in ('approved', 'partly_approved') and needs_second and second_approver is null and workspace_id not in (select id from tw)) end,
+    'refunds_waiting', case when hq_can('refunds.view') then (select count(*) from refund_requests where status in ('submitted', 'reviewing') and workspace_id not in (select id from tw)) end,
+    'emails_failed', case when hq_can('emails.view') then (select count(*) from email_outbox where status in ('failed', 'held')) end,
+    'trials_3d', case when hq_can('customers.view') then (select coalesce(json_agg(x order by x.days_left, x.name), '[]') from (
+        select w.id, w.name, w.company_code, min(z.te) - current_date as days_left, array_agg(mm.m order by mm.m) as modules
+        from workspaces w cross join unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built']) mm(m)
+        left join company_modules c on c.workspace_id = w.id and c.module = mm.m
+        cross join lateral (select coalesce(c.trial_ends, w.created_at::date + 90) as te) z
+        where w.status = 'active' and (inc or w.account_kind = 'customer') and (c.module is null or c.status = 'trial') and z.te between current_date and current_date + 3
+          and not exists (select 1 from company_modules p where p.workspace_id = w.id and p.status = 'active' and (p.paid_until is null or p.paid_until >= current_date))
+        group by w.id, w.name, w.company_code limit 50) x) end,
+    'follow_ups', case when hq_can('customers.view') or hq_can('customers.notes') then hq_my_follow_ups() end));
+end $$;
+
 revoke all on function public.hq_touch(), public.hq_set_account_kind(uuid, text, text), public.hq_test_accounts(), public.hq_kpis(boolean),
-  public.hq_ops_runs(), public.usd_only() from public, anon;
+  public.hq_ops_runs(), public.usd_only(), public.hq_overview(boolean), public.hq_attention(boolean) from public, anon;
 grant execute on function public.hq_touch(), public.hq_set_account_kind(uuid, text, text), public.hq_test_accounts(), public.hq_kpis(boolean),
-  public.hq_ops_runs() to authenticated;
+  public.hq_ops_runs(), public.hq_overview(boolean), public.hq_attention(boolean) to authenticated;

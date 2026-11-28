@@ -8,7 +8,7 @@ const assert = require('assert');
   const b = await chromium.launch(); const errs = []; const out = process.argv[2] || '.'; let failed = false;
   try {
     const pg = await b.newPage({ viewport: { width: 1200, height: 900 } }); pg.on('pageerror', (e) => errs.push(e.message)); pg.on('dialog', (d) => d.accept());
-    await pg.goto('http://127.0.0.1:8090/hq/?demo'); await pg.waitForFunction(() => window.RiyeserHQLink);
+    await pg.goto((process.env.HQ_URL || 'http://127.0.0.1:8090').replace(/\/$/, '') + '/hq/?demo'); await pg.waitForFunction(() => window.RiyeserHQLink);
     // the summary wording, straight from the function
     const line = await pg.evaluate(() => window.RiyeserHQLink.summary({ now: new Date().toISOString(), offices: [{ pc_name: 'OFFICE-PC', version: '1.1.0', state: 'running', last_seen: new Date(Date.now() - 120000).toISOString(),
       addresses: ['192.168.1.20'], sip_port: 5060, address_stable: true, phones: [...Array(6)].map((_, i) => ({ assigned: true, registered: i < 5 })) }] }));
