@@ -345,10 +345,12 @@ def check(riyeser_dir, own_dir=None, now=None, public_key=None, write=True, lic_
                  "expires_at": expires, "problem": None, "message": None})
 
 
-def local_trial(riyeser_dir, own_dir=None, now=None, write=True, start_now=True, days=TRIAL_DAYS, lic_file=None):
+def local_trial(riyeser_dir, own_dir=None, now=None, write=True, start_now=True, days=TRIAL_DAYS, lic_file=None, extra=None):
     """The local 90-day trial: from the earlier of licence.json's trialStart and the hidden markers, so deleting one
     doesn't restart it, and counted from the latest time seen, so winding the clock back gives no days back.
-    A PC that has never been online can't be fully protected. start_now=False: don't start one (returns None)."""
+    A PC that has never been online can't be fully protected. start_now=False: don't start one (returns None).
+    extra (trial_guard.py): {"starts": [seconds] from the registry, company files and Riyeser online's PC record (the
+    earliest counts), "latest": the latest time seen there, "extra_days": a goodwill extension from Riyeser online}."""
     t = _now_s(now if now is not None else datetime.now(timezone.utc))
     lf = lic_file or os.path.join(riyeser_dir, "licence.json")
     lic = _read(lf) or {}
@@ -356,12 +358,15 @@ def local_trial(riyeser_dir, own_dir=None, now=None, write=True, start_now=True,
     before = _markers(dirs)
     m = _merge(before)
     from_file = _ms(lic.get("trialStart"))
-    known = [x for x in (from_file, m["firstRun"]) if x is not None]
+    extra = extra or {}
+    more = [float(x) for x in (extra.get("starts") or []) if isinstance(x, (int, float))]
+    known = [x for x in (from_file, m["firstRun"]) if x is not None] + more
     if not known and not start_now:
         return None
     start = min(known + [t])
     m["firstRun"] = start
-    seen = max(t, m["clock"]["latest"] if m["clock"] else 0)
+    latest_seen = max(m["clock"]["latest"] if m["clock"] else 0, float(extra.get("latest") or 0))
+    seen = max(t, latest_seen)
     if not m["clock"] or m["clock"]["issued"] == "":
         m["clock"] = {"issued": "", "latest": seen}
     if write:
@@ -371,6 +376,11 @@ def local_trial(riyeser_dir, own_dir=None, now=None, write=True, start_now=True,
                 _write(lf, dict(lic, trialStart=_iso(start)))
             except OSError:
                 pass
-    ends = start + days * DAY
+    try:
+        bonus = max(0, min(365, int(extra.get("extra_days") or 0)))
+    except (TypeError, ValueError):
+        bonus = 0
+    ends = start + (days + bonus) * DAY
     import math
-    return {"start": start, "ends": ends, "days_left": max(0, math.ceil((ends - seen) / DAY)), "active": seen < ends, "linked": m["linked"]}
+    return {"start": start, "ends": ends, "days_left": max(0, math.ceil((ends - seen) / DAY)), "active": seen < ends, "linked": m["linked"],
+            "seen": seen, "clock_back": t < latest_seen - CLOCK_SLACK}

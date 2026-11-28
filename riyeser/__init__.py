@@ -94,6 +94,18 @@ def create_app(test_config=None):
                 elif here_id not in marks:
                     session["pwv"] = {**marks, here_id: mark}
         g.company = db.execute("SELECT * FROM company WHERE id=1").fetchone()
+        stamped = app.config.setdefault("_trial_stamped_dbs", set())
+        if g.company is not None and here not in stamped:
+            # The free trial's stamp in this company file (riyeser/trial_guard.py): an older one (a restored file) is passed
+            # on to this PC, and the trial's start is stamped in. Once per company file per run; never for demo companies.
+            stamped.add(here)
+            try:
+                from .trial_guard import sync_company
+                from .licence import licence_file
+                sync_company(db, os.path.dirname(licence_file()),
+                             demo=bool(g.company["is_demo"]) or bool(app.config.get("DEMO_MODE")) or demo_mode.demo_on())
+            except Exception:  # pragma: no cover - the trial's other places still count
+                pass
         if g.company is not None:
             from .licence import enterprise_allowed
             from .edition import app_edition

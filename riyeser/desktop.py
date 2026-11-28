@@ -62,6 +62,9 @@ def main(argv=None):
         return cli_main(([] if not args.data_dir else ["--data-dir", args.data_dir]) + [args.command] + rest)
 
     from .cli import data_dir, _configure
+    # the free trial's registry copy (HKCU\Software\Riyeser\Trial, riyeser/trial_guard.py): Windows only, the app itself
+    from .trial_guard import use_windows_defaults
+    use_windows_defaults()
     ns = argparse.Namespace(data_dir=args.data_dir, db=None)
     _configure(ns)
     from . import create_app
