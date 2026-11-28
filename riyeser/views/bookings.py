@@ -642,8 +642,17 @@ def _invoice_job(db, jid):
         return redirect(url_for("documents.view", doc_id=j["document_id"]))
     if not j["contact_id"]:
         raise PostingError(f"Choose the customer on this {M()['one']} first, then invoice it.")
-    from .quotes import invoice_from_quote, link_job_invoice
-    quoted = invoice_from_quote(db, jid)  # a job made from a quote, at its price: the invoice has the quote's lines
+    from .quotes import invoice_from_quote, link_job_invoice, quote_for_job
+    from .documents import rate_choice, audit_rate_choice
+    q = quote_for_job(db, jid)
+    choice = None
+    if q:   # the tax rate changed since that quote: ask first (riyeser/rate_change.py)
+        choice, ask = rate_choice(db, q["id"], request.form, request.path, {})
+        if ask:
+            return ask
+    quoted = invoice_from_quote(db, jid, choice)  # a job made from a quote, at its price: the invoice has the quote's lines
+    if quoted:
+        audit_rate_choice(db, q["id"], quoted, choice)
     lines, sm = job_charges(db, j)
     if j["billing"] == "time":
         unpriced = [p["description"] or p["item_name"] or "Part" for p in sm["parts"] if not p["unit_price"]]

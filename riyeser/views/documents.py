@@ -4,7 +4,7 @@ from datetime import date
 
 from flask import Blueprint, render_template, request, redirect, url_for, flash, abort, g, Response
 
-from ..db import get_db, to_cents, linked
+from ..db import get_db, to_cents, linked, audit
 from .. import pdf as pdfmod
 from ..ledger import save_document, convert_document, void_document, record_payment, void_payment, add_days, \
     PostingError, credits_for, apply_credit, refund_credit, credit_available
@@ -262,13 +262,46 @@ def convert(doc_id):
     quotes.check_convertible(db, doc_id)
     if received_any(db, doc_id):
         raise PostingError("Part of this order has already been received. Use \"Receive goods\" for the rest.")
-    new = convert_document(db, doc_id, to)
+    choice, ask = rate_choice(db, doc_id, request.form, url_for("documents.convert", doc_id=doc_id), {"to": to})
+    if ask:
+        return ask   # the tax rate changed since this quote: the panel first, nothing created yet
+    new = convert_document(db, doc_id, to, choice)
     quotes.after_convert(db, doc_id, new)
+    audit_rate_choice(db, doc_id, new, choice)
     num = db.execute("SELECT number FROM documents WHERE id=?", (new,)).fetchone()["number"]
     flash(f"Converted: {num}." + (" The quote is kept as it was." if new != doc_id else ""), "ok")
     if to == "open":
         _auto_pdf(db, new)
     return redirect(url_for("documents.view", doc_id=new))
+
+
+def rate_choice(db, quote_id, form, action, hidden):
+    """(choice, None) when the quote's tax codes are unchanged or the panel was answered; (None, page) when the panel
+    must be shown first ("The GST rate has changed since this quote"). riyeser/rate_change.py."""
+    from .. import rate_change as RC
+    q = db.execute("SELECT * FROM documents WHERE id=?", (quote_id,)).fetchone()
+    if not q or q["status"] != "quote" or q["converted_to"]:
+        return None, None
+    p = RC.panel(db, quote_id)
+    if not p:
+        return None, None
+    choice = RC.choice_from(form)
+    if choice:
+        return choice, None
+    return None, render_template("documents/rate_change.html", p=p, q=q, action=action, hidden=hidden)
+
+
+def audit_rate_choice(db, quote_id, new_id, choice):
+    if not choice:
+        return
+    from ..countries import labels, request_money
+    q = db.execute("SELECT number FROM documents WHERE id=?", (quote_id,)).fetchone()
+    n = db.execute("SELECT number, total FROM documents WHERE id=?", (new_id,)).fetchone()
+    tax = labels(g.company or {})["tax"]
+    audit(db, "quote_rate_choice", f"{q['number']} -> {n['number']}: the {tax} rate changed since the quote; "
+          + {"add": "used the current rate and added the extra " + tax, "same_total": "used the current rate and kept "
+             "the customer's total the same", "keep": "kept the quoted rate"}[choice]
+          + f" (invoice total {request_money(n['total'])}).")
 
 
 def free_invoices_apply():

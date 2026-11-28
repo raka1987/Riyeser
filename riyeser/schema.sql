@@ -49,7 +49,8 @@ CREATE TABLE tax_codes (
     kind TEXT NOT NULL CHECK (kind IN ('gst','gst_free','export','input_taxed','capital','not_reportable')),
     collected_account_id INTEGER REFERENCES accounts(id),
     paid_account_id INTEGER REFERENCES accounts(id),
-    active INTEGER NOT NULL DEFAULT 1   -- 0 = no longer offered (what it was used on keeps it)
+    active INTEGER NOT NULL DEFAULT 1,  -- 0 = no longer offered (what it was used on keeps it)
+    replaced_by INTEGER REFERENCES tax_codes(id)   -- the code that took over (a rate change, riyeser/rate_change.py)
 );
 
 -- Control accounts used automatically by each kind of transaction

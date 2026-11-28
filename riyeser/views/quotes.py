@@ -194,7 +194,19 @@ def make_job(db, doc_id):
     return jid
 
 
-def invoice_from_quote(db, jid):
+def quote_for_job(db, jid):
+    """The quote a job was made from, when Bookings would invoice the job with that quote's lines (else None)."""
+    j = db.execute("SELECT * FROM booking_jobs WHERE id=?", (jid,)).fetchone()
+    q = db.execute("SELECT * FROM documents WHERE booking_job_id=? AND side='sale' AND status='quote'"
+                   " ORDER BY id DESC LIMIT 1", (jid,)).fetchone()
+    if not j or not q or q["converted_to"] or q["quote_status"] == "declined":
+        return None
+    if j["billing"] != "fixed" or j["price"] != q["total"] or j["contact_id"] != q["contact_id"]:
+        return None
+    return q
+
+
+def invoice_from_quote(db, jid, rate_choice=None):
     """Bookings is invoicing a job made from a quote at the quoted price: the invoice is the quote's own lines (so
     stock items come off the shelf). Returns the invoice id, or None to invoice the job the usual way."""
     j = db.execute("SELECT * FROM booking_jobs WHERE id=?", (jid,)).fetchone()
@@ -205,7 +217,7 @@ def invoice_from_quote(db, jid):
     if j["billing"] != "fixed" or j["price"] != q["total"] or j["contact_id"] != q["contact_id"]:
         return None
     from ..ledger import convert_document
-    return convert_document(db, q["id"], "open")
+    return convert_document(db, q["id"], "open", rate_choice)
 
 
 def link_job_invoice(db, jid, invoice_id):

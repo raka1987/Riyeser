@@ -90,8 +90,11 @@ COLUMNS = (("country", "TEXT"),                 # ISO code, OTHER, or NULL (neve
 
 
 def ensure_schema(db):
-    if "active" not in {r["name"] for r in db.execute("PRAGMA table_info(tax_codes)")}:
+    tcols = {r["name"] for r in db.execute("PRAGMA table_info(tax_codes)")}
+    if "active" not in tcols:
         db.execute("ALTER TABLE tax_codes ADD COLUMN active INTEGER NOT NULL DEFAULT 1")  # 0 = no longer offered
+    if "replaced_by" not in tcols:   # the code that took over after a rate change (riyeser/rate_change.py)
+        db.execute("ALTER TABLE tax_codes ADD COLUMN replaced_by INTEGER REFERENCES tax_codes(id)")
     have = {r["name"] for r in db.execute("PRAGMA table_info(company)")}
     for col, ddl in COLUMNS + (("tax_name", "TEXT NOT NULL DEFAULT 'GST'"), ("date_format", "TEXT NOT NULL DEFAULT 'iso'")):
         if col not in have:
@@ -268,6 +271,7 @@ def change_rate(db, code, new_rate, who):
     new_id = db.execute("INSERT INTO tax_codes (code, name, rate, kind, collected_account_id, paid_account_id, active)"
                         " VALUES (?,?,?,?,?,?,1)", (code, f"{tax} {new_rate:g}%", float(new_rate), old["kind"],
                                                     old["collected_account_id"], old["paid_account_id"])).lastrowid
+    db.execute("UPDATE tax_codes SET replaced_by=? WHERE id=?", (new_id, old["id"]))   # quotes made before ask
     for table, col in (("accounts", "tax_code_id"), ("contacts", "tax_code_id"), ("items", "sale_tax_code_id"),
                        ("items", "purchase_tax_code_id")):
         db.execute(f"UPDATE {table} SET {col}=? WHERE {col}=?", (new_id, old["id"]))

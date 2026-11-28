@@ -1,0 +1,24 @@
+{% extends "base.html" %}{% block title %}{{ tl.tax }} rate changed · {{ q.number }}{% endblock %}
+{% block content %}
+{% set t = p.totals %}
+<div class="head"><div><h1>The {{ tl.tax }} rate has changed since this quote.</h1>
+<p class="sub">Quote <a href="{{ url_for('documents.view', doc_id=q.id) }}">{{ q.number }}</a> was made at {{ '%g'|format(p.old_rate) }}% {{ tl.tax }}; it's {{ '%g'|format(p.new_rate) }}% now. Choose how to invoice it. The quote itself stays as it is.</p></div></div>
+<form method="post" action="{{ action }}" class="card rc-form">
+{% for k, v in hidden.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+<fieldset class="rc-set"><legend class="sr-only">Which {{ tl.tax }} rate</legend>
+<label class="rc-opt"><input type="radio" name="rate_choice" value="current" checked> <span><b>Use the current rate ({{ '%g'|format(p.new_rate) }}%)</b> — recommended</span></label>
+<fieldset class="rc-sub" id="rc-how"><legend class="sr-only">How</legend>
+<label class="rc-opt"><input type="radio" name="rate_how" value="add" checked> <span>Add the extra {{ tl.tax }} <b class="n">(total {{ t.add.total|money }})</b><small class="muted">Prices stay as quoted before {{ tl.tax }}; the {{ tl.tax }} goes up from {{ t.keep.tax|money }} to {{ t.add.tax|money }}.</small></span></label>
+<label class="rc-opt"><input type="radio" name="rate_how" value="same_total"> <span>Keep the customer's total the same <b class="n">({{ t.same_total.total|money }})</b><small class="muted">The prices before {{ tl.tax }} are worked back from the quoted total, so your business absorbs the difference ({{ tl.tax }} {{ t.same_total.tax|money }}). The invoice shows prices including {{ tl.tax }}.</small></span></label>
+</fieldset>
+<label class="rc-opt"><input type="radio" name="rate_choice" value="quoted"> <span><b>Keep the quoted rate ({{ '%g'|format(p.old_rate) }}%)</b> <b class="n">(total {{ t.keep.total|money }}, {{ tl.tax }} {{ t.keep.tax|money }})</b><small class="muted">Only if that rate still applies to this sale. Check with your accountant if unsure.</small></span></label>
+</fieldset>
+<div class="rc-go"><button class="btn pri">Make the invoice</button> <a class="btn" href="{{ url_for('documents.view', doc_id=q.id) }}">Cancel</a></div>
+</form>
+<script>(function () {
+  var how = document.getElementById('rc-how');
+  function sync() { var cur = document.querySelector('input[name=rate_choice]:checked').value === 'current';
+    how.disabled = !cur; how.classList.toggle('off', !cur); }
+  document.querySelectorAll('input[name=rate_choice]').forEach(function (r) { r.addEventListener('change', sync); }); sync();
+})();</script>
+{% endblock %}

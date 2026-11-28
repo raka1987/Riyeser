@@ -477,9 +477,11 @@ def post_document(db, doc_id):
     return eid
 
 
-def convert_document(db, doc_id, to_status):
+def convert_document(db, doc_id, to_status, rate_choice=None):
     """An order becomes the invoice (bill). A quote is kept as it was quoted (S35): the order or invoice is a new
-    document with its own number, linked from the quote. Returns the id of the order / invoice."""
+    document with its own number, linked from the quote. Returns the id of the order / invoice.
+    rate_choice: the quote's tax rate has changed since it was made (riyeser/rate_change.py): 'add', 'same_total'
+    or 'keep' (None = keep, as before)."""
     write_txn(db)
     doc = db.execute("SELECT * FROM documents WHERE id=?", (doc_id,)).fetchone()
     if doc["status"] not in ("quote", "order"):
@@ -487,10 +489,10 @@ def convert_document(db, doc_id, to_status):
     if doc["converted_to"]:
         raise PostingError(f"{doc['number']} has already been converted.")
     if doc["status"] == "quote":
-        lines = [dict(r) for r in db.execute("SELECT * FROM document_lines WHERE document_id=? ORDER BY id", (doc_id,))]
+        from .rate_change import plan
+        incl, lines = plan(db, doc_id, rate_choice or "keep")   # the quote's own lines (the quote isn't changed)
         header = dict(contact_id=doc["contact_id"], date=_date.today().isoformat(), due_date=doc["due_date"],
-                      reference=doc["reference"] or doc["number"], notes=doc["notes"],
-                      tax_inclusive=bool(doc["tax_inclusive"]))
+                      reference=doc["reference"] or doc["number"], notes=doc["notes"], tax_inclusive=incl)
         new = save_document(db, doc["side"], header, lines, "order" if to_status == "order" else "open")
         db.execute("UPDATE documents SET converted_to=? WHERE id=?", (new, doc_id))
         audit(db, "convert_document", f"{doc['number']} -> document {new}")
