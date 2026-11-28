@@ -32,7 +32,7 @@ module.exports = function mailer(app, h) {
     if (!list.length) return Promise.resolve(false);
     if (!force && s.email_enabled !== '1') return Promise.resolve(false);
     if (!s.smtp_host || !isEmail(s.email_from)) { log(list.join(', '), subject, kind, 'failed', 'Email is not set up (Settings → Email)'); return Promise.resolve(false); }
-    return transport(s).sendMail({ from: { name: s.email_from_name || s.company_name, address: s.email_from }, to: list.join(', '), subject, html: wrapHtml(html, s), replyTo: s.email || s.email_from, attachments: toAtt(attachments) })
+    return transport(s).sendMail({ from: { name: s.email_from_name || s.company_name, address: s.email_from }, to: list.join(', '), subject, html: wrapHtml(html, s), replyTo: s.email || s.email_from, attachments: withLogo(toAtt(attachments)) })
       .then(() => { log(list.join(', '), subject, kind, 'sent'); return true; })
       .catch(e => {
         // over the provider's hourly limit, a temporary refusal, or the server can't be reached (S33): keep it and send it again later
@@ -61,7 +61,7 @@ module.exports = function mailer(app, h) {
     const due = db.prepare('SELECT * FROM email_queue WHERE next_at <= ? ORDER BY id LIMIT 10').all(Date.now());
     for (const q of due) {
       db.prepare('UPDATE email_queue SET next_at = ? WHERE id = ?').run(Date.now() + 10 * 60000, q.id); // don't pick it twice
-      transport(s).sendMail({ from: { name: s.email_from_name || s.company_name, address: s.email_from }, to: q.to_addr, subject: q.subject, html: wrapHtml(q.html, s), replyTo: s.email || s.email_from, attachments: toAtt((() => { try { return JSON.parse(q.attach || '[]'); } catch { return []; } })()) })
+      transport(s).sendMail({ from: { name: s.email_from_name || s.company_name, address: s.email_from }, to: q.to_addr, subject: q.subject, html: wrapHtml(q.html, s), replyTo: s.email || s.email_from, attachments: withLogo(toAtt((() => { try { return JSON.parse(q.attach || '[]'); } catch { return []; } })())) })
         .then(() => { db.prepare('DELETE FROM email_queue WHERE id = ?').run(q.id); log(q.to_addr, q.subject, q.kind, 'sent', q.tries ? `sent after ${q.tries} wait${q.tries > 1 ? 's' : ''}` : ''); })
         .catch(e => {
           if (q.tries >= 8) { db.prepare('DELETE FROM email_queue WHERE id = ?').run(q.id); log(q.to_addr, q.subject, q.kind, 'failed', 'Gave up after 8 tries: ' + e.message); return; }
@@ -69,10 +69,23 @@ module.exports = function mailer(app, h) {
         });
     }
   }, 3 * 60 * 1000).unref();
-  const wrapHtml = (body, s) => `<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;color:#1b2b22">
-    <div style="background:#12355b;color:#fff;padding:16px 20px;border-radius:10px 10px 0 0"><b style="font-size:18px">${esc(s.company_name)}</b></div>
+  // Business details & branding (brand.js): the business's logo, name, tax number and contacts on every email
+  const BRAND = require('./brand');
+  const brandNow = () => { try { return BRAND.brand(getSettings(), BRAND.ownLogo(db)); } catch { return null; } };
+  const LOGO_CID = 'business-logo@riyeser';
+  const withLogo = (atts, b = brandNow()) => (b && b.logo ? [...(atts || []), { filename: `logo.${b.logo.mime === 'image/png' ? 'png' : 'jpg'}`, content: Buffer.from(b.logo.data), contentType: b.logo.mime, cid: LOGO_CID }] : atts);
+  const wrapHtml = (body, s, b = brandNow()) => {
+    const name = (b && b.name) || s.company_name;
+    let logo = '';
+    if (b && b.logo) { const f = BRAND.fit(b.logo, 200, 56); logo = `<img src="cid:${LOGO_CID}" width="${Math.round(f.w)}" height="${Math.round(f.h)}" alt="${esc(name)}" style="display:block;border:0;width:${Math.round(f.w)}px;height:${Math.round(f.h)}px;margin:0 0 10px;background:#fff;padding:4px;border-radius:4px">`; }
+    const details = b ? [b.legal_name, b.tax_line, (b.address_lines || []).join(', '), (b.contact_lines || []).join(' · ')].filter(Boolean)
+      : [s.address, s.phone].filter(Boolean);
+    return `<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:0 auto;color:#1b2b22">
+    <div style="background:#12355b;color:#fff;padding:16px 20px;border-radius:10px 10px 0 0">${logo}<b style="font-size:18px;word-break:break-word">${esc(name)}</b></div>
     <div style="border:1px solid #e3e0d6;border-top:0;padding:18px 20px;border-radius:0 0 10px 10px">${body}
-    <p style="color:#777;font-size:12px;margin-top:22px">${esc(s.company_name)}${s.address ? ' · ' + esc(s.address) : ''}${s.phone ? ' · ' + esc(s.phone) : ''}</p></div></div>`;
+    <p style="color:#777;font-size:12px;margin-top:22px;word-break:break-word">${details.map(esc).join('<br>')}</p>
+    <p style="color:#aaa;font-size:11px;margin:8px 0 0">Sent with Riyeser Payroll</p></div></div>`;
+  };
   // M7: thousands separators, as on screen (FJ$1,500.00)
   const money = v => `${getSettings().currency === 'FJD' ? 'FJ$' : getSettings().currency + ' '}${(+v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const t12 = t => { const [hh, mm] = String(t || '0:0').split(':').map(Number); return `${((hh + 11) % 12) + 1}:${String(mm).padStart(2, '0')}${hh < 12 ? 'am' : 'pm'}`; };
@@ -232,7 +245,8 @@ module.exports = function mailer(app, h) {
     let ded = []; try { ded = typeof p.deduction_lines === 'string' ? JSON.parse(p.deduction_lines || '[]') : (p.deduction_lines || []); } catch { }
     const s = getSettings(), r = 'style="text-align:right;padding:5px 0"', l = 'style="padding:5px 0"';
     return `<div style="border:1px solid #ddd;border-radius:8px;padding:16px;margin:0 0 16px">
-      <h3 style="margin:0 0 2px">${esc(s.company_name)} — Payslip${p.status === 'draft' ? ' <span style="color:#b3261e">(DRAFT — not finalised)</span>' : ''}</h3>
+      <h3 style="margin:0 0 2px">${esc((brandNow() || {}).name || s.company_name)} — Payslip${p.status === 'draft' ? ' <span style="color:#b3261e">(DRAFT — not finalised)</span>' : ''}</h3>
+      ${(brandNow() || {}).tax_line ? `<p style="color:#666;margin:0 0 6px;font-size:12px">${esc(brandNow().tax_line)}</p>` : ''}
       <p style="color:#666;margin:0 0 10px"><b>${esc(p.employee_name)}</b>${p.position ? ' · ' + esc(p.position) : ''}<br>Period: ${dLong(p.period_start)} – ${dLong(p.period_end)}${p.pay_date ? `<br>Pay date: ${dLong(p.pay_date)}` : ''}${p.part ? '<br><span style="color:#b3261e">Part of a pay period (in proportion)</span>' : ''}</p>
       <table style="width:100%;border-collapse:collapse">
         ${p.pay_type === 'hourly' && +p.break_hours ? `<tr><td ${l} style="color:#666">Hours worked ${(+p.worked_hours).toFixed(2)} − unpaid breaks ${(+p.break_hours).toFixed(2)}</td><td></td></tr>` : ''}
@@ -271,6 +285,10 @@ module.exports = function mailer(app, h) {
       Object.assign(['Employer FNPF contribution', money(p.fnpf_employer)], { gray: true }),
       ...(p.ytd ? [{ heading: `Year to date (${p.ytd.year})` }, ['Gross pay', money(p.ytd.gross)], ['PAYE tax', money(p.ytd.paye)], ['FNPF total', money(p.ytd.fnpf_total)], ['Net pay', money(p.ytd.net)],
         ['Annual leave', `${p.ytd.annual_taken} taken, ${p.ytd.annual_left} left`], ['Sick leave', `${p.ytd.sick_taken} taken, ${p.ytd.sick_left} left`]] : [])];
+    const b = brandNow();
+    if (b) return payslipPage({ brand: b, draft: p.status === 'draft' ? 'DRAFT - not finalised' : '', rows,
+      lines: [`${p.employee_name}${p.position ? ' - ' + p.position : ''}`, `Period: ${dLong(p.period_start)} - ${dLong(p.period_end)}`, p.pay_date ? `Pay date: ${dLong(p.pay_date)}` : 'Not paid yet (draft)',
+        `Employee TIN: ${p.tin || '-'}   FNPF: ${p.fnpf_no || '-'}`] });
     return payslipPage({ title: `${s.company_name} - Payslip${p.status === 'draft' ? ' (DRAFT - not finalised)' : ''}`, rows,
       lines: [s.address || '', `${p.employee_name}${p.position ? ' - ' + p.position : ''}`, `Period: ${dLong(p.period_start)} - ${dLong(p.period_end)}`, p.pay_date ? `Pay date: ${dLong(p.pay_date)}` : 'Not paid yet (draft)',
         `TIN: ${p.tin || '-'}   FNPF: ${p.fnpf_no || '-'}`].filter(Boolean) });
