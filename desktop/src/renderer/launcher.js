@@ -252,7 +252,19 @@
     return out.slice(0, 8);
   }
 
-  const api = { ORDER, JOBS, byOrder, firstName, greeting, audience, planLine, payLine, onlineToday, liveLine, tiles, jobsFor, chips, attention, searchLocal };
+  /** Update all's banner line for one step (update-progress from central-main.js installUpdates). */
+  function updateStep(p) {
+    const x = p || {}; const n = x.name || 'the program';
+    switch (x.stage) {
+      case 'downloading': return `Downloading ${n}… ${Math.round((x.pct || 0) * 100)}%`;
+      case 'checking': return `Checking the ${n} download…`;
+      case 'installing': return x.elevate ? `Installing ${n}… Windows is asking for permission — look for the prompt on the taskbar` : `Installing ${n}…`;
+      case 'restarting': return 'Restarting Riyeser Central to finish updating…';
+      case 'failed': return x.message || `${n} didn't update.`;
+      default: return '';
+    }
+  }
+  const api = { updateStep, ORDER, JOBS, byOrder, firstName, greeting, audience, planLine, payLine, onlineToday, liveLine, tiles, jobsFor, chips, attention, searchLocal };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.RiyeserLauncher = api;
 }(typeof window !== 'undefined' ? window : null));

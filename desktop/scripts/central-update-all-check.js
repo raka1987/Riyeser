@@ -83,6 +83,10 @@ function cdp(wsUrl) {
   await screenshot('before');
   await ev(`document.querySelector('#updall').click(), true`);
   note('clicked Update all');
+  // Central 1.9.2 asks first ("Update now?"): answer Update now, the way the person does
+  await sleep(800);
+  const asked = await ev(`(() => { const b = document.querySelector('[data-upconfirm="now"]'); if (!b) return null; const t = b.closest('dialog').innerText; b.click(); return t; })()`).catch(() => null);
+  if (asked) { note('answered Update now', { dialog: asked }); await screenshot('confirm'); }
   let last = ''; let sameSince = Date.now(); let restarting = false;
   while (Date.now() - t0 < minutes * 60000) {
     await sleep(1000);

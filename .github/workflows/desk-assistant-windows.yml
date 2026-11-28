@@ -340,7 +340,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: "22" }
       - name: Unit tests (install state machine and detection, first run's install queue)
-        run: node --test test/central-install.test.js test/central-first-run.test.js
+        run: node --test test/central-install.test.js test/central-first-run.test.js test/central-update-run.test.js
       - name: Windows permission settings on this runner
         shell: pwsh
         run: |

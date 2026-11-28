@@ -250,8 +250,10 @@ async function tileAction(a, id) {
   closeMenus();
   if (a === 'update') {
     updatingIds.add(id); renderTiles();
-    try { const r = await bridge.call('central:installUpdates', [id]); if (!r.restarting) toast(`${p.full} is up to date.`); updError = ''; } catch (e) { updError = e.message; toast(e.message); }
-    updatingIds.delete(id); await checkForUpdates(true);
+    const r = await runUpdates([id]);
+    if (r && !r.restarting && !(r.failed || []).length) toast(`${p.full} is up to date.`);
+    if (updFailed) openAdmin('updates');   // the reason, Try again and Get help are there
+    updatingIds.delete(id); renderTiles();
   }
   if (a === 'repair') {
     if (!(await askConfirm({ title: `Repair ${p.full}?`, body: `Central downloads ${p.full} again and installs it over the top. Your information is kept. ${p.full} closes for a moment if it's open.`, ok: 'Repair it' }))) return;
@@ -565,27 +567,57 @@ document.addEventListener('click', (e) => {
 
 // ---------- updates (Admin panel → Updates; a tile's ⋯ → Update) ----------
 let versions = null;
-function renderUpdates() {
-  const box = $('#updates');
-  const list = upd.updates || [];
-  if (!list.length && !updating) { box.hidden = true; return; }
-  box.hidden = false;
-  if (updating) return; // progress is drawn by the update-progress events
-  box.innerHTML = `<div style="font-size:24px">⬆</div><div class="grow"><b>${list.length === 1 ? 'An update is ready' : `${list.length} updates are ready`}</b>
-    <div class="lbl">${list.map((u) => `${esc(u.name)}${u.self ? ' (this app)' : ''} ${esc(u.from)} → ${esc(u.to)}`).join(' · ')}</div></div>
-    <button class="go" id="updall">Update ${list.length === 1 ? '' : 'all'}</button>`;
-  $('#updall').addEventListener('click', () => safe(async () => {
-    updating = true;
-    box.innerHTML = '<div style="font-size:24px">⬇</div><div class="grow"><b id="updmsg">Getting ready…</b><div class="prog"><i id="updbar"></i></div><div class="lbl">Your information is kept. Programs being updated will close for a moment.</div></div>';
-    try {
-      const r = await bridge.call('central:installUpdates', null);
-      if (r.restarting) { $('#updmsg').textContent = 'Riyeser Central is restarting to finish updating…'; return; }
-      toast(`Updated ${r.done.length} program${r.done.length === 1 ? '' : 's'}.`); updError = '';
-    } catch (e) { updError = e.message; toast(e.message); }
-    updating = false;
-    await checkForUpdates(true);
-  }));
+let updFailed = null;   // the last Update all that didn't finish: { ids, failed: [{ name, message, fix }] } (Try again, Get help)
+const updBoxes = () => ['#updates', '#updpbanner'].map((q) => $(q)).filter(Boolean);
+function updFailHtml(f) {
+  return `<div style="font-size:24px">⚠</div><div class="grow"><b>${f.failed.length === 1 ? `${esc(f.failed[0].name)} didn't update` : `${f.failed.length} updates didn't finish`}</b>
+    ${f.failed.map((x) => `<div class="lbl updfail">${f.failed.length > 1 ? `<b>${esc(x.name)}:</b> ` : ''}${esc(x.message)}${x.fix ? ` ${esc(x.fix)}` : ''}</div>`).join('')}
+    ${f.done && f.done.length ? `<div class="lbl">Updated: ${esc(f.done.join(', '))}.</div>` : ''}</div>
+    <button class="go" data-updretry>Try again</button><button class="btn sm s" data-act="gethelp">Get help</button>`;
 }
+function renderUpdates() {
+  const list = upd.updates || [];
+  for (const box of updBoxes()) {
+    if (!list.length && !updating && !updFailed) { box.hidden = true; continue; }
+    box.hidden = false;
+    if (updating) continue; // progress is drawn by the update-progress events
+    if (updFailed) { box.innerHTML = updFailHtml(updFailed); continue; }
+    box.innerHTML = `<div style="font-size:24px">⬆</div><div class="grow"><b>${list.length === 1 ? 'An update is ready' : `${list.length} updates are ready`}</b>
+      <div class="lbl">${list.map((u) => `${esc(u.name)}${u.self ? ' (this app)' : ''} ${esc(u.from)} → ${esc(u.to)}`).join(' · ')}</div></div>
+      <button class="go" data-updall>Update ${list.length === 1 ? '' : 'all'}</button>`;
+    if (box.id === 'updates') box.querySelector('[data-updall]').id = 'updall';
+  }
+}
+/**
+ * Update all (ids null) or some programs: the banner follows each step; a failure stays in the banner with its plain
+ * reason, Try again and Get help (and in Needs attention) until it's fixed. -> the result, or null when it didn't run.
+ */
+async function runUpdates(ids) {
+  if (updating) return null;
+  updating = true; updFailed = null;
+  for (const box of updBoxes()) {
+    box.hidden = false;
+    box.innerHTML = '<div style="font-size:24px">⬇</div><div class="grow"><b data-updmsg>Getting ready…</b><div class="prog"><i data-updbar></i></div><div class="lbl">Your information is kept. Programs being updated will close for a moment.</div></div>';
+  }
+  let r = null;
+  try {
+    r = await bridge.call('central:installUpdates', ids);
+    if (r.restarting) { document.querySelectorAll('[data-updmsg]').forEach((m) => { m.textContent = 'Riyeser Central is restarting to finish updating…'; }); return r; }
+    const failed = r.failed || [];
+    if (failed.length) {
+      const nm = (id) => (programs.find((p) => p.id === id) || {}).full || id;
+      updFailed = { ids, failed, done: (r.done || []).map(nm) }; updError = failed.map((x) => `${x.name}: ${x.message}`).join(' ');
+    } else { toast(`Updated ${r.done.length} program${r.done.length === 1 ? '' : 's'}.`); updError = ''; }
+  } catch (e) {
+    updFailed = { ids, failed: [{ name: 'Updates', message: e.message, fix: 'Click Try again. If it happens again, click Get help.' }] }; updError = e.message;
+  } finally { updating = false; }
+  await checkForUpdates(true);
+  return r;
+}
+document.addEventListener('click', (e) => {
+  if (e.target.closest('[data-updall]')) { safe(() => runUpdates(null)); return; }
+  if (e.target.closest('[data-updretry]')) { const ids = updFailed && updFailed.ids; updFailed = null; safe(() => runUpdates(ids || null)); }
+});
 async function checkForUpdates(force, quiet = true) {
   try { upd = await bridge.call('central:updates', force); } catch (e) { if (!quiet) toast(e.message); return; }
   (upd.updates || []).sort((a, b) => byOrder(a.id, b.id));
@@ -595,10 +627,9 @@ async function checkForUpdates(force, quiet = true) {
 }
 bridge.on('update-progress', (p) => {
   const tl = document.querySelector(`#tiles [data-tile="${p.id}"] .tl`);
-  if (tl && updatingIds.has(p.id)) tl.textContent = p.stage === 'downloading' ? `Updating… ${Math.round(p.pct * 100)}%` : 'Updating…';
-  const msg = $('#updmsg'); const bar = $('#updbar'); if (!msg) return;
-  msg.textContent = p.stage === 'downloading' ? `Downloading ${p.name}… ${Math.round(p.pct * 100)}%` : p.stage === 'installing' ? (p.elevate ? `Installing ${p.name}… Windows will ask for permission: choose Yes` : `Installing ${p.name}…`) : `Restarting Riyeser Central…`;
-  bar.style.width = `${Math.round((p.stage === 'downloading' ? p.pct : 1) * 100)}%`;
+  if (tl && updatingIds.has(p.id)) tl.textContent = p.stage === 'downloading' ? `Updating… ${Math.round(p.pct * 100)}%` : p.stage === 'failed' ? 'Didn\'t update' : 'Updating…';
+  document.querySelectorAll('[data-updmsg]').forEach((m) => { m.textContent = L9.updateStep(p); });
+  document.querySelectorAll('[data-updbar]').forEach((b) => { b.style.width = `${Math.round((p.stage === 'downloading' ? p.pct : 1) * 100)}%`; });
 });
 
 // ---------- demo mode: practice data for Sample Trading Co (%APPDATA%\Riyeser\demo.json) ----------
