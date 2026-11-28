@@ -9,6 +9,10 @@
 // release riyeser-2026.11.27-60 on GitHub. `ev` is where that was checked: keep it when you change a row.
 // The POS 2.11.0 rows (variants, locations and transfers, tables, cash drawer, kitchen screen) are from main's branch
 // feat/pos-complete: publish them only together with that release.
+// The POS 2.11.1 rows (cashier PINs, switch cashier, sales by cashier, Hardware page, printing straight to the printer,
+// kitchen printers, scanner settings), business details & branding, country tax wording (main feat/pos-pins,
+// feat/branding, feat/tax-labels), Central's automatic updates (feat/auto-update) and the PDF rows below are in the
+// next release: publish them only together with it.
 //
 // STATUS
 //   available  in the current release, for everyone with that program
@@ -71,7 +75,7 @@ export const FACTS = {
     countries: 'Built around Fiji\'s PAYE and FNPF: you enter the rates in Payroll rules. Australian (PAYG, super, Single Touch Payroll) and New Zealand (PAYE, KiwiSaver) payroll are not built in.' },
   pos: { version: '2.11.0', runs: 'Windows 10 and 11 PCs (touch screens work); the kitchen screen in any tablet or PC browser on the same network', net: 'Works offline. Online shop orders need the internet.',
     account: 'Not needed for the 90-day trial. A free Riyeser account is needed to buy.',
-    hw: 'Receipts print through Windows (80 mm layout); barcode scanners that type like a keyboard; cash drawers that plug into an ESC/POS receipt printer (beta); your own EFTPOS machine, not linked. See the hardware page.',
+    hw: 'Receipts print through Windows (80 mm, 58 mm or your own paper width), or straight to an ESC/POS receipt printer with no print box (beta); kitchen printers (beta); barcode scanners that type like a keyboard (beta); cash drawers that plug into an ESC/POS receipt printer (beta); your own EFTPOS machine, not linked. The beta hardware is not yet tested on real devices. See the hardware page.',
     countries: 'Receipts use the company file\'s country settings: its tax name, tax number label and currency.' },
 };
 
@@ -82,6 +86,8 @@ export const FEATURES = [
   // Riyeser Central (free)
   ['central', 'Home screen with every Riyeser program you have', 'available', W, 'offline', 'Free', 'desktop/src/renderer/launcher.js'],
   ['central', 'Installs and updates Riyeser programs', 'available', W, 'online', 'Free', 'desktop/src/central/install-run.js, updates.js'],
+  ['central', 'Automatic updates, only outside your work hours (or when an owner or admin approves); "Only when I approve" and "As soon as possible" too', 'available', W, 'online', 'Free', 'desktop/src/central/auto-update.js, test/central-auto-update.test.js (desk feat/auto-update)'],
+  ['central', '"Welcome to Riyeser" first start: "Just try it", no account needed (an optional business name, pick your programs, done)', 'available', W, 'offline', 'Free', 'desktop/src/renderer/company.js, demo-ui.js; test/central-first-run.test.js'],
   ['central', 'Money owed, overdue invoices and bills to pay, from Riyeser Accounting', 'available', W, 'offline', 'Free (needs Accounting)', 'desktop/src/renderer/launcher.js'],
   ['central', 'Demo mode with a sample business, kept apart from your real records', 'available', W, 'offline', 'Free', 'desktop/src/central/demo.js; riyeser/demo_mode.py'],
   ['central', 'Online connections: bookings, orders and enquiries from your website collected every minute', 'beta', W, 'online', 'Needs Bookings, POS or Accounting', 'desktop/src/central/online-sync.js; supabase/functions/api (main)'],
@@ -105,7 +111,8 @@ export const FEATURES = [
   ['invoices', 'A quote made before a tax rate change asks how to invoice it: today\'s rate with the extra tax, today\'s rate with the same total, or the quoted rate', 'available', W, 'offline', 'Free', 'riyeser/rate_change.py (main)'],
   ['invoices', 'Recurring invoices', 'no', [], 'offline', '—', 'no recurring invoices in riyeser/ (main); apps QA register'],
   ['invoices', 'Automatic overdue reminder emails', 'no', [], 'online', '—', 'apps QA register: statements are emailed by hand only'],
-  ['invoices', 'Your logo on invoice PDFs', 'no', [], 'offline', '—', 'apps QA register: no logo code in riyeser/'],
+  ['invoices', 'Business details & branding: your logo, business and legal name, tax number, contacts and a note for each kind of document, on invoices, quotes, credit notes, statements, receipts, purchase orders and the emails they go in', 'available', W, 'offline', 'Free', 'riyeser/branding.py, views/branding.py, pdf.py, mailer.py; tests/test_branding.py (main feat/branding)'],
+  ['invoices', 'Screens and documents use your country\'s tax wording (GST, VAT, sales tax or none) and tax number label; bank details ask for the fields your country uses', 'available', W, 'offline', 'Free', 'riyeser/countries.py labels(), bank_labels(); tests/test_tax_labels.py (main feat/tax-labels)'],
   // Riyeser PDF (free)
   ['pdf', 'Edit words, add text, highlight and mark up', 'available', W, 'offline', 'Free', 'desktop/src/renderer/editor.js'],
   ['pdf', 'Fill in forms, sign, tick and date', 'available', W, 'offline', 'Free', 'desktop/src/renderer/editor.js'],
@@ -114,6 +121,8 @@ export const FEATURES = [
   ['pdf', 'Compress PDF files (make them smaller)', 'available', W, 'offline', 'Free', 'desktop/src/renderer/editor.js compress()'],
   ['pdf', 'Recognise the text in scanned pages', 'available', W, 'offline', 'Free', 'desktop/src/renderer/ocr-render.js'],
   ['pdf', 'Password-protect a PDF', 'available', W, 'offline', 'Free', 'desktop/src/renderer/editor.js (doc.encrypt)'],
+  ['pdf', 'Save your signature and initials once and place them with one click; stamps (PAID, RECEIVED, APPROVED and your own) with today\'s date', 'available', W, 'offline', 'Free', 'desktop/src/renderer/pdf-handy.mjs, pdf/handy-ipc.js'],
+  ['pdf', 'Ask someone to sign: place the fields, add the signers, and each gets their own signing link; you get the signed copy with a certificate of completion (needs a free Riyeser account; beta until the email service is set up)', 'beta', W, 'online', 'Free (free Riyeser account)', 'desktop/src/renderer/sign-request.js, core/sign-client.js; website/sign; team-chat.sql sign_request_*'],
   // Accounting Basics
   ['accounting-basics', 'Country and tax settings for any country, checked and confirmed by you; change any value or add your own tax codes', 'available', W, 'offline', 'Basics or Plus', 'riyeser/countries.py, countries.json (main, APP-023)'],
   ['accounting-basics', 'Quotes, orders and invoices with GST', 'available', W, 'offline', 'Basics or Plus', 'riyeser/views/documents.py'],
@@ -194,8 +203,16 @@ export const FEATURES = [
   ['pos', 'Product variants (size, colour and more): up to 3 options, each with its own SKU, barcode, price, cost and stock; quick picker at the till; CSV import and export', 'available', W, 'offline', 'POS', 'main feat/pos-complete: riyeser/views/variants.py, tests/test_pos_complete.py'],
   ['pos', 'Stock locations and transfers (sent, in transit, received in parts), stocktake and reorder per location', 'available', W, 'offline', 'POS', 'main feat/pos-complete: riyeser/locations.py, riyeser/views/stock_locations.py'],
   ['pos', 'Move an order or some items to another table, merge tables, and split the bill evenly, by item or by amount', 'available', W, 'offline', 'POS', 'main feat/pos-complete: riyeser/views/pos_tables.py'],
-  ['pos', 'Cash drawer opens by itself (drawers that plug into an ESC/POS receipt printer)', 'beta', W, 'offline', 'POS', 'main feat/pos-complete: riyeser/drawer.py (tested with a fake printer; no tested model list yet)'],
+  ['pos', 'Cash drawer opens by itself on cash sales, cash refunds and No sale (drawers that plug into an ESC/POS receipt printer; not yet tested on real devices)', 'beta', W, 'offline', 'POS', 'main feat/pos-complete, feat/pos-pins: riyeser/drawer.py, views/pos_hardware.py (tested with a fake printer; no tested model list yet)'],
   ['pos', 'Kitchen display screen on a tablet or PC on the same network (no prices shown), alongside printed dockets', 'available', ['win', 'web'], 'lan', 'POS', 'main feat/pos-complete: riyeser/views/kds.py, templates/pos/kds.html'],
+  ['pos', 'Cashier PINs: each cashier taps their own 4 to 6 number PIN, so every sale shows who made it', 'available', W, 'offline', 'POS', 'main feat/pos-pins: riyeser/pos_pins.py, views/pos_cashier.py; tests/test_pos_pins.py'],
+  ['pos', 'Switch cashier at the till without signing out', 'available', W, 'offline', 'POS', 'main feat/pos-pins: riyeser/views/pos_cashier.py, templates/pos/_pos.html'],
+  ['pos', 'Sales by cashier on Today\'s sales and when closing the till', 'available', W, 'offline', 'POS', 'main feat/pos-pins: templates/pos/_by_cashier.html, sales.html, close.html'],
+  ['pos', 'Hardware page: set up the receipt printer, paper width and print layout, cash drawer, barcode scanner and kitchen printers step by step, with test prints', 'available', W, 'offline', 'POS', 'main feat/pos-pins: riyeser/views/pos_hardware.py, templates/pos/hardware.html; tests/test_pos_hardware.py'],
+  ['pos', 'Receipts print straight to the receipt printer with no print box (ESC/POS printers installed in Windows; not yet tested on real devices)', 'beta', W, 'offline', 'POS', 'main feat/pos-pins: riyeser/pos_print.py (tested with a fake printer)'],
+  ['pos', 'Barcode scanner settings: prefix and suffix, scans caught anywhere on the till screen, a beep, and what to do with an unknown barcode (not yet tested on real devices)', 'beta', W, 'offline', 'POS', 'main feat/pos-pins: riyeser/static/pos-scanner.js; tests/test_pos_hardware.py'],
+  ['pos', 'Kitchen printers: each kitchen or bar station prints its dockets on its own printer (not yet tested on real devices)', 'beta', W, 'lan', 'POS', 'main feat/pos-pins: riyeser/views/pos_kitchen.py, pos_print.docket_job'],
+  ['pos', 'Receipts carry your business details & branding: logo, name, legal name, tax number and contacts, and your receipt note', 'available', W, 'offline', 'POS', 'main feat/branding, feat/pos-pins: riyeser/pos_print.py receipt_brand(), brand_logo()'],
 ];
 
 // ---------- Accounting Basics vs Plus (both columns from the code; nothing guessed) ----------
@@ -271,7 +288,7 @@ export const FAQ = {
     ['Is it the same as payroll in Accounting Plus?', 'No. Riyeser Payroll is its own program and its own price. Pay runs can be brought into Riyeser Accounting. It is not part of the Shop bundle; it is in the Office and Business bundles.']],
   pos: [['Does it connect to my EFTPOS machine?', 'Not yet. Today you key the amount into your own card machine and tap Approved or Declined on the till. A practice terminal is built in for training. Linked terminals (Windcave, Stripe) are planned.'],
     ['Retail or restaurant?', 'Both, chosen in setup: retail has product tiles, barcodes, product variants and held sales; restaurant adds tables (move, merge and split the bill), kitchen dockets, a kitchen screen and takeaway.'],
-    ['Which hardware works?', 'Receipts print through Windows on an 80 mm layout, and barcode scanners that type like a keyboard can be used. The cash drawer can open by itself if it plugs into an ESC/POS receipt printer (beta). We have not yet published a list of tested printers, scanners or cash drawers.']],
+    ['Which hardware works?', 'Receipts print through Windows on 80 mm, 58 mm or your own paper width. These are in beta and not yet tested on real devices: printing straight to an ESC/POS receipt printer with no print box, kitchen printers, barcode scanner settings, and a cash drawer that plugs into the receipt printer. Set them up on POS setup › Hardware. We have not yet published a list of tested printers, scanners or cash drawers.']],
 };
 
 // ---------- hardware: what the code supports, and what has been tested on real devices ----------
@@ -279,9 +296,9 @@ export const FAQ = {
 export const HARDWARE = [
   ['Desk phones (SIP)', 'Automatic set-up for Yealink, Grandstream, Snom and Polycom on the office network; other SIP phones by hand', 'Riyeser Link Office', 'Not yet verified: no tested model list yet'],
   ['Phone apps (softphones)', 'Linphone and other SIP apps through the Riyeser relay (TLS)', 'Riyeser Link Office', 'Not yet verified'],
-  ['Receipt printers', 'Printed through Windows on an 80 mm receipt layout, or sent straight to an ESC/POS printer installed in Windows (optional)', 'Riyeser POS', 'Not yet verified: no tested model list yet'],
-  ['Kitchen printers', 'Kitchen dockets print through Windows on an 80 mm layout', 'Riyeser POS (restaurant)', 'Not yet verified'],
-  ['Barcode scanners', 'Scanners that type like a keyboard into the till\'s search', 'Riyeser POS', 'Not yet verified'],
+  ['Receipt printers', 'Printed through Windows on 80 mm, 58 mm or your own paper width, with margins you can adjust. Beta: sent straight to an ESC/POS printer installed in Windows, with no print box', 'Riyeser POS', 'Not yet verified: no tested model list yet'],
+  ['Kitchen printers', 'Kitchen dockets print through Windows. Beta: each kitchen or bar station can print on its own ESC/POS printer', 'Riyeser POS (restaurant)', 'Not yet verified'],
+  ['Barcode scanners', 'Scanners that type like a keyboard. Beta: scanner settings (prefix and suffix, scans caught anywhere on the till, a beep, unknown barcodes)', 'Riyeser POS', 'Not yet verified'],
   ['Cash drawers', 'Beta: drawers that plug into an ESC/POS receipt printer open on cash sales, cash refunds and No sale. A drawer with its own USB cable is not supported', 'Riyeser POS', 'Not yet verified: no tested model list yet'],
   ['Kitchen display screens', 'Any tablet or PC web browser on the same network as the till PC, paired with a code', 'Riyeser POS (restaurant)', 'Not yet verified model by model'],
   ['EFTPOS / card terminals', 'Your own machine, not linked: key in the amount, tap Approved or Declined. Linked Windcave and Stripe terminals are planned', 'Riyeser POS', 'No linked terminal yet'],
