@@ -1,5 +1,6 @@
 """Real PDF files for invoices, quotes, bills, statements and payslips (no browser needed),
 and the shared Riyeser documents folder other Riyeser modules (Desk Assistant, Payroll) use."""
+import io
 import os
 import re
 from datetime import date
@@ -50,6 +51,23 @@ def _t(s):
     return str(s if s is not None else "")
 
 
+# The Riyeser wordmark for the "produced with" line (the same file as the website's assets/logo-wordmark.svg).
+WORDMARK = Path(__file__).with_name("static") / "logo-wordmark.svg"
+WORDMARK_RATIO = 388 / 121          # its viewBox: width / height
+_WM_CACHE = {}
+
+
+def _wordmark():
+    """The wordmark's SVG as bytes (its <title> left out: fpdf only draws the shapes), or None if it's missing."""
+    if "svg" not in _WM_CACHE:
+        try:
+            _WM_CACHE["svg"] = re.sub(r"<title>.*?</title>", "", WORDMARK.read_text(encoding="utf-8")).encode("utf-8")
+        except OSError:
+            _WM_CACHE["svg"] = None
+    svg = _WM_CACHE["svg"]
+    return None if svg is None else io.BytesIO(svg)
+
+
 class _PDF(FPDF):
     def __init__(self, company):
         super().__init__(format="A4")
@@ -75,8 +93,21 @@ class _PDF(FPDF):
         self.set_y(-12)
         self.set_font(FONT, "", 7.5)
         self.set_text_color(*MUTED)
-        self.cell(0, 5, _t(f"{self.company['name']}  -  page {self.page_no()}  -  produced with Riyeser Accounting"),
-                  align="C")
+        text = _t(f"{self.company['name']}  -  page {self.page_no()}  -  produced with ")
+        logo = _wordmark()
+        if logo is None:
+            self.cell(0, 5, text + "Riyeser", align="C")
+            return
+        # "... produced with" and the Riyeser wordmark (static/logo-wordmark.svg), centred together on the line
+        # (3.4 mm high: its capitals match the 7.5 pt text; its baseline, 78/121 of the way down, sits on the text's)
+        h, gap = 3.4, 0.6
+        w = h * WORDMARK_RATIO
+        tw = self.get_string_width(text)
+        x = (self.w - tw - gap - w) / 2
+        y = self.get_y()
+        self.set_x(x)
+        self.cell(tw, 5, text)
+        self.image(logo, x=x + tw + gap, y=y + 1.2, h=h, alt_text="Riyeser")
 
     def header_block(self, title, number, rows):
         c = self.company
