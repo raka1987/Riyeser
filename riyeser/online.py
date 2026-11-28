@@ -648,11 +648,15 @@ def _bookings_mode(db):
     return c["bookings_mode"] if c and c["bookings_mode"] in ("jobs", "appointments", "tables") else "jobs"
 
 
+LONGEST_BOOKING_DAYS = 14  # a booking can last up to 14 days: one that started that long ago may still be on
+
+
 def _clash(db, rid, start, minutes):
     end = start + timedelta(minutes=minutes)
     for r in db.execute("SELECT starts_at, minutes FROM bookings WHERE resource_id=? AND status IN"
                         " ('booked','confirmed','started') AND starts_at < ? AND starts_at >= ?",
-                        (rid, end.isoformat(timespec="minutes"), (start - timedelta(days=1)).isoformat(timespec="minutes"))):
+                        (rid, end.isoformat(timespec="minutes"),
+                         (start - timedelta(days=LONGEST_BOOKING_DAYS)).isoformat(timespec="minutes"))):
         if datetime.fromisoformat(r["starts_at"]) + timedelta(minutes=r["minutes"] or 0) > start:
             return True
     return False
@@ -1337,7 +1341,7 @@ def availability(db, s=None, now=None):
     busy = {}
     for b in db.execute("SELECT resource_id, starts_at, minutes FROM bookings WHERE resource_id IS NOT NULL AND status IN"
                         " ('booked','confirmed','started') AND starts_at >= ? AND starts_at < ?",
-                        ((today - timedelta(days=1)).isoformat(), last)):
+                        ((today - timedelta(days=LONGEST_BOOKING_DAYS)).isoformat(), last)):
         try:
             st = datetime.fromisoformat(str(b["starts_at"]).strip().replace("Z", "")).replace(tzinfo=tz)
         except (TypeError, ValueError):

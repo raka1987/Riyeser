@@ -3,7 +3,7 @@ from functools import wraps
 
 from flask import flash, redirect, request, g, abort
 
-from ..db import get_db, to_cents
+from ..db import get_db, to_cents, write_txn
 from ..ledger import PostingError
 
 
@@ -54,6 +54,34 @@ def guarded(fn):
     return wrapper
 
 
+def once(fn):
+    """A form sent twice (a double click on Save, a refresh, a lost reply sent again) is saved once. Every POST form
+    carries a one-off "_once" token (riyeser/static/app.js adds it); the first save keeps the token with where it
+    went, and the same token again just goes there. Put it under @guarded: a save that fails is rolled back, token
+    and all, so the corrected form can be sent again."""
+    @wraps(fn)
+    def wrapper(*a, **kw):
+        token = (request.form.get("_once") or "").strip()[:64]
+        if not token:
+            return fn(*a, **kw)
+        db = get_db()
+        write_txn(db)  # a second copy arriving at the same moment waits here, then finds the first one's token
+        db.execute("CREATE TABLE IF NOT EXISTS form_submits (token TEXT PRIMARY KEY, location TEXT,"
+                   " created_at TEXT NOT NULL DEFAULT (datetime('now')))")
+        done = db.execute("SELECT location FROM form_submits WHERE token=?", (token,)).fetchone()
+        if done:
+            flash("That was already saved (the form was sent twice), so it wasn't saved again.", "ok")
+            return redirect(done["location"] or request.referrer or request.path)
+        db.execute("DELETE FROM form_submits WHERE created_at < datetime('now', '-7 days')")
+        db.execute("INSERT INTO form_submits (token) VALUES (?)", (token,))
+        resp = fn(*a, **kw)
+        loc = getattr(resp, "location", None)
+        if loc:
+            db.execute("UPDATE form_submits SET location=? WHERE token=?", (loc, token))
+        return resp
+    return wrapper
+
+
 def admin_only(fn):
     @wraps(fn)
     def wrapper(*a, **kw):
@@ -63,4 +91,4 @@ def admin_only(fn):
     return wrapper
 
 
-__all__ = ["lookups", "opt_int", "opt_float", "form_lines", "guarded", "admin_only", "to_cents"]
+__all__ = ["lookups", "opt_int", "opt_float", "form_lines", "guarded", "once", "admin_only", "to_cents"]

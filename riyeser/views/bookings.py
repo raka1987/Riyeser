@@ -14,9 +14,9 @@ from datetime import date, datetime, timedelta
 
 from flask import Blueprint, render_template, request, redirect, url_for, flash, g, abort
 
-from ..db import get_db, audit, to_cents, round_cents
+from ..db import get_db, audit, to_cents, round_cents, write_txn
 from ..ledger import save_document, PostingError
-from . import guarded, opt_int, opt_float
+from . import guarded, once, opt_int, opt_float
 
 bp = Blueprint("bookings", __name__, url_prefix="/bookings")
 
@@ -128,8 +128,12 @@ def ends(b):
     return datetime.fromisoformat(b["starts_at"]) + timedelta(minutes=b["minutes"] or 0)
 
 
+LONGEST_MINUTES = 24 * 60 * 14  # a booking can last up to 14 days (equipment hire, a long job)
+
+
 def clash(db, resource_id, start, minutes, skip_id=None):
-    """Another live booking on the same staff member or table that overlaps this time."""
+    """Another live booking on the same staff member or table that overlaps this time (one that started up to 14
+    days earlier can still be running)."""
     if not resource_id:
         return None
     end = start + timedelta(minutes=minutes)
@@ -137,7 +141,7 @@ def clash(db, resource_id, start, minutes, skip_id=None):
                       " WHERE b.resource_id=? AND b.status IN ('booked','confirmed','started') AND b.id IS NOT ?"
                       " AND b.starts_at < ? AND b.starts_at >= ?",
                       (resource_id, skip_id, end.isoformat(timespec="minutes"),
-                       (start - timedelta(days=1)).isoformat(timespec="minutes"))).fetchall()
+                       (start - timedelta(minutes=LONGEST_MINUTES)).isoformat(timespec="minutes"))).fetchall()
     for r in rows:
         if ends(r) > start:
             return r
@@ -320,7 +324,7 @@ def edit(bid=None):
         if bid:
             return _save(bid)
         try:  # M6: a new booking that can't be saved comes back with what was typed, and the reason once
-            resp = _save_core(None)
+            resp = once(_save_core)(None)   # Save pressed twice: one booking
             db.commit()
             return resp
         except (PostingError, ValueError) as e:
@@ -361,7 +365,7 @@ def edit(bid=None):
 
 
 def _save(bid):
-    return guarded(_save_core)(bid)
+    return guarded(once(_save_core))(bid)
 
 
 def _save_core(bid):
@@ -383,7 +387,7 @@ def _save_core(bid):
         raise PostingError("Enter a date and time.")
     svc = db.execute("SELECT * FROM booking_services WHERE id=?", (opt_int(f.get("service_id")),)).fetchone()
     minutes = opt_int(f.get("minutes")) or (svc["minutes"] if svc else m["minutes"])
-    if minutes is None or minutes <= 0 or minutes > 24 * 60 * 14:
+    if minutes is None or minutes <= 0 or minutes > LONGEST_MINUTES:
         raise PostingError("How long should it take? Enter the minutes.")
     rid = opt_int(f.get("resource_id"))
     status = f.get("status") if f.get("status") in dict(STATUSES) else "booked"
@@ -633,6 +637,7 @@ def labour_groups(db, j):
 
 
 def _invoice_job(db, jid):
+    write_txn(db)  # Invoice pressed twice at once: the second waits, then finds the first one's invoice
     j = get_job(db, jid)
     if j["document_id"]:
         return redirect(url_for("documents.view", doc_id=j["document_id"]))

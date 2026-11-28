@@ -3,7 +3,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 
 from ..db import get_db, audit, to_cents, linked
 from ..ledger import general_journal, reverse_entry, balances, fy_start, PostingError, check_journal_lines
-from . import lookups, opt_int, form_lines, guarded, admin_only
+from . import lookups, opt_int, form_lines, guarded, once, admin_only
 from ..perms import can, PAYROLL_SOURCES, collapse_pay
 
 bp = Blueprint("core", __name__)
@@ -194,6 +194,7 @@ def journal_new():
 
 
 @guarded
+@once
 def _save_journal():
     db = get_db()
     lines = []

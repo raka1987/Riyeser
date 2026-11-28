@@ -8,7 +8,7 @@ from ..db import get_db, to_cents, linked
 from .. import pdf as pdfmod
 from ..ledger import save_document, convert_document, void_document, record_payment, void_payment, add_days, \
     PostingError, credits_for, apply_credit, refund_credit, credit_available
-from . import lookups, opt_int, opt_float, form_lines, guarded
+from . import lookups, opt_int, opt_float, form_lines, guarded, once
 
 bp = Blueprint("documents", __name__)
 
@@ -134,6 +134,7 @@ def edit(side, doc_id=None):
 
 
 @guarded
+@once
 def _save(side, doc_id):
     db = get_db()
     f = request.form
@@ -396,6 +397,7 @@ def pay(side):
 
 
 @guarded
+@once
 def _save_payment(side):
     db = get_db()
     f = request.form
@@ -418,6 +420,7 @@ def _save_payment(side):
 
 @bp.route("/credit/<int:cid>/apply", methods=["POST"])
 @guarded
+@once
 def credit_apply(cid):
     db = get_db()
     cr = db.execute("SELECT * FROM documents WHERE id=?", (cid,)).fetchone() or abort(404)
@@ -429,6 +432,7 @@ def credit_apply(cid):
 
 @bp.route("/credit/<int:cid>/refund", methods=["POST"])
 @guarded
+@once
 def credit_refund(cid):
     db = get_db()
     cr = db.execute("SELECT * FROM documents WHERE id=?", (cid,)).fetchone() or abort(404)

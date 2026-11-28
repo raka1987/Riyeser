@@ -12,7 +12,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 from .. import perms
 from ..db import get_db, audit, to_cents, fmt_money, linked, round_cents
 from ..ledger import save_document, bank_transaction, PostingError
-from . import guarded, opt_int
+from . import guarded, once, opt_int
 
 bp = Blueprint("expenses", __name__, url_prefix="/expenses")
 
@@ -113,6 +113,7 @@ def _gst_rate(db):
 
 
 @guarded
+@once
 def _save():
     db = get_db()
     f = request.form

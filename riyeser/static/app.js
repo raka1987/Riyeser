@@ -21,6 +21,17 @@
     if (tr && !e.target.closest("a,button,input,select,form")) location.href = tr.dataset.href;
   });
 
+  // Each form on the page gets a one-off token: if it is sent twice (a double click on Save, a refresh), the server
+  // saves it once (riyeser/views/__init__.py, once()).
+  const token = () => (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+    : Date.now().toString(36) + Math.random().toString(36).slice(2);
+  $$("form").forEach(f => {
+    if ((f.getAttribute("method") || "").toLowerCase() !== "post" || f.querySelector("input[name=_once]")) return;
+    const i = document.createElement("input");
+    i.type = "hidden"; i.name = "_once"; i.value = token();
+    f.appendChild(i);
+  });
+
   // confirm buttons
   document.addEventListener("submit", e => {
     const msg = e.target.dataset.confirm;

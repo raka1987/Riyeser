@@ -8,8 +8,10 @@
 {% if 'job' in rep.filters %}<div><label>Job</label><select name="job"><option value="">All</option>{% for j in jobs %}<option value="{{ j.id }}" {{ 'selected' if p.job==j.id }}>{{ j.code }} {{ j.name }}</option>{% endfor %}</select></div>{% endif %}
 <div><button class="btn pri">Run report</button></div></form>{% endif %}
 {% if rep.warning %}<div class="flash error" role="alert">{{ rep.warning }}</div>{% endif %}
-<div class="tbl"><table><tr>{% for c in rep.columns %}<th class="{{ 'n' if not loop.first }}">{{ c }}</th>{% endfor %}</tr>
+{# money columns (any amount in them) line up on the right, heading and blanks too; text columns stay on the left #}
+{% set ns = namespace(num=[]) %}{% for r in rep.rows %}{% for c in r.cells %}{% if c is number and loop.index0 not in ns.num %}{% set ns.num = ns.num + [loop.index0] %}{% endif %}{% endfor %}{% endfor %}
+<div class="tbl"><table><tr>{% for c in rep.columns %}<th class="{{ 'n' if loop.index0 in ns.num }}">{{ c }}</th>{% endfor %}</tr>
 {% for r in rep.rows %}<tr class="{{ r.kind }} {{ 'click' if r.link }}" {% if r.link %}data-href="{{ r.link }}"{% endif %}>
-{% for c in r.cells %}{% if c is number %}<td class="n {{ 'neg' if c < 0 }}">{{ c|money }}</td>{% else %}<td class="{{ 'i1' if loop.first and r.indent }}">{{ c }}</td>{% endif %}{% endfor %}</tr>
+{% for c in r.cells %}{% if c is number %}<td class="n {{ 'neg' if c < 0 }}">{{ c|money }}</td>{% else %}<td class="{{ 'i1' if loop.first and r.indent }} {{ 'n' if loop.index0 in ns.num }}">{{ c }}</td>{% endif %}{% endfor %}</tr>
 {% else %}<tr><td class="muted" colspan="{{ rep.columns|length }}">No data for this period.</td></tr>{% endfor %}</table></div>
 {% endblock %}

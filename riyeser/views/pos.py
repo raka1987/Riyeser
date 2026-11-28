@@ -11,7 +11,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, abort, g, current_app
 
-from ..db import get_db, linked, round_cents, audit, to_cents
+from ..db import get_db, linked, round_cents, audit, to_cents, write_txn
 from ..ledger import save_document, record_payment, void_payment, void_document, post_entry, stock_in, tax_code, \
     PostingError
 from . import guarded, opt_int
@@ -1099,6 +1099,7 @@ def refund(sid):
     db = get_db()
     d = request.get_json(silent=True) or {}
     try:
+        write_txn(db)  # Refund pressed twice at once: the second waits, then sees what is left to refund
         s = _sale(db, sid)
         if s["voided"]:
             raise PostingError("This sale was voided, so there is nothing to refund.")
@@ -1114,7 +1115,12 @@ def refund(sid):
             l = lines.get(lid)
             if not l or q > left.get(lid, 0) + 1e-9:
                 raise PostingError("You can't refund more than was sold.")
-            net, t = round(l["net_amount"] * q / l["qty"]), round(l["tax_amount"] * q / l["qty"])
+            # what is refunded so far (by quantity) and with this refund, each rounded the same way: the parts
+            # always add up to the line, so refunding a line one at a time returns its income and GST to the cent
+            done = l["qty"] - left[lid]
+            share = lambda amt, n: round_cents(amt * min(n / l["qty"], 1))
+            net = share(l["net_amount"], done + q) - share(l["net_amount"], done)
+            t = share(l["tax_amount"], done + q) - share(l["tax_amount"], done)
             jl.append(dict(account_id=l["account_id"], debit=net, tax_code_id=l["tax_code_id"],
                            memo=f"Refund {l['description']}"))
             if t:

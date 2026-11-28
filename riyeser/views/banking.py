@@ -6,7 +6,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 
 from ..db import get_db, to_cents, audit, linked, fmt_money, write_txn
 from ..ledger import bank_transaction, transfer, balances, PostingError
-from . import lookups, opt_int, form_lines, guarded
+from . import lookups, opt_int, form_lines, guarded, once
 
 bp = Blueprint("banking", __name__, url_prefix="/banking")
 
@@ -40,6 +40,7 @@ def money(kind):
 
 
 @guarded
+@once
 def _save_money(kind):
     db = get_db()
     f = request.form
@@ -68,6 +69,7 @@ def transfer_money():
 
 
 @guarded
+@once
 def _save_transfer():
     f = request.form
     eid = transfer(get_db(), int(f["from_id"]), int(f["to_id"]), f["date"], to_cents(f["amount"]), f.get("memo"))
