@@ -3727,7 +3727,7 @@
     TITLE: 'Desk phones',
     UPSELL_TEAM: 'Riyeser Link is paused, so desk phones and calls are paused too. Ask the owner to add Riyeser Link on the Riyeser home page (Add to my plan).',
     UPSELL: `Riyeser Link is paused, so desk phones and calls are paused too. Riyeser Link (chat, calls, desk phones and Riyeser Link Office) is ${usd(PRICE_LINK)} a month per business (3 users included), with no call charges. Add it on the Riyeser home page: <b>Add to my plan</b>.`,
-    GUIDE: ['Install <b>Riyeser Link Office</b> on a PC at the office that stays on (<b>Riyeser Central → Get more apps</b>, or <a href="/downloads.html">riyeser.com → Downloads</a>).', 'Sign in with your Riyeser account.', 'Plug in desk phones.'],
+    GUIDE: ['Install <b>Riyeser Link Office</b> on a PC at the office that stays on (<b>Riyeser Central → Add a program</b>, or <a href="/downloads.html">riyeser.com → Downloads</a>).', 'Sign in with your Riyeser account.', 'Plug in desk phones.'],
     SENDING: 'Sending to Riyeser Link Office…', DONE: 'Done', SLOW: 'Riyeser Link Office hasn\'t picked this up yet. It checks every 30 seconds while the office PC is on and connected to the internet.',
     HELP: [['🔌 Power', 'Many desk phones don\'t come with a power adapter and expect power over the network cable (PoE). Buy the phone\'s power adapter, or a small PoE switch.'],
       ['🏢 Same office network', 'Desk phones plug into the same office network as the Riyeser Link Office PC. A phone at home or at another site can join too once the Riyeser relay is switched on (Sites and the Riyeser relay, below).'],
@@ -4558,7 +4558,7 @@
     const fresh = offices.some((x) => now - Date.parse(x.last_seen) < 10 * 60000);
     const called = offices.some((x) => x.counts && ((x.counts.calls_made || 0) > 0 || (x.counts.calls_in_progress || 0) > 0));
     return [
-      { t: 'Install Riyeser Link Office on a PC at the office that stays on.', s: 'Get it from <b>Riyeser Central → Get more apps</b>, or from <a href="/downloads.html">riyeser.com → Downloads</a>.', done: offices.length > 0, act: '<a class="btn sm" href="/help/link.html#desk-phones">How to install</a>' },
+      { t: 'Install Riyeser Link Office on a PC at the office that stays on.', s: 'Get it from <b>Riyeser Central → Add a program</b>, or from <a href="/downloads.html">riyeser.com → Downloads</a>.', done: offices.length > 0, act: '<a class="btn sm" href="/help/link.html#desk-phones">How to install</a>' },
       { t: 'Sign in on that PC.', s: last && !fresh ? `Riyeser Link Office last reported ${ago(last.last_seen)}. Is the PC on, and signed in to your Riyeser account?` : 'Open Riyeser Link Office and sign in with your Riyeser account. It brings in your people and extensions.', done: fresh },
       { t: 'Plug in your desk phones.', s: 'Into a network socket at the office, and into power.', done: phones.length > 0, act: offices.length ? '<button class="btn sm" data-step="add">+ Add desk phone</button>' : '' },
       { t: 'Give each phone to a person.', s: 'New phones show up below. Choose who each one is for.', done: phones.length > 0 && phones.every((p) => p.assigned), act: phones.some((p) => !p.assigned) ? '<button class="btn sm" data-step="found">New phones found</button>' : '' },
