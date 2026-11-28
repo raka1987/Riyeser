@@ -34,7 +34,9 @@
   const hours = (a, b = Date.now()) => (new Date(b) - new Date(a)) / 3600000;
   const dur = (h) => (h < 1 ? `${Math.max(1, Math.round(h * 60))} min` : h < 48 ? `${Math.round(h)} h` : `${Math.round(h / 24)} days`);
   const ROLES = [['owner', 'Owner'], ['admin', 'Admin'], ['finance', 'Finance'], ['support', 'Support'], ['senior', 'Senior support'], ['sales', 'Sales'], ['developer', 'Developer']];
-  const roleName = (r) => (ROLES.find((x) => x[0] === r) || [r, r])[1];
+  // Role names by key: the built-in ones, plus custom roles from the database once HQ team or hq_me has loaded them.
+  const ROLE_NAMES = Object.fromEntries(ROLES);
+  const roleName = (r) => ROLE_NAMES[r] || (r && String(r).startsWith('c_') ? 'Custom role' : r);
   // The paid programs A to Z (as everywhere else). 'calls' is Riyeser Link (chat, calls, desk phones, Link Office).
   // Riyeser Estimate ('estimate'): free for 90 days from first use, then US$20 a month (not part of any bundle).
   const MODULES = [['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['bookings', 'Bookings'], ['calls', 'Riyeser Link'], ['payroll', 'Payroll'], ['pos', 'POS'], ['as_built', 'As Built'], ['estimate', 'Riyeser Estimate']];
@@ -79,25 +81,71 @@
   function missing(e) { const m = (e && (e.message || '')) + ' ' + ((e && e.code) || ''); return /PGRST202|Could not find the function|schema cache|does not exist/i.test(m); }
   const SWITCH_ON = '<div class="card"><p class="muted">Run the latest <b>team-chat.sql</b> in Supabase (SQL Editor) to switch this on. See ops/RUNBOOK.md.</p></div>';
 
-  // Permissions (the same list and role defaults as the database: hq_all_perms / hq_role_perms).
-  const PERMS = [['overview.view', 'See the overview'], ['downloads.view', 'See downloads'], ['customers.view', 'See businesses'], ['customers.notes', 'Add notes'],
-    ['customers.edit', 'Edit business details'], ['people.reset_2fa', 'Reset two-step sign-in'], ['people.change_owner', 'Change a business\'s owner'],
-    ['business.close', 'Close, suspend or reopen businesses'], ['licences.view', 'See licences'], ['licences.manage', 'Change licences and plans'],
-    ['support.view', 'See support tickets'], ['support.reply', 'Reply to tickets (level 1)'], ['support.assign', 'Assign tickets'],
-    ['support.saved_replies', 'Manage saved replies'], ['support.escalate', 'Escalate tickets'], ['support.level2', 'Work level 2 (senior) tickets'],
-    ['support.level3', 'Work level 3 (management) tickets'], ['refunds.view', 'See refunds'], ['refunds.request', 'Enter a refund request for a customer'],
-    ['refunds.approve', 'Approve refunds'], ['refunds.pay', 'Mark refunds paid'], ['offers.grant', 'Give free periods'], ['offers.approve', 'Approve free periods (supervisor)'],
-    ['emails.view', 'See the email outbox'], ['emails.manage', 'Send held or failed emails again'], ['accounts.inactive', 'Approve removing inactive accounts'],
-    ['staff.manage', 'Manage the HQ team'], ['audit.view', 'See the HQ history'], ['settings.manage', 'Change HQ settings'], ['reports.view', 'See reports'],
-    ['link.support', 'Riyeser Link phone support'], ['support.diagnostics', 'Look up diagnostic reports'], ['ops.view', 'See integrations, backups and restore tests'],
-    ['test_accounts.manage', 'Mark test, demo and internal accounts'],
-    ['trials.view', 'See a PC\'s free-trial history (from a ticket\'s report)']];
+  // Permissions (the same list as the database's hq_all_perms), in plain English, in groups, each with what it allows.
+  // The database is the source of truth for every role's ticks (hq_roles / hq_role_permissions); ROLE_PERMS below are the
+  // shipped built-in ticks (hq_builtin_perms), used by the demo and by a database that hasn't had the latest team-chat.sql.
+  const PERM_GROUPS = [
+    ['Everyday', [
+      ['overview.view', 'See the overview', 'The HQ home: counts, the work queue, system health and the team handover.'],
+      ['downloads.view', 'See downloads', 'How many times each program has been downloaded.']]],
+    ['Customers', [
+      ['customers.view', 'See customer accounts', 'Business name, Company ID, country, the owner\'s contact details, linked PCs and versions. Never their books, chats or files.'],
+      ['customers.notes', 'Add internal notes', 'Write notes on a customer page. Only HQ staff see them.'],
+      ['customers.edit', 'Edit business details', 'Correct a business\'s name, address or contact email (with a reason, kept in the HQ history).'],
+      ['people.reset_2fa', 'Reset a customer\'s two-step sign-in', 'For someone who has lost their phone. It never shows their password.'],
+      ['people.change_owner', 'Change a business\'s owner', 'Hand a business over to another of its people.'],
+      ['business.close', 'Close, suspend or reopen a business', 'Stop or restart a business\'s account, with a reason.'],
+      ['accounts.inactive', 'Approve removing inactive accounts', 'Remove accounts that have been closed and unused for a long time.'],
+      ['test_accounts.manage', 'Mark test accounts', 'Mark an account as test, demo or internal so business figures leave it out.']]],
+    ['Licences and money', [
+      ['licences.view', 'See customer licences', 'Licences, plans, Riyeser\'s invoices and payments, and monthly revenue.'],
+      ['licences.manage', 'Change licences', 'Change plans and paid-until dates, mark bank transfers paid and give extra storage.'],
+      ['invoices.email', 'Email invoices and receipts', 'Send a customer\'s invoice or receipt again. Finance and the Owner have it; only the Owner can give it to anyone else.'],
+      ['refunds.view', 'See refunds', 'Refund requests and what was decided.'],
+      ['refunds.request', 'Enter a refund request', 'Start a refund for a customer. Someone else approves it.'],
+      ['refunds.approve', 'Approve refunds', 'Say yes or no to refunds. Big refunds need a second person too.'],
+      ['refunds.pay', 'Mark refunds paid', 'Record that an approved refund has been paid.'],
+      ['offers.grant', 'Give free periods', 'Short free periods apply straight away; longer ones wait for approval.'],
+      ['offers.approve', 'Approve free periods', 'Approve longer free periods (supervisor).']]],
+    ['Support', [
+      ['support.view', 'See tickets', 'Read customers\' help requests.'],
+      ['support.reply', 'Answer tickets (level 1)', 'Reply to customers and add internal notes on level 1 tickets.'],
+      ['support.level2', 'Work level 2 tickets (senior)', 'Work tickets passed up to senior or technical support.'],
+      ['support.level3', 'Work level 3 tickets (management)', 'Work tickets passed up to management.'],
+      ['support.assign', 'Assign tickets', 'Give a ticket to someone on the team.'],
+      ['support.escalate', 'Escalate tickets', 'Pass a ticket up a level, or send it back down.'],
+      ['support.saved_replies', 'Manage saved replies', 'Add, change and retire the team\'s saved replies.'],
+      ['support.diagnostics', 'Look up diagnostic reports', 'Read the report a PC sends with a ticket. Passwords and keys are already removed from it.'],
+      ['link.support', 'Riyeser Link phone help', 'Help with a customer\'s phones while they allow it (1 hour). Never shows a phone password.'],
+      ['trials.view', 'See trial history', 'A PC\'s free-trial dates, from a ticket\'s report.']]],
+    ['Emails and reports', [
+      ['emails.view', 'See the email outbox', 'Which emails HQ has sent, and any that are held or failed.'],
+      ['emails.manage', 'Send held or failed emails again', 'Try a held or failed email again.'],
+      ['reports.view', 'See reports and website traffic', 'Sign-ups, trials, the revenue estimate, leaving, support and website visits.']]],
+    ['Running HQ', [
+      ['staff.manage', 'Manage the HQ team', 'Add people, choose their role and ticks, and make roles. Never more than they can do themselves.'],
+      ['settings.manage', 'Change HQ settings', 'Ticket timings, refund and free-period limits, and similar settings.'],
+      ['audit.view', 'See the HQ history', 'Every HQ action: who did what, and when.'],
+      ['ops.view', 'See system operations', 'Integrations, backups and restore tests.']]]];
+  const PERMS = PERM_GROUPS.flatMap(([, list]) => list.map(([k, l]) => [k, l]));
+  const PERM_HINT = Object.fromEntries(PERM_GROUPS.flatMap(([, list]) => list.map(([k, , h]) => [k, h])));
+  const permLabel = (k) => (PERMS.find((x) => x[0] === k) || [k, k])[1];
+  // Only the Owner can give these (SEC-010), and nobody can ever be given what's on NEVER (the database refuses it too).
+  const OWNER_ONLY = ['invoices.email'];
+  const NEVER = ['See any password, phone (SIP) password or secret', 'Change Riyeser\'s bank details (only the Owner)', 'Make or change an Owner (only an Owner)', 'Get past two-step sign-in'];
+  const ROLE_DESC = { owner: 'Everything, always, including Riyeser\'s billing and bank details. Only an Owner makes another Owner.',
+    admin: 'Runs the HQ team, settings, the HQ history and operations. No money, licences, refunds or bank details.',
+    finance: 'Licences, invoices and payments, refunds and free periods, and emailing invoices and receipts.',
+    support: 'Level 1 help: tickets, customer details, diagnostics, two-step sign-in resets and Link phone help.',
+    senior: 'Everything Support does, plus level 2 tickets, owner changes, closing businesses and resending emails.',
+    sales: 'Customer accounts and licence state, notes, and free periods within the limit.',
+    developer: 'The overview, downloads, sanitised diagnostic reports and system operations. No customer list.' };
   const BASE = ['overview.view', 'downloads.view'];
   const ROLE_PERMS = {
     owner: PERMS.map((p) => p[0]),
     // Finance: money, and billing tickets at level 1 (owner's decision: not level 2/3 ticket work by default)
     finance: [...BASE, 'customers.view', 'customers.notes', 'licences.view', 'licences.manage', 'support.view', 'support.reply',
-      'support.escalate', 'refunds.view', 'refunds.approve', 'refunds.pay', 'offers.grant', 'offers.approve', 'emails.view', 'reports.view', 'trials.view'],
+      'support.escalate', 'refunds.view', 'refunds.approve', 'refunds.pay', 'offers.grant', 'offers.approve', 'emails.view', 'reports.view', 'trials.view', 'invoices.email'],
     // Admin: the HQ team, settings, history and operations; no money, licences, refunds or bank details
     admin: [...BASE, 'customers.view', 'customers.notes', 'emails.view', 'emails.manage', 'audit.view', 'staff.manage', 'settings.manage', 'ops.view', 'test_accounts.manage'],
     support: [...BASE, 'customers.view', 'customers.notes', 'customers.edit', 'people.reset_2fa', 'licences.view', 'support.view', 'support.reply', 'support.assign',
@@ -182,6 +230,10 @@
       addStaff: (email, name, role) => rpc('hq_add_staff', { staff_email: email, staff_name: name, staff_role: role }),
       setStaff: (staff, role, active) => rpc('hq_set_staff', { staff, staff_role: role, is_active: active }),
       setStaffPerms: (staff, on, off) => rpc('hq_set_staff_perms', { staff, perms_on: on, perms_off: off }),
+      // custom HQ roles (each answers "missing" on a database without the latest team-chat.sql)
+      setStaffAccess: (staff, role, perms) => rpc('hq_set_staff_access', { staff, staff_role: role, perms }),
+      roleSave: (key, name, description, perms) => rpc('hq_role_save', { role_key: key || null, role_name: name, role_description: description, perms }),
+      roleDelete: (key, moveTo) => rpc('hq_role_delete', { role_key: key, move_to: moveTo || null }),
       async history(f = {}) {
         try { return await rpc('hq_audit_search', { who: f.who || null, action_like: f.action || null, ws: f.ws || null, from_day: f.from || null, to_day: f.to || null, for_export: !!f.exp }); }
         catch (e) { if (!missing(e) || f.exp) throw e; return rpc('hq_history'); }
@@ -315,7 +367,18 @@
       { user_id: 's4', display_name: 'Senior Sione', role: 'senior', active: true, email: 'senior@riyeser.test', added_at: t(3), perms_add: [], perms_remove: [] },
       { user_id: 's5', display_name: 'Admin Ana', role: 'admin', active: true, email: 'admin@riyeser.test', added_at: t(2), perms_add: [], perms_remove: [] }];
     // staff emails: only for whoever manages the HQ team (and your own), as hq_team() in the database
-    const staffOut = () => { const all = permsOf(me()).includes('staff.manage'); return staff.map((s) => ({ ...s, email: all || s.user_id === actor ? s.email : null, perms: permsOf(s) })); };
+    const staffOut = () => { const all = permsOf(me()).includes('staff.manage'); return staff.map((s) => ({ ...s, role_name: roleName(s.role), email: all || s.user_id === actor ? s.email : null, perms: permsOf(s) })); };
+    // custom HQ roles, as hq_roles / hq_role_permissions and the checks in team-chat.sql (hq_access_check, hq_role_save, hq_role_delete)
+    const STD = JSON.parse(JSON.stringify(ROLE_PERMS));
+    const droles = ROLES.map(([key, name], i) => ({ key, name, description: ROLE_DESC[key], builtin: true, sort: i }));
+    const permsFor = (role, add = [], rem = []) => (role === 'owner' ? PERMS.map((p) => p[0]) : [...new Set([...(ROLE_PERMS[role] || []), ...add])].filter((p) => !rem.includes(p)).sort());
+    const dCheckList = (list) => { const bad = (list || []).find((p) => !PERMS.some((x) => x[0] === p)); if (bad) throw new Error(/password|secret|bank|bypass|owner\.|two_step|mfa/i.test(bad) ? `That can never be given to anyone (${bad}).` : 'Unknown permission: ' + bad); };
+    const dGrant = (nw, old) => { if (me().role === 'owner') return; const extra = nw.filter((p) => !old.includes(p));
+      const oo = extra.filter((p) => OWNER_ONLY.includes(p)); if (oo.length) throw new Error(`Only the HQ Owner can give "Email invoices and receipts" (${oo.join(', ')}, SEC-010).`);
+      const mine = permsOf(me()); const nh = extra.filter((p) => !mine.includes(p)).sort(); if (nh.length) throw new Error(`You can only give permissions you have yourself (${nh.join(', ')}).`); };
+    const dCheck = (target, role, nw, old) => { if (target === actor) throw new Error('You can\'t change your own HQ access. Ask another owner.'); dCheckList(nw);
+      if (me().role === 'owner') return; const cur = staff.find((x) => x.user_id === target);
+      if (['owner', 'admin'].includes(role) || (cur && ['owner', 'admin'].includes(cur.role))) throw new Error('Only an HQ owner can make or change an owner or an admin.'); dGrant(nw, old); };
     let actor = 's1';
     const me = () => staff.find((s) => s.user_id === actor); const nameOf = (id) => (staff.find((s) => s.user_id === id) || {}).display_name || null;
     const need = (p) => { if (!permsOf(me()).includes(p)) throw new Error('Your HQ role can\'t do that.'); };
@@ -518,7 +581,7 @@
     return {
       async session() { return { user: { email: 'sam@riyeser.test' } }; }, async signIn() {}, async signOut() {},
       async aal() { return { currentLevel: 'aal2', nextLevel: 'aal2' }; }, async factors() { return [{ id: 'f' }]; }, async verify() {},
-      async me() { const s = me(); return { role: s.role, name: s.display_name, active: true, two_step: true, perms: permsOf(s), id: s.user_id }; },
+      async me() { const s = me(); return { role: s.role, role_name: roleName(s.role), name: s.display_name, active: true, two_step: true, perms: permsOf(s), id: s.user_id, customised: !!((s.perms_add || []).length || (s.perms_remove || []).length) }; },
       asStaff(id) { actor = id; }, staffList: () => staff.slice(),
       async overview(inc) { return { include_test: !!inc, companies: cos.filter((c) => inc || !c.account_kind || c.account_kind === 'customer').length, companies_7d: 1, companies_30d: 2, people: 24, pcs: 10, pcs_active_7d: 8, pcs_active_30d: 10, requests_waiting: 1, calls_paid: 1, calls_trial: 3,
         trials_ending: [{ id: 'w1', name: 'Sample Plumbing', company_code: 'RIY-7K3M-Q2', days_left: 10 }],
@@ -540,7 +603,9 @@
       async setCallsPaid(ws, until) { cos.find((x) => x.id === ws).calls_paid_until = until + 'T23:59:59Z'; log('calls.paid_until', { workspace_id: ws, until }); },
       async addNote(ws, body) { return this.noteAdd(ws, { kind: 'note', body }); },
       async staff() { return staffOut(); },
-      async team() { return { all: PERMS.map((p) => p[0]), roles: ROLE_PERMS, staff: staffOut() }; },
+      async team() { return { all: PERMS.map((p) => p[0]), roles: Object.fromEntries(droles.map((r) => [r.key, permsFor(r.key)])), owner_only: OWNER_ONLY,
+        role_list: droles.slice().sort((a, b) => a.sort - b.sort || a.name.localeCompare(b.name)).map((r) => ({ ...r, perms: permsFor(r.key), standard: r.builtin ? (r.key === 'owner' ? permsFor('owner') : STD[r.key]) : null, people: staff.filter((x) => x.role === r.key).length })),
+        staff: staffOut() }; },
       // HQ V2 first slice: sessions aren't timed in the demo; test accounts; the overview figures; backup and restore-test records
       async touch() { return { ok: true, timed: false, idle_minutes: 30, max_hours: 12 }; },
       async testAccounts() { if (!['customers.view', 'test_accounts.manage'].some((x) => permsOf(me()).includes(x))) throw new Error('Your HQ role can\'t do that.');
@@ -567,10 +632,44 @@
         { job: 'backup', target: 'team', ok: true, started_at: h(5.2), finished_at: h(5), detail: { bytes: 48213337, fingerprint: 'demo' }, last_ok_at: h(5) },
         { job: 'hq_jobs', target: 'team', ok: true, started_at: h(0.4), finished_at: h(0.38), detail: { emails_sent: 0, note: 'email sending isn\'t set up yet' }, last_ok_at: h(0.38) },
         { job: 'restore_drill', target: 'team', ok: true, started_at: t(26.01), finished_at: t(26), detail: { rows_backup: 18233, rows_restored: 18233 }, last_ok_at: t(26) }]; },
-      async addStaff(email, name, role) { need('staff.manage'); staff.push({ user_id: 's' + (staff.length + 1), display_name: name, role, active: true, email, added_at: now(), perms_add: [], perms_remove: [] }); log('staff.added', { email, role }); },
-      async setStaff(id, role, active) { need('staff.manage'); Object.assign(staff.find((x) => x.user_id === id), { role, active }); log('staff.changed', { user_id: id, role, active }); },
-      async setStaffPerms(id, on2, off) { need('staff.manage'); if (me().role !== 'owner') throw new Error('Only an HQ owner can tick permissions on or off.');
-        if (id === actor) throw new Error('You can\'t change your own HQ access. Ask another owner.'); Object.assign(staff.find((x) => x.user_id === id), { perms_add: on2, perms_remove: off }); log('staff.permissions', { user_id: id, on: on2, off }); },
+      async addStaff(email, name, role) { need('staff.manage'); if (!droles.some((r) => r.key === role)) throw new Error('Choose a role');
+        if (['owner', 'admin'].includes(role) && me().role !== 'owner') throw new Error('Only an HQ owner can make an owner or an admin.');
+        dGrant(permsFor(role), []); staff.push({ user_id: 's' + (staff.length + 1), display_name: name, role, active: true, email, added_at: now(), perms_add: [], perms_remove: [] }); log('staff.added', { email, role }); },
+      async setStaff(id, role, active) { need('staff.manage'); const s = staff.find((x) => x.user_id === id); if (!droles.some((r) => r.key === role)) throw new Error('Choose a role');
+        const before = s.active ? permsFor(s.role, s.perms_add, s.perms_remove) : []; dCheck(id, role, active ? permsFor(role, s.perms_add, s.perms_remove) : [], before);
+        if (s.role === 'owner' && (role !== 'owner' || !active) && !staff.some((x) => x !== s && x.role === 'owner' && x.active)) throw new Error('At least one HQ Owner must keep full access. Make someone else an Owner first.');
+        const pr = s.role; Object.assign(s, { role, active }); log('staff.changed', { user_id: id, role, active, before: { role: pr, perms: before }, after: { role, active, perms: active ? permsOf(s) : [] } }); },
+      async setStaffPerms(id, on2, off) { need('staff.manage'); const s = staff.find((x) => x.user_id === id); dCheckList([...on2, ...off]);
+        const before = permsFor(s.role, s.perms_add, s.perms_remove); dCheck(id, s.role, permsFor(s.role, on2, off), before);
+        Object.assign(s, { perms_add: on2, perms_remove: off }); log('staff.permissions', { user_id: id, on: on2, off, before: { role: s.role, perms: before }, after: { role: s.role, perms: permsOf(s) } }); },
+      async setStaffAccess(id, role, perms) { need('staff.manage'); if (id === actor) throw new Error('You can\'t change your own HQ access. Ask another owner.');
+        const s = staff.find((x) => x.user_id === id); if (!s) throw new Error('That person isn\'t on the HQ team.'); if (!droles.some((r) => r.key === role)) throw new Error('Choose a role'); dCheckList(perms);
+        const rp = permsFor(role); const want = role === 'owner' ? rp : perms || rp; const add = role === 'owner' ? [] : want.filter((p) => !rp.includes(p)).sort(); const rem = role === 'owner' ? [] : rp.filter((p) => !want.includes(p)).sort();
+        const before = permsFor(s.role, s.perms_add, s.perms_remove); const after = permsFor(role, add, rem); dCheck(id, role, after, before);
+        if (s.role === 'owner' && role !== 'owner' && !staff.some((x) => x !== s && x.role === 'owner' && x.active)) throw new Error('At least one HQ Owner must keep full access. Make someone else an Owner first.');
+        log('staff.access', { user_id: id, before: { role: s.role, added: s.perms_add, removed: s.perms_remove, perms: before }, after: { role, added: add, removed: rem, perms: after } });
+        Object.assign(s, { role, perms_add: add, perms_remove: rem }); return { role, perms: after, perms_add: add, perms_remove: rem }; },
+      async roleSave(key, name, description, perms) { need('staff.manage'); const own = me().role === 'owner'; dCheckList(perms); perms = [...new Set(perms || [])].sort();
+        const nm = String(name || '').trim(); const ds = String(description || '').trim(); let r = null; let old = [];
+        if (key) { r = droles.find((x) => x.key === key); if (!r) throw new Error('That role isn\'t there any more. Reload the page.');
+          if (key === 'owner') throw new Error('The Owner role always has every permission, so nobody is ever locked out. It can\'t be changed.');
+          if (key === 'admin' && !own) throw new Error('Only the HQ Owner can change the Owner and Admin roles.');
+          if (!own && me().role === key) throw new Error('You can\'t change the role you have yourself. Ask the HQ Owner.');
+          if (r.builtin && nm !== r.name) throw new Error('Built-in roles keep their names. Duplicate it to make a new role.'); old = permsFor(key); }
+        if (!nm || nm.length > 40) throw new Error('Give the role a name (up to 40 letters).'); if (ds.length > 300) throw new Error('Keep the description under 300 letters.');
+        if (droles.some((x) => x.name.toLowerCase() === nm.toLowerCase() && x !== r)) throw new Error(`There's already a role called ${nm}.`);
+        dGrant(perms, old);
+        if (!r) { const k = 'c_' + Math.random().toString(16).slice(2, 14); droles.push({ key: k, name: nm, description: ds, builtin: false, sort: 100 }); ROLE_PERMS[k] = perms; ROLE_NAMES[k] = nm;
+          log('role.created', { role: k, name: nm, after: { name: nm, description: ds, perms } }); return k; }
+        log('role.changed', { role: key, name: nm, before: { name: r.name, description: r.description, perms: old }, after: { name: nm, description: ds, perms } });
+        Object.assign(r, { name: nm, description: ds }); ROLE_PERMS[key] = perms; ROLE_NAMES[key] = nm; return key; },
+      async roleDelete(key, moveTo) { need('staff.manage'); const r = droles.find((x) => x.key === key); if (!r) throw new Error('That role isn\'t there any more. Reload the page.');
+        if (r.builtin) throw new Error('Built-in HQ roles can\'t be removed. You can change their ticks instead.'); const ppl = staff.filter((x) => x.role === key);
+        if (ppl.length && !moveTo) throw new Error(`Some people still have this role (${ppl.length}). Choose a role to move them to first.`);
+        if (ppl.length && (moveTo === key || !droles.some((x) => x.key === moveTo))) throw new Error('Choose another role to move them to.');
+        ppl.forEach((s) => dCheck(s.user_id, moveTo, permsFor(moveTo), permsFor(s.role, s.perms_add, s.perms_remove)));
+        ppl.forEach((s) => { log('staff.access', { user_id: s.user_id, why: 'role.deleted', before: { role: key, perms: permsFor(key, s.perms_add, s.perms_remove) }, after: { role: moveTo, perms: permsFor(moveTo) } }); Object.assign(s, { role: moveTo, perms_add: [], perms_remove: [] }); });
+        log('role.deleted', { role: key, name: r.name, moved_to: moveTo || null, moved: ppl.length, before: { perms: permsFor(key) } }); droles.splice(droles.indexOf(r), 1); delete ROLE_PERMS[key]; return ppl.length; },
       async history(f = {}) { need('audit.view'); const rows = hist.filter((x) => (!f.who || x.actor === f.who) && (!f.action || x.action.startsWith(f.action)) && (!f.ws || x.workspace_id === f.ws)
           && (!f.from || x.at.slice(0, 10) >= f.from) && (!f.to || x.at.slice(0, 10) <= f.to)).map((x) => ({ ...x, business: (cos.find((c) => c.id === x.workspace_id) || {}).name }));
         if (f.exp) log('audit.exported', { who: f.who || null, action: f.action || null }); return rows; },
@@ -633,7 +732,7 @@
         log('billing.bank_paid', { workspace_id: o.workspace_id, invoice: o.ref, receipt: rc, amount: Number(amount), paid_until: upto });
         docPay(bPays[0]); contactsOf(o.workspace_id).forEach((a) => queue(a, 'Thanks, your Riyeser payment is in', 'billing_paid', o.workspace_id)); return { receipt: rc, paid_until: upto }; },
       async paymentsReceived(days) { need('licences.view'); const ps = bPays.filter((p) => p.status === 'completed' && (Date.now() - new Date(p.at)) / 864e5 <= days); return { days, count: ps.length, total: ps.reduce((a, p) => a + p.amount, 0) }; },
-      async resendDoc(ref, to, update) { need('licences.manage'); const P = permsOf(me()); const r = String(ref || '').trim().toUpperCase();
+      async resendDoc(ref, to, update) { need('invoices.email'); const P = permsOf(me()); const r = String(ref || '').trim().toUpperCase();
         bOrders.forEach(docOrder); bPays.forEach(docPay); const d = bDocs[r]; if (!d) throw new Error('There\'s no invoice or receipt with that number.');
         const ws = (bOrders.find((o) => o.ref === (d.kind === 'invoice' ? d.ref : d.order_ref)) || {}).workspace_id; const addr = String(to || '').trim().toLowerCase();
         if (addr && (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr) || addr.length > 120)) throw new Error('Check the email address.');
@@ -1012,6 +1111,8 @@
   const S = { me: null, tab: 'overview', companies: [], perms: [] };
   // can('a.b', 'c.d'): has at least one of these permissions. Older databases (no permissions yet): from the role.
   const can = (...perms) => !!S.me && perms.some((p) => S.perms.includes(p));
+  // SEC-010: emailing invoices is its own permission (invoices.email); a database from before custom roles still uses licences.manage
+  const canEmailDocs = () => can('invoices.email') || (!!S.me && S.me.role_name === undefined && can('licences.manage'));
 
   // ------------------------------------------------------------------ sign-in
   function gate(note = '', step = 'password') {
@@ -1055,6 +1156,7 @@
     // hq_me doesn't say who you are by id: the signed-in session does ("Assign to me", "You")
     if (S.me && !S.me.id) { try { const ss = await api.session(); if (ss && ss.user) S.me.id = ss.user.id; } catch { /* not needed to show HQ */ } }
     S.perms = S.me && S.me.active ? (S.me.perms || permsOf({ role: S.me.role })) : [];
+    if (S.me && S.me.role_name) ROLE_NAMES[S.me.role] = S.me.role_name;
   }
   async function start() {
     try {
@@ -1510,8 +1612,8 @@
     const x = (S.docs || {})[ref]; if (!x) return; const d = x.doc; const R = window.RiyeserBillDoc;
     dlg(`<div class="printdoc" id="printdoc">${R ? R.html(d, { paid: x.paid, paidAt: x.paidAt }) : '<p>Couldn\'t load the document view.</p>'}</div>
       <p class="muted small noprint" style="margin:10px 0 0">The customer's copy, kept exactly as issued on ${day(d.issued_at)}. The owner sees the same under Billing on their Riyeser home.</p>
-      <div class="mfoot noprint docacts"><button type="button" class="btn" data-close>Close</button>${can('licences.manage') ? `<button type="button" class="btn" id="docResend">✉️ Resend to customer</button>
-        <button type="button" class="btn" id="docOther">Send to a different email…</button>` : '<span class="muted small" id="docNoSend">Only Finance and the Owner can email invoices and receipts.</span>'}<button type="button" class="btn p" id="docPrint">🖨 Print or save as PDF</button></div>`, (m) => {
+      <div class="mfoot noprint docacts"><button type="button" class="btn" data-close>Close</button>${canEmailDocs() ? `<button type="button" class="btn" id="docResend">✉️ Resend to customer</button>
+        <button type="button" class="btn" id="docOther">Send to a different email…</button>` : '<span class="muted small" id="docNoSend">Only Finance and the Owner (or someone the Owner allows) can email invoices and receipts.</span>'}<button type="button" class="btn p" id="docPrint">🖨 Print or save as PDF</button></div>`, (m) => {
       m.classList.add('printing'); m.querySelector('.mcard').classList.add('paper');
       m.querySelector('#docPrint').onclick = () => { const t = document.title; document.title = `${d.kind === 'receipt' ? 'Receipt' : 'Invoice'} ${d.ref}`; window.print(); document.title = t; };
       if (m.querySelector('#docResend')) m.querySelector('#docResend').onclick = () => resendDoc(ref, x.ws);
@@ -1624,7 +1726,7 @@
     el.querySelectorAll('[data-real]').forEach((b) => b.onclick = () => { f0.q.value = b.dataset.real; f0.kind.value = 'customer'; f0.reason.value = ''; f0.reason.focus(); f0.scrollIntoView({ block: 'nearest' }); });
   }
   async function inbox() { main(soon('Team Inbox', 'Internal discussions linked to a customer, case or invoice, handovers that become tasks with an owner and due time, and commitments saved to the customer timeline. For now, use the Team handover on the Overview and internal notes on each customer page.', 'Coming soon')); }
-  async function settings() { await team(); const el = document.getElementById('settings'); if (el) el.scrollIntoView({ block: 'start' }); }
+  async function settings() { TT.tab = 'people'; TT.person = null; TT.role = null; await team(); const el = document.getElementById('settings'); if (el) el.scrollIntoView({ block: 'start' }); }
   // "Needs attention": only what this person can act on. Each item opens the right page.
   function attentionHtml(a, off) {
     if (!a) return '';
@@ -3027,25 +3129,85 @@
         ${byRelease.slice(0, 15).map((r) => `<tr><td class="code">${esc(r.tag)}</td><td>${day(r.when)}</td><td class="n">${num(r.total)}</td></tr>`).join('')}</table></div>`;
   }
 
-  // ------------------------------------------------------------------ HQ team: staff, roles, per-person permissions, settings
-  async function team() {
-    let T = null; try { T = await api.team(); } catch (e) { if (!missing(e)) throw e; }
-    const staff = T ? T.staff : await api.staff(); const owner = can('staff.manage'); const ownerRole = S.me.role === 'owner';
-    const settings = can('settings.manage') ? await api.settings().catch(() => null) : null;
-    const defaults = (role) => (T && T.roles && T.roles[role]) || ROLE_PERMS[role] || [];
-    const m = main(`<h2>HQ team</h2><p class="sub">Riyeser staff who can use HQ. Everyone needs two-step sign-in. Each role has default permissions; an HQ owner can tick extra ones on or off for a person.</p>
-      <div class="card scroll"><table class="tbl" id="staff"><tr><th>Name</th><th>Role</th><th>Status</th><th>Added</th>${owner ? '<th></th>' : ''}</tr>
-      ${staff.map((s) => `<tr><td><b>${esc(s.display_name)}</b><small>${esc(s.email)}</small></td><td>${owner && s.display_name !== S.me.name ? `<select data-role="${s.user_id}" aria-label="Role for ${esc(s.display_name)}">${ROLES.filter(([k]) => ownerRole || !['owner', 'admin'].includes(k) || k === s.role).map(([k, l]) => `<option value="${k}"${k === s.role ? ' selected' : ''}>${l}</option>`).join('')}</select>` : esc(roleName(s.role))}
-          ${(s.perms_add || []).length || (s.perms_remove || []).length ? `<small>${(s.perms_add || []).length ? `+${s.perms_add.length} ticked on` : ''}${(s.perms_remove || []).length ? ` −${s.perms_remove.length} ticked off` : ''}</small>` : ''}</td>
+  // ------------------------------------------------------------------ HQ team: People (each person's role and ticks), Roles, settings
+  // Owner's decision: "still have a standard selection but we can tick or untick as required". Each person has a standard role;
+  // its ticks show on their page and can be ticked or unticked for them alone (shown as "Support (customised)", with Reset to
+  // standard). Roles: the built-in ones are templates (view, duplicate); custom roles can be made, changed and removed. The
+  // database checks all of it again (hq_set_staff_access, hq_role_save, hq_role_delete in team-chat.sql).
+  const TT = { tab: 'people', person: null, role: null };   // where the HQ team page is: its tab, a person's page, a role being edited
+  async function teamData() {
+    let T = null; try { T = await api.team(true); } catch (e) { if (!missing(e)) throw e; }
+    const staff = T ? T.staff : await api.staff();
+    const fresh = !!(T && T.role_list);   // a database with custom roles (else: the built-in roles only, as before)
+    const all = PERMS.map((p) => p[0]);
+    const roles = (fresh ? T.role_list : ROLES.map(([key, name]) => ({ key, name, description: ROLE_DESC[key], builtin: true,
+      perms: (T && T.roles && T.roles[key]) || ROLE_PERMS[key] || [], standard: ROLE_PERMS[key], people: staff.filter((x) => x.role === key).length })))
+      .map((r) => ({ ...r, perms: r.key === 'owner' ? all : r.perms || [] }));
+    roles.forEach((r) => { ROLE_NAMES[r.key] = r.name; });
+    return { staff, roles, fresh };
+  }
+  const meOwner = () => !!S.me && S.me.role === 'owner';
+  const isMe = (s) => (S.me.id ? s.user_id === S.me.id : s.display_name === S.me.name);
+  // what you could give someone: the Owner anything; anyone else only what they have themselves, never an Owner-only one
+  const canGive = (p) => meOwner() || (S.perms.includes(p) && !OWNER_ONLY.includes(p));
+  const personEditable = (s, D) => can('staff.manage') && !isMe(s) && (meOwner() || (D.fresh && !['owner', 'admin'].includes(s.role)));
+  const roleEditable = (r) => can('staff.manage') && r.key !== 'owner' && (meOwner() || (r.key !== 'admin' && S.me.role !== r.key));
+  const rolesFor = (D, s) => D.roles.filter((r) => meOwner() || !['owner', 'admin'].includes(r.key) || (s && r.key === s.role));
+  const firstName = (n) => String(n || '').trim().split(/\s+/)[0] || 'They';
+  const sameSet = (a, b) => a.length === b.length && a.every((x) => b.includes(x));
+  const customised = (s) => s.role !== 'owner' && !!((s.perms_add || []).length || (s.perms_remove || []).length);
+  const diffText = (s) => [(s.perms_add || []).length ? `+${s.perms_add.length} added` : '', (s.perms_remove || []).length ? `−${s.perms_remove.length} removed` : ''].filter(Boolean).join(' · ');
+
+  // The grouped checklist of every HQ permission, each with what it allows. base (a person's page) = the role's ticks, so what
+  // differs for this person is marked; a tick you can't give is greyed out with the reason.
+  function permList(sel, { editable = true } = {}) {
+    return `<div class="rl-groups">${PERM_GROUPS.map(([g, list]) => `<fieldset class="rl-grp"><legend>${esc(g)} <small class="rl-cnt" data-cnt="${esc(g)}"></small></legend>
+      ${list.map(([k, l, h]) => { const why = !editable || sel.has(k) || canGive(k) ? '' : OWNER_ONLY.includes(k) ? 'Only the Owner can give this.' : 'You can\'t give this: you don\'t have it yourself.';
+        return `<label class="rl-item" data-perm="${esc(k)}"><input type="checkbox" name="p" value="${esc(k)}"${sel.has(k) ? ' checked' : ''}${!editable || why ? ' disabled' : ''}>
+          <span class="rl-txt"><span class="rl-name">${esc(l)}${OWNER_ONLY.includes(k) ? '<span class="rl-tag own">Owner gives this</span>' : ''}<span class="rl-tag rl-diff" hidden></span></span>
+          <small>${esc(h)}</small>${why ? `<small class="rl-why">${esc(why)}</small>` : ''}</span></label>`; }).join('')}</fieldset>`).join('')}</div>`;
+  }
+  function permRefresh(root, sel, base, who) {
+    root.querySelectorAll('.rl-item').forEach((it) => { const k = it.dataset.perm; const on = sel.has(k); const t = it.querySelector('.rl-diff');
+      const add = !!base && on && !base.has(k); const rem = !!base && !on && base.has(k);
+      it.classList.toggle('add', add); it.classList.toggle('rem', rem); t.textContent = add ? `+ added for ${who}` : rem ? `− removed for ${who}` : ''; t.hidden = !(add || rem); });
+    root.querySelectorAll('[data-cnt]').forEach((c) => { const list = (PERM_GROUPS.find(([g]) => g === c.dataset.cnt) || [, []])[1];
+      c.textContent = `· ${list.filter(([k]) => sel.has(k)).length} of ${list.length}`; });
+  }
+  // the live summary in plain English: "People with this role can…"
+  function permSummary(sel, title) {
+    const groups = PERM_GROUPS.map(([g, list]) => [g, list.filter(([k]) => sel.has(k))]).filter(([, l]) => l.length);
+    return `<h4>${esc(title)} <small class="muted">${sel.size} of ${PERMS.length}</small></h4>
+      ${groups.length ? groups.map(([g, l]) => `<p class="rl-sg">${esc(g)}</p><ul>${l.map(([, n]) => `<li>${esc(n)}</li>`).join('')}</ul>`).join('') : '<p class="muted small">Nothing yet: tick what they need.</p>'}
+      <p class="rl-sg">Never, for anyone</p><ul class="rl-nv">${NEVER.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>`;
+  }
+  const teamBack = (label) => `<p class="rl-back"><button type="button" class="lnk" id="ttBack">← ${esc(label)}</button></p>`;
+
+  // team(true): stay where you are (after a change); from the menu: the People or Roles list
+  async function team(stay) {
+    if (!stay) { TT.person = null; TT.role = null; }
+    const D = await teamData();
+    if (TT.person) { const s = D.staff.find((x) => x.user_id === TT.person); if (s) return personPage(D, s); TT.person = null; }
+    if (TT.role) { if (TT.role.key && !D.roles.some((r) => r.key === TT.role.key)) TT.role = null; else return roleEditor(D, TT.role); }
+    const settings = TT.tab === 'people' && can('settings.manage') ? await api.settings().catch(() => null) : null;
+    const m = main(`<h2>HQ team</h2><p class="sub">Riyeser staff who can use HQ. Everyone needs two-step sign-in. Each person has a standard role, and you can tick or untick permissions for one person on their page.</p>
+      <div class="cptabs rl-tabs" role="tablist" aria-label="HQ team">${[['people', 'People'], ['roles', 'Roles']].map(([k, l]) => `<button type="button" role="tab" data-tt="${k}" aria-selected="${TT.tab === k}" class="${TT.tab === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+      <div id="ttBody"></div>`);
+    m.querySelectorAll('[data-tt]').forEach((b) => b.onclick = () => { TT.tab = b.dataset.tt; team(true); });
+    if (TT.tab === 'roles') rolesTab(D, m.querySelector('#ttBody')); else peopleTab(D, m.querySelector('#ttBody'), settings);
+  }
+
+  function peopleTab(D, el, settings) {
+    const mng = can('staff.manage');
+    el.innerHTML = `<div class="card scroll"><table class="tbl" id="staff"><tr><th>Name</th><th>Role</th><th>Status</th><th>Added</th><th></th></tr>
+      ${D.staff.map((s) => `<tr><td><b>${esc(s.display_name)}</b>${s.email ? `<small>${esc(s.email)}</small>` : ''}</td>
+        <td><span class="rl-rn">${esc(s.role_name || roleName(s.role))}${customised(s) ? ' <span class="pill violet">customised</span>' : ''}</span>${customised(s) ? `<small>${esc(diffText(s))}</small>` : ''}</td>
         <td>${s.active ? '<span class="pill ok">Active</span>' : '<span class="pill">Switched off</span>'}</td><td>${day(s.added_at)}</td>
-        ${owner ? `<td><div class="row">${s.display_name !== S.me.name ? `<button class="btn sm" data-toggle="${s.user_id}" data-active="${s.active}">${s.active ? 'Switch off' : 'Switch on'}</button>${T && ownerRole && s.role !== 'owner' ? `<button class="btn sm" data-perms="${s.user_id}">Permissions</button>` : ''}` : '<span class="muted small">you</span>'}</div></td>` : ''}</tr>
-        <tr class="permrow" data-permrow="${s.user_id}" hidden><td colspan="5"></td></tr>`).join('')}</table></div>
-      ${owner ? `<div class="card" style="margin-top:14px"><h3>Add someone to the HQ team</h3><p class="muted small">They need a Riyeser account first (riyeser.com/link), and must turn on two-step sign-in there.</p>
+        <td><div class="row"><button type="button" class="btn sm" data-access="${esc(s.user_id)}">${personEditable(s, D) ? 'Role and access' : 'See access'}</button>
+          ${isMe(s) ? '<span class="muted small">you</span>' : mng ? `<button type="button" class="btn sm" data-toggle="${esc(s.user_id)}">${s.active ? 'Switch off' : 'Switch on'}</button>` : ''}</div></td></tr>`).join('')}</table></div>
+      ${mng ? `<div class="card" style="margin-top:14px"><h3>Add someone to the HQ team</h3><p class="muted small">They need a Riyeser account first (riyeser.com/link), and must turn on two-step sign-in there. You can tick or untick their permissions afterwards.</p>
         <form id="as" class="grid g3"><label class="f"><span>Email</span><input type="email" name="email" required></label><label class="f"><span>Name</span><input name="name" required maxlength="60"></label>
-        <label class="f"><span>Role</span><select name="role">${ROLES.filter(([k]) => ownerRole || !['owner', 'admin'].includes(k)).map(([k, l]) => `<option value="${k}"${k === 'support' ? ' selected' : ''}>${l}</option>`).join('')}</select></label><div><button class="btn p">Add</button></div></form></div>` : ''}
-      <div class="card scroll" style="margin-top:14px"><h3>What each role can do <small>· the defaults</small></h3><table class="tbl small rolegrid"><tr><th>Permission</th>${ROLES.map(([, l]) => `<th>${l}</th>`).join('')}</tr>
-        ${PERMS.map(([k, l]) => `<tr><td>${esc(l)}<small class="code">${k}</small></td>${ROLES.map(([r]) => `<td>${defaults(r).includes(k) ? '✓' : ''}</td>`).join('')}</tr>`).join('')}</table>
-        <p class="muted small">Support levels: level 1 Support, level 2 Senior / technical (Senior support, or anyone with "Work level 2"), level 3 Management (Owner and Finance).</p></div>
+        <label class="f"><span>Standard role</span><select name="role">${rolesFor(D).map((r) => `<option value="${esc(r.key)}"${r.key === 'support' ? ' selected' : ''}>${esc(r.name)}${r.builtin ? '' : ' (custom)'}</option>`).join('')}</select></label><div><button class="btn p">Add</button></div></form></div>` : ''}
       ${settings ? `<div class="card" style="margin-top:14px" id="settings"><h3>HQ settings <small>· owners only</small></h3><form id="setf" class="grid g2">
         <label class="f"><span>Ticket overdue after (hours without a first reply)</span><input type="number" min="1" name="support.overdue_hours" value="${esc(settings['support.overdue_hours'])}"></label>
         <label class="f"><span>Escalate automatically after (hours waiting on us)</span><input type="number" min="1" name="support.escalate_hours" value="${esc(settings['support.escalate_hours'])}"></label>
@@ -3053,25 +3215,135 @@
         <label class="f"><span>Free periods up to this many days apply straight away</span><input type="number" min="1" name="offers.self_limit_days" value="${esc(settings['offers.self_limit_days'])}"></label>
         ${settings['billing.grace_days'] != null ? `<label class="f"><span>After a failed PayPal payment, programs keep working this many days</span><input type="number" min="1" name="billing.grace_days" value="${esc(settings['billing.grace_days'])}"></label>` : ''}
         ${settings['sign.free_per_month'] != null ? `<label class="f"><span>Riyeser PDF: free signing requests a business can send each month</span><input type="number" min="1" name="sign.free_per_month" value="${esc(settings['sign.free_per_month'])}"></label>` : ''}
-        <div><button class="btn p">Save settings</button></div></form></div>` : ''}`);
-    m.querySelectorAll('[data-role]').forEach((sel) => sel.onchange = async () => { const s = staff.find((x) => x.user_id === sel.dataset.role);
-      try { await api.setStaff(s.user_id, sel.value, s.active); team(); } catch (err) { alert(plain(err)); team(); } });
-    m.querySelectorAll('[data-toggle]').forEach((b) => b.onclick = async () => { const s = staff.find((x) => x.user_id === b.dataset.toggle);
-      if (s.active && !confirm(`Switch off ${s.display_name}'s HQ access?`)) return;
-      try { await api.setStaff(s.user_id, s.role, !s.active); team(); } catch (err) { alert(plain(err)); } });
-    m.querySelectorAll('[data-perms]').forEach((b) => b.onclick = () => { const s = staff.find((x) => x.user_id === b.dataset.perms); const row = m.querySelector(`[data-permrow="${s.user_id}"]`);
-      if (!row.hidden) { row.hidden = true; return; } row.hidden = false; const def = defaults(s.role); const eff = s.perms || permsOf(s);
-      row.firstElementChild.innerHTML = `<form class="permgrid" data-pf="${s.user_id}"><p class="small muted">Ticked = ${esc(s.display_name)} can do it. <b>Bold</b> = the ${esc(roleName(s.role))} default.</p>
-        <div class="pgrid">${PERMS.map(([k, l]) => `<label class="opt"><input type="checkbox" name="p" value="${k}"${eff.includes(k) ? ' checked' : ''}> ${def.includes(k) ? `<b>${esc(l)}</b>` : esc(l)}</label>`).join('')}</div>
-        <div class="row"><button class="btn p sm">Save permissions</button><button type="button" class="btn sm" data-reset>Back to the role's defaults</button></div></form>`;
-      const pf = row.querySelector('form');
-      pf.querySelector('[data-reset]').onclick = async () => { try { await api.setStaffPerms(s.user_id, [], []); team(); } catch (err) { alert(plain(err)); } };
-      pf.onsubmit = async (e) => { e.preventDefault(); const on = new FormData(pf).getAll('p').map(String);
-        try { await api.setStaffPerms(s.user_id, on.filter((p) => !def.includes(p)), def.filter((p) => !on.includes(p))); flash(`Permissions saved for ${s.display_name}.`); team(); } catch (err) { alert(plain(err)); } }; });
-    const as = m.querySelector('#as'); if (as) as.onsubmit = async (e) => { e.preventDefault(); const f = new FormData(e.target);
-      try { await api.addStaff(String(f.get('email')), String(f.get('name')), String(f.get('role'))); team(); } catch (err) { alert(plain(err)); } };
-    const sf = m.querySelector('#setf'); if (sf) sf.onsubmit = async (e) => { e.preventDefault(); const f = new FormData(sf);
-      try { for (const [k, v] of f.entries()) if (Number(v) !== Number(settings[k])) await api.setSetting(k, Number(v)); flash('Settings saved.'); team(); } catch (err) { alert(plain(err)); } };
+        <div><button class="btn p">Save settings</button></div></form></div>` : ''}`;
+    el.querySelectorAll('[data-access]').forEach((b) => b.onclick = () => { TT.person = b.dataset.access; team(true); });
+    el.querySelectorAll('[data-toggle]').forEach((b) => b.onclick = () => { const s = D.staff.find((x) => x.user_id === b.dataset.toggle);
+      const run = async () => { await api.setStaff(s.user_id, s.role, !s.active); flash(`${s.display_name} ${s.active ? 'switched off' : 'switched on'}.`); team(true); };
+      if (!s.active) return run().catch((err) => alert(plain(err)));
+      dlg(`<h3>Switch off ${esc(s.display_name)}'s HQ access?</h3><p class="muted small">They can't use HQ until someone switches them on again. Their role and ticks are kept, and it goes in the HQ history.</p>
+        <div id="swErr"></div><div class="mfoot"><button type="button" class="btn" data-close>Cancel</button><button type="button" class="btn p" id="swGo">Switch off</button></div>`, (d, close) => {
+        d.querySelector('#swGo').onclick = async () => { try { await run(); close(); } catch (err) { d.querySelector('#swErr').innerHTML = `<div class="err">${esc(plain(err))}</div>`; } }; }); });
+    const as = el.querySelector('#as'); if (as) as.onsubmit = async (e) => { e.preventDefault(); const f = new FormData(e.target);
+      try { await api.addStaff(String(f.get('email')), String(f.get('name')), String(f.get('role'))); flash(`${String(f.get('name'))} added to the HQ team.`); team(true); } catch (err) { alert(plain(err)); } };
+    const sf = el.querySelector('#setf'); if (sf) sf.onsubmit = async (e) => { e.preventDefault(); const f = new FormData(sf);
+      try { for (const [k, v] of f.entries()) if (Number(v) !== Number(settings[k])) await api.setSetting(k, Number(v)); flash('Settings saved.'); team(true); } catch (err) { alert(plain(err)); } };
+  }
+
+  // A person's page: their standard role, its ticks, and what's ticked or unticked for them alone (the main way in).
+  function personPage(D, s) {
+    const ed = personEditable(s, D); const who = firstName(s.display_name);
+    const roleOf = (k) => D.roles.find((r) => r.key === k) || { key: k, name: roleName(k), perms: [], builtin: true };
+    let role = s.role; let sel = new Set(s.role === 'owner' ? PERMS.map((p) => p[0]) : (s.perms || permsOf(s)));
+    const why = isMe(s) ? 'You can\'t change your own HQ access. Ask another owner.' : !can('staff.manage') ? 'Only someone who manages the HQ team can change this.'
+      : ['owner', 'admin'].includes(s.role) ? 'Only the HQ Owner can change an Owner or an Admin.' : 'Run the latest team-chat.sql to change this here.';
+    const m = main(`${teamBack('HQ team')}<h2>${esc(s.display_name)}</h2>
+      <p class="sub">${s.email ? `${esc(s.email)} · ` : ''}${s.active ? 'Active' : 'Switched off'} · added ${day(s.added_at)}</p>
+      <form id="paf" class="card rl-card" data-pa="${esc(s.user_id)}"><div class="rl-head"><h3>Role and access</h3><span class="rl-status" id="paStatus"></span></div>
+        <div class="rl-wrap"><div class="rl-main">
+          <label class="f rl-role"><span>Standard role</span><select name="role" id="paRole"${ed ? '' : ' disabled'}>${rolesFor(D, s).map((r) => `<option value="${esc(r.key)}"${r.key === role ? ' selected' : ''}>${esc(r.name)}${r.builtin ? '' : ' (custom)'}</option>`).join('')}</select></label>
+          <p class="muted small" id="paIntro"></p><div id="paList"></div>
+          ${ed ? `<div class="rl-acts"><button class="btn p" id="paSave">Save ${esc(who)}'s access</button><button type="button" class="btn" id="paCancel">Cancel</button>
+            ${D.fresh ? '<button type="button" class="lnk" id="paAsRole">Save these ticks as a new role…</button>' : ''}</div>` : `<p class="muted small rl-ro">${esc(why)}</p>`}
+        </div><aside class="rl-sum" id="paSum" aria-live="polite"></aside></div></form>`);
+    const base = () => new Set(roleOf(role).perms);
+    const isCustom = () => role !== 'owner' && !sameSet([...sel], [...base()]);
+    const status = () => { const r = roleOf(role); m.querySelector('#paStatus').innerHTML = `${esc(r.name)}${isCustom() ? ' <span class="pill violet">customised</span>' : ''}${isCustom() && ed ? ' <button type="button" class="lnk" id="paReset">Reset to standard</button>' : ''}`;
+      const rs = m.querySelector('#paReset'); if (rs) rs.onclick = () => { sel = base(); draw(); };
+      m.querySelector('#paSum').innerHTML = permSummary(sel, `${who} can…`); };
+    const draw = () => {
+      const r = roleOf(role);
+      if (role === 'owner') { m.querySelector('#paIntro').textContent = ''; m.querySelector('#paList').innerHTML = '<p class="note-ok">Owners can always do everything, including Riyeser\'s billing and bank details. Nothing can be ticked off for an Owner, so HQ always has someone with full access.</p>'; }
+      else { m.querySelector('#paIntro').textContent = `The ticks show what ${r.name} can do. Tick or untick for ${who} only: anything different from ${r.name} is marked.`;
+        m.querySelector('#paList').innerHTML = permList(sel, { editable: ed }); permRefresh(m, sel, base(), who); }
+      status(); };
+    draw();
+    m.querySelector('#ttBack').onclick = () => { TT.person = null; team(true); };
+    if (!ed) return;
+    m.querySelector('#paRole').onchange = (e) => { role = e.target.value; sel = new Set(roleOf(role).perms); draw(); };
+    m.querySelector('#paList').onchange = (e) => { if (!e.target.matches('input[name=p]')) return; if (e.target.checked) sel.add(e.target.value); else sel.delete(e.target.value); permRefresh(m, sel, base(), who); status(); };
+    m.querySelector('#paCancel').onclick = () => { TT.person = null; team(true); };
+    m.querySelector('#paf').onsubmit = async (e) => { e.preventDefault();
+      try {
+        if (D.fresh) await api.setStaffAccess(s.user_id, role, isCustom() ? [...sel] : null);
+        else { const b = [...base()]; if (role !== s.role) await api.setStaff(s.user_id, role, s.active); await api.setStaffPerms(s.user_id, [...sel].filter((p) => !b.includes(p)), b.filter((p) => !sel.has(p))); }
+        flash(`${s.display_name}'s access saved.`); team(true);
+      } catch (err) { alert(plain(err)); } };
+    const ar = m.querySelector('#paAsRole'); if (ar) ar.onclick = () => dlg(`<h3>Save these ticks as a new role</h3><p class="muted small">${sel.size} permissions, as ticked for ${esc(who)}. The new role shows under Roles and can be given to anyone.</p>
+      <form id="nrf"><label class="f"><span>Name</span><input name="name" required maxlength="40" value="${esc(roleOf(role).name)} (${esc(who)})"></label><label class="f"><span>Description <small class="muted">(optional)</small></span><input name="description" maxlength="300"></label>
+      <label class="opt"><input type="checkbox" name="give" checked> Give ${esc(who)} this role</label><div id="nrErr"></div>
+      <div class="mfoot"><button type="button" class="btn" data-close>Cancel</button><button class="btn p">Save role</button></div></form>`, (d, close) => {
+      d.querySelector('#nrf').onsubmit = async (ev) => { ev.preventDefault(); const f = new FormData(ev.target);
+        try { const k = await api.roleSave(null, String(f.get('name')), String(f.get('description') || ''), [...sel]); if (f.get('give')) await api.setStaffAccess(s.user_id, k, null);
+          close(); flash(`Role "${String(f.get('name')).trim()}" saved.`); team(true); } catch (err) { d.querySelector('#nrErr').innerHTML = `<div class="err">${esc(plain(err))}</div>`; } }; });
+  }
+
+  function rolesTab(D, el) {
+    const mng = can('staff.manage') && D.fresh;
+    el.innerHTML = `<div class="card"><div class="rl-head"><div><h3>Roles</h3><p class="muted small rl-lead">Built-in roles are templates: view or duplicate them. The Owner can change their ticks, and an Admin can change all of them except Owner and Admin. Make your own with Create a role.</p></div>
+        ${mng ? '<button type="button" class="btn p" id="rlNew">+ Create a role</button>' : ''}</div>
+      ${D.fresh ? '' : '<p class="muted small">Run the latest <b>team-chat.sql</b> in Supabase (SQL Editor) to make your own roles. See ops/RUNBOOK.md.</p>'}
+      <div class="scroll"><table class="tbl" id="roles"><tr><th>Role</th><th>Type</th><th class="n">People</th><th class="n">Permissions</th><th></th></tr>
+      ${D.roles.map((r) => `<tr data-rolerow="${esc(r.key)}"><td><b>${esc(r.name)}</b>${r.description ? `<small>${esc(r.description)}</small>` : ''}</td>
+        <td>${r.builtin ? '<span class="pill">Built-in</span>' : '<span class="pill blue">Custom</span>'}</td><td class="n">${num(r.people || 0)}</td><td class="n">${r.key === 'owner' ? 'All' : `${r.perms.length} of ${PERMS.length}`}</td>
+        <td><div class="row"><button type="button" class="btn sm" data-roleopen="${esc(r.key)}">${mng && roleEditable(r) ? 'Edit' : 'View'}</button>
+          ${mng && (r.key !== 'owner' || meOwner()) ? `<button type="button" class="btn sm" data-roledup="${esc(r.key)}">Duplicate</button>` : ''}
+          ${mng && !r.builtin ? `<button type="button" class="btn sm" data-roledel="${esc(r.key)}">Remove</button>` : ''}</div></td></tr>`).join('')}</table></div></div>
+      <div class="card rl-nevercard" style="margin-top:14px"><h3>Never allowed, for anyone</h3><p class="muted small">No role and no per-person tick can give these, and the database refuses them too.</p>
+        <ul>${NEVER.map((x) => `<li>${esc(x)}</li>`).join('')}</ul><p class="muted small">Emailing invoices and receipts stays with Finance and the Owner unless the Owner gives it to someone.</p></div>
+      <details class="card rl-compare" style="margin-top:14px"><summary><b>Compare roles</b> <small class="muted">· every permission, every role</small></summary>
+        <div class="scroll"><table class="tbl small rolegrid"><tr><th>Permission</th>${D.roles.map((r) => `<th>${esc(r.name)}</th>`).join('')}</tr>
+        ${PERMS.map(([k, l]) => `<tr><td>${esc(l)}<small class="code">${esc(k)}</small></td>${D.roles.map((r) => `<td>${r.perms.includes(k) ? '✓' : ''}</td>`).join('')}</tr>`).join('')}</table></div>
+        <p class="muted small">Support levels: level 1 Support, level 2 Senior / technical (anyone with "Work level 2 tickets"), level 3 Management (anyone with "Work level 3 tickets").</p></details>`;
+    const nw = el.querySelector('#rlNew'); if (nw) nw.onclick = () => { TT.role = { key: null }; team(true); };
+    el.querySelectorAll('[data-roleopen]').forEach((b) => b.onclick = () => { TT.role = { key: b.dataset.roleopen }; team(true); });
+    el.querySelectorAll('[data-roledup]').forEach((b) => b.onclick = () => { TT.role = { key: null, from: b.dataset.roledup }; team(true); });
+    el.querySelectorAll('[data-roledel]').forEach((b) => b.onclick = () => roleRemove(D, D.roles.find((r) => r.key === b.dataset.roledel)));
+  }
+
+  // Create a role (from nothing, or a copy of another), or view / change one.
+  function roleEditor(D, st) {
+    const r = st.key ? D.roles.find((x) => x.key === st.key) : null; const src = !r && st.from ? D.roles.find((x) => x.key === st.from) : null;
+    const ed = D.fresh && (r ? roleEditable(r) : can('staff.manage'));
+    const dropped = src ? src.perms.filter((p) => !canGive(p)) : [];
+    let sel = new Set(r ? r.perms : src ? src.perms.filter((p) => canGive(p)) : ['overview.view']);
+    const name = r ? r.name : src ? `${src.name} (copy)` : ''; const desc = r ? r.description || '' : src ? src.description || '' : '';
+    const why = !D.fresh ? 'Run the latest team-chat.sql to change roles here.' : r && r.key === 'owner' ? 'The Owner role always has every permission, so HQ always has someone with full access. It can\'t be changed.'
+      : !can('staff.manage') ? 'Only someone who manages the HQ team can change roles.' : r && r.key === 'admin' ? 'Only the HQ Owner can change the Admin role.' : 'You can\'t change the role you have yourself. Ask the HQ Owner.';
+    const title = r ? (ed ? `Edit ${r.name}` : r.name) : 'Create a role';
+    const m = main(`${teamBack('Roles')}<h2>${esc(title)}</h2>
+      <p class="sub">${r ? `${r.builtin ? 'Built-in role' : 'Custom role'} · ${num(r.people || 0)} ${r.people === 1 ? 'person has' : 'people have'} it${r.people && ed ? ': changes reach them straight away' : ''}.` : 'Choose a name, then tick what people with this role can do. Each one says what it allows.'}</p>
+      <form id="rlf" class="card rl-card"><div class="rl-wrap"><div class="rl-main">
+        <div class="grid g2"><label class="f"><span>Name</span><input name="name" required maxlength="40" value="${esc(name)}"${!ed || (r && r.builtin) ? ' readonly' : ''}></label>
+        <label class="f"><span>Description <small class="muted">(optional)</small></span><input name="description" maxlength="300" value="${esc(desc)}"${ed ? '' : ' readonly'}></label></div>
+        ${r && r.builtin && ed ? '<p class="muted small">A built-in role keeps its name. To make a different one, duplicate it.</p>' : ''}
+        ${dropped.length ? `<p class="muted small rl-why">Left out of the copy, because you can't give them: ${esc(dropped.map(permLabel).join(', '))}.</p>` : ''}
+        <div id="rlList">${permList(sel, { editable: ed && !(r && r.key === 'owner') })}</div>
+        ${ed ? `<div class="rl-acts"><button class="btn p" id="rlSave">${r ? 'Save changes' : 'Create role'}</button><button type="button" class="btn" id="rlCancel">Cancel</button>
+          ${r && r.builtin && r.standard && !sameSet(r.perms, r.standard) ? '<button type="button" class="lnk" id="rlStd">Back to the standard ticks</button>' : ''}</div>`
+          : `<p class="muted small rl-ro">${esc(why)}</p>${can('staff.manage') && D.fresh && r && (r.key !== 'owner' || meOwner()) ? '<button type="button" class="btn" id="rlDup">Duplicate this role</button>' : ''}`}
+      </div><aside class="rl-sum" id="rlSum" aria-live="polite"></aside></div></form>`);
+    const refresh = () => { permRefresh(m, sel, null, ''); m.querySelector('#rlSum').innerHTML = permSummary(sel, 'People with this role can…'); };
+    refresh();
+    m.querySelector('#ttBack').onclick = () => { TT.role = null; TT.tab = 'roles'; team(true); };
+    const dp = m.querySelector('#rlDup'); if (dp) dp.onclick = () => { TT.role = { key: null, from: r.key }; team(true); };
+    if (!ed) return;
+    m.querySelector('#rlList').onchange = (e) => { if (!e.target.matches('input[name=p]')) return; if (e.target.checked) sel.add(e.target.value); else sel.delete(e.target.value); refresh(); };
+    m.querySelector('#rlCancel').onclick = () => { TT.role = null; TT.tab = 'roles'; team(true); };
+    const sd = m.querySelector('#rlStd'); if (sd) sd.onclick = () => { sel = new Set(r.standard); m.querySelector('#rlList').innerHTML = permList(sel, { editable: true }); refresh(); };
+    m.querySelector('#rlf').onsubmit = async (e) => { e.preventDefault(); const f = new FormData(e.target);
+      try { await api.roleSave(r ? r.key : null, String(f.get('name')), String(f.get('description') || ''), [...sel]);
+        flash(r ? `${String(f.get('name')).trim()} saved.` : `Role "${String(f.get('name')).trim()}" created.`); TT.role = null; TT.tab = 'roles'; team(true); } catch (err) { alert(plain(err)); } };
+  }
+
+  // Removing a role that people still have asks where to move them (they get that role's standard ticks).
+  function roleRemove(D, r) {
+    const to = D.roles.filter((x) => x.key !== r.key && (meOwner() || !['owner', 'admin'].includes(x.key)));
+    dlg(`<h3>Remove the ${esc(r.name)} role?</h3>${r.people ? `<p>${r.people === 1 ? '1 person still has' : `${num(r.people)} people still have`} this role. Where should ${r.people === 1 ? 'they' : 'they all'} move?</p>
+      <label class="f"><span>Move them to</span><select id="rmTo">${to.map((x) => `<option value="${esc(x.key)}"${x.key === 'support' ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>
+      <p class="muted small">They get that role's standard ticks. Each move goes in the HQ history.</p>` : '<p class="muted small">Nobody has this role. Removing it goes in the HQ history.</p>'}
+      <div id="rmErr"></div><div class="mfoot"><button type="button" class="btn" data-close>Cancel</button><button type="button" class="btn p" id="rmGo">Remove role</button></div>`, (d, close) => {
+      d.querySelector('#rmGo').onclick = async () => { try { const n = await api.roleDelete(r.key, r.people ? d.querySelector('#rmTo').value : null); close();
+        flash(n ? `${r.name} removed. ${n === 1 ? '1 person' : `${n} people`} moved.` : `${r.name} removed.`); team(true); } catch (err) { d.querySelector('#rmErr').innerHTML = `<div class="err">${esc(plain(err))}</div>`; } }; });
   }
 
   // ------------------------------------------------------------------ reports (reports.view): every table downloads as CSV

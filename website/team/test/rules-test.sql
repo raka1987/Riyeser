@@ -5133,5 +5133,145 @@ reset role;
 do $$ begin
   assert (select count(*) from public.hq_audit where action = 'account.kind') = 2, 'each change of kind is in the HQ history once';
 end $$;
+-- ===== Custom HQ roles (owner's request: "give the option for admin to select roles"; owner's decision: a standard role,
+-- then tick or untick for the person). The built-in roles come from the database now (hq_roles / hq_role_permissions).
+reset role;
+-- the lists HQ had before custom roles, frozen here (from hq_role_perms before this change): after the migration every built-in
+-- role must give exactly these, plus "Email invoices and receipts" where it had licences.manage (SEC-010 split it out)
+create function pg_temp.legacy_all() returns text[] language sql as $$
+  select array['overview.view', 'downloads.view', 'customers.view', 'customers.notes', 'customers.edit', 'people.reset_2fa',
+    'people.change_owner', 'business.close', 'licences.view', 'licences.manage', 'support.view', 'support.reply', 'support.assign',
+    'support.saved_replies', 'support.escalate', 'support.level2', 'support.level3', 'refunds.view', 'refunds.request',
+    'refunds.approve', 'refunds.pay', 'offers.grant', 'offers.approve', 'emails.view', 'emails.manage', 'accounts.inactive',
+    'staff.manage', 'audit.view', 'settings.manage', 'link.support', 'reports.view', 'support.diagnostics', 'ops.view', 'test_accounts.manage', 'trials.view'] $$;
+create function pg_temp.legacy(r text) returns text[] language sql as $$
+  select case r
+    when 'owner' then pg_temp.legacy_all()
+    when 'finance' then array['overview.view', 'downloads.view', 'customers.view', 'customers.notes', 'licences.view', 'licences.manage',
+      'support.view', 'support.reply', 'support.escalate', 'refunds.view', 'refunds.approve', 'refunds.pay',
+      'offers.grant', 'offers.approve', 'emails.view', 'reports.view', 'trials.view']
+    when 'admin' then array['overview.view', 'downloads.view', 'customers.view', 'customers.notes', 'emails.view', 'emails.manage',
+      'audit.view', 'staff.manage', 'settings.manage', 'ops.view', 'test_accounts.manage']
+    when 'support' then array['overview.view', 'downloads.view', 'customers.view', 'customers.notes', 'customers.edit', 'people.reset_2fa',
+      'licences.view', 'support.view', 'support.reply', 'support.assign', 'support.saved_replies', 'support.escalate', 'refunds.view',
+      'refunds.request', 'offers.grant', 'emails.view', 'link.support', 'support.diagnostics', 'ops.view', 'trials.view']
+    when 'senior' then array['overview.view', 'downloads.view', 'customers.view', 'customers.notes', 'customers.edit', 'people.reset_2fa',
+      'people.change_owner', 'business.close', 'licences.view', 'support.view', 'support.reply', 'support.assign', 'support.saved_replies',
+      'support.escalate', 'support.level2', 'refunds.view', 'refunds.request', 'offers.grant', 'emails.view', 'emails.manage', 'link.support', 'reports.view',
+      'support.diagnostics', 'ops.view', 'test_accounts.manage']
+    when 'sales' then array['overview.view', 'downloads.view', 'customers.view', 'customers.notes', 'licences.view', 'support.view', 'offers.grant']
+    when 'developer' then array['overview.view', 'downloads.view', 'support.diagnostics', 'ops.view'] end $$;
+create function pg_temp.sorted(a text[]) returns text[] language sql as $$ select array(select distinct x from unnest(a) x order by 1) $$;
+create function pg_temp.expect(r text) returns text[] language sql as $$
+  select pg_temp.sorted(pg_temp.legacy(r) || case when 'licences.manage' = any(pg_temp.legacy(r)) then array['invoices.email'] else '{}' end) $$;
+insert into auth.users (id, email) select ('e0e0e0e0-0000-4000-8000-00000000000' || i)::uuid, 'role' || i || '@riyeser.test' from generate_series(1, 9) i;
+insert into public.hq_staff (user_id, display_name, role) values
+  ('e0e0e0e0-0000-4000-8000-000000000001', 'R Owner', 'owner'), ('e0e0e0e0-0000-4000-8000-000000000002', 'R Admin', 'admin'),
+  ('e0e0e0e0-0000-4000-8000-000000000003', 'R Finance', 'finance'), ('e0e0e0e0-0000-4000-8000-000000000004', 'R Support', 'support'),
+  ('e0e0e0e0-0000-4000-8000-000000000005', 'R Senior', 'senior'), ('e0e0e0e0-0000-4000-8000-000000000006', 'R Sales', 'sales'),
+  ('e0e0e0e0-0000-4000-8000-000000000007', 'R Developer', 'developer');
+do $$ declare r text; i int := 0; begin
+  -- the seven built-in roles are there once, marked built in, in the usual order
+  assert (select array_agg(key order by sort) from public.hq_roles where builtin) = array['owner', 'admin', 'finance', 'support', 'senior', 'sales', 'developer'], 'built-in roles';
+  assert (select count(*) from public.hq_roles where builtin) = 7, 'seeded once (team-chat.sql was run twice)';
+  assert pg_temp.sorted(public.hq_all_perms()) = pg_temp.sorted(pg_temp.legacy_all() || array['invoices.email']), 'one new permission: invoices.email';
+  foreach r in array array['owner', 'admin', 'finance', 'support', 'senior', 'sales', 'developer'] loop
+    i := i + 1;
+    assert pg_temp.sorted(public.hq_staff_perms(('e0e0e0e0-0000-4000-8000-00000000000' || i)::uuid)) = pg_temp.expect(r),
+      'built-in role ' || r || ' unchanged: ' || array_to_string(public.hq_staff_perms(('e0e0e0e0-0000-4000-8000-00000000000' || i)::uuid), ',');
+    assert pg_temp.sorted(public.hq_role_perms(r)) = pg_temp.expect(r), 'hq_role_perms ' || r;
+    assert pg_temp.sorted(public.hq_builtin_perms(r)) = pg_temp.expect(r), 'shipped ticks ' || r;
+    assert pg_temp.sorted(public.hq_legacy_role_perms(r)) = pg_temp.sorted(pg_temp.legacy(r)) or r = 'owner', 'legacy list kept ' || r;
+  end loop;
+  assert not exists (select 1 from public.hq_role_permissions where role_key = 'owner'), 'nothing stored for the Owner role (always everything)';
+  -- per-person extras work as before: role + ticked on - ticked off
+  update public.hq_staff set perms_add = array['audit.view'], perms_remove = array['offers.grant'] where user_id = 'e0e0e0e0-0000-4000-8000-000000000006';
+  assert public.hq_staff_perms('e0e0e0e0-0000-4000-8000-000000000006') = pg_temp.sorted(array_remove(pg_temp.legacy('sales'), 'offers.grant') || array['audit.view']), 'extras as before';
+  update public.hq_staff set perms_add = '{}', perms_remove = '{}' where user_id = 'e0e0e0e0-0000-4000-8000-000000000006';
+end $$;
+-- (as Sam, the HQ Owner, but as the database owner so the checks can read the tables; security-test.sql calls these as a
+-- signed-in person)
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999');
+do $$ declare t json; k text; k2 text; r json; begin
+  t := public.hq_team();
+  assert json_array_length(t -> 'role_list') >= 7 and (t -> 'role_list' -> 0 ->> 'key') = 'owner' and (t -> 'role_list' -> 0 ->> 'builtin')::boolean, 'role list, built-in first';
+  assert (select x ->> 'people' from json_array_elements(t -> 'role_list') x where x ->> 'key' = 'finance')::int >= 2, 'people per role';
+  assert (t -> 'owner_only')::text = '["invoices.email"]', 'owner-only permissions listed';
+  assert (select count(*) from json_array_elements(t -> 'staff') x where x ->> 'role_name' is null) = 0, 'everyone''s role has a name';
+  -- create a role: name, description, ticks
+  k := public.hq_role_save(null, 'Billing helper', 'Looks after invoices and payments, no refunds', array['overview.view', 'customers.view', 'licences.view', 'invoices.email']);
+  assert k like 'c\_%', 'custom key: ' || k;
+  assert (select name from public.hq_roles where key = k) = 'Billing helper' and not (select builtin from public.hq_roles where key = k), 'saved';
+  -- names are unique (built-in ones too), and built-in roles keep theirs
+  begin perform public.hq_role_save(null, 'billing HELPER', '', array['overview.view']); raise exception 'duplicate name';
+  exception when others then assert sqlerrm like 'There''s already a role called%', sqlerrm; end;
+  begin perform public.hq_role_save(null, 'Finance', '', array['overview.view']); raise exception 'built-in name reused';
+  exception when others then assert sqlerrm like 'There''s already a role called%', sqlerrm; end;
+  begin perform public.hq_role_save('sales', 'Sales team', '', array['overview.view']); raise exception 'built-in renamed';
+  exception when others then assert sqlerrm like 'Built-in roles keep their names%', sqlerrm; end;
+  begin perform public.hq_role_save(null, '  ', '', array['overview.view']); raise exception 'no name';
+  exception when others then assert sqlerrm like 'Give the role a name%', sqlerrm; end;
+  begin perform public.hq_role_save(null, 'Odd', '', array['made.up']); raise exception 'unknown permission';
+  exception when others then assert sqlerrm like 'Unknown permission: made.up%', sqlerrm; end;
+  -- duplicate a built-in one (the page sends its ticks under a new name)
+  k2 := public.hq_role_save(null, 'Support (nights)', 'Support, without two-step sign-in resets', array_remove(public.hq_role_perms('support'), 'people.reset_2fa'));
+  -- the Owner may change a built-in role's ticks; people with it follow
+  perform public.hq_role_save('developer', 'Developer', 'Diagnostics and operations', public.hq_role_perms('developer') || array['audit.view']);
+  assert 'audit.view' = any(public.hq_staff_perms('e0e0e0e0-0000-4000-8000-000000000007')), 'a role change reaches its people';
+  perform public.hq_role_save('developer', 'Developer', 'The overview, downloads, sanitised diagnostic reports and system operations. No customer list.', public.hq_builtin_perms('developer'));
+  assert public.hq_staff_perms('e0e0e0e0-0000-4000-8000-000000000007') = pg_temp.expect('developer'), 'back to the standard ticks';
+  -- a standard role for a person, then tick or untick: only the difference is kept, and the person shows as customised
+  r := public.hq_set_staff_access('e0e0e0e0-0000-4000-8000-000000000004', 'support',
+         array_remove(public.hq_role_perms('support'), 'people.reset_2fa') || array['business.close']);
+  assert (r -> 'perms_add')::text = '["business.close"]' and (r -> 'perms_remove')::text = '["people.reset_2fa"]', 'only the difference: ' || r::text;
+  assert (select perms_add = array['business.close'] and perms_remove = array['people.reset_2fa'] from public.hq_staff where user_id = 'e0e0e0e0-0000-4000-8000-000000000004'), 'stored';
+  assert 'business.close' = any(public.hq_staff_perms('e0e0e0e0-0000-4000-8000-000000000004')) and not 'people.reset_2fa' = any(public.hq_staff_perms('e0e0e0e0-0000-4000-8000-000000000004')), 'effective';
+  -- Reset to standard (perms null)
+  perform public.hq_set_staff_access('e0e0e0e0-0000-4000-8000-000000000004', 'support', null);
+  assert public.hq_staff_perms('e0e0e0e0-0000-4000-8000-000000000004') = pg_temp.expect('support')
+     and (select perms_add = '{}' and perms_remove = '{}' from public.hq_staff where user_id = 'e0e0e0e0-0000-4000-8000-000000000004'), 'reset to standard';
+  -- a custom role for someone (with emailing invoices: the Owner may give it, SEC-010)
+  perform public.hq_set_staff_access('e0e0e0e0-0000-4000-8000-000000000006', k, null);
+  perform public.hq_set_staff_access('e0e0e0e0-0000-4000-8000-000000000005', k2, null);
+  assert public.hq_staff_perms('e0e0e0e0-0000-4000-8000-000000000006') = pg_temp.sorted(array['overview.view', 'customers.view', 'licences.view', 'invoices.email']), 'custom role';
+  -- adding someone with a custom role works too
+  perform public.hq_add_staff('role8@riyeser.test', 'R Eight', k2);
+  -- removing a role that still has people asks where they go
+  begin perform public.hq_role_delete(k, null); raise exception 'removed a role with people';
+  exception when others then assert sqlerrm like 'Some people still have this role (1). Choose a role to move them to first.%', sqlerrm; end;
+  begin perform public.hq_role_delete(k, k); raise exception 'moved to itself';
+  exception when others then assert sqlerrm like 'Choose another role%', sqlerrm; end;
+  begin perform public.hq_role_delete('sales', 'support'); raise exception 'removed a built-in role';
+  exception when others then assert sqlerrm like 'Built-in HQ roles can''t be removed%', sqlerrm; end;
+  assert public.hq_role_delete(k, 'sales') = 1, 'one person moved';
+  assert (select role from public.hq_staff where user_id = 'e0e0e0e0-0000-4000-8000-000000000006') = 'sales'
+     and public.hq_staff_perms('e0e0e0e0-0000-4000-8000-000000000006') = pg_temp.expect('sales'), 'moved, with the standard ticks';
+  assert not exists (select 1 from public.hq_roles where key = k) and not exists (select 1 from public.hq_role_permissions where role_key = k), 'gone';
+  assert public.hq_role_delete(public.hq_role_save(null, 'Empty one', '', '{}'), null) = 0, 'a role nobody has goes straight away';
+end $$;
+reset role;
+do $$ begin
+  -- the HQ history: who, and before and after, for every role change and assignment
+  assert exists (select 1 from pg_temp.audit('role.created') a where a.details ->> 'name' = 'Billing helper' and a.actor = '99999999-9999-9999-9999-999999999999'
+     and a.details -> 'after' -> 'perms' ? 'invoices.email'), 'role.created';
+  assert exists (select 1 from pg_temp.audit('role.changed') a where a.details ->> 'role' = 'developer' and a.details -> 'after' -> 'perms' ? 'audit.view'
+     and not a.details -> 'before' -> 'perms' ? 'audit.view'), 'role.changed before/after';
+  assert exists (select 1 from pg_temp.audit('staff.access') a where a.details ->> 'user_id' = 'e0e0e0e0-0000-4000-8000-000000000004'
+     and a.details -> 'after' -> 'added' ? 'business.close' and a.details -> 'before' -> 'perms' ? 'people.reset_2fa' and not a.details -> 'after' -> 'perms' ? 'people.reset_2fa'), 'staff.access before/after';
+  assert exists (select 1 from pg_temp.audit('staff.access') a where a.details ->> 'why' = 'role.deleted' and a.details -> 'after' ->> 'role' = 'sales'), 'the move is in the history';
+  assert exists (select 1 from pg_temp.audit('role.deleted') a where a.details ->> 'name' = 'Billing helper' and a.details ->> 'moved_to' = 'sales' and (a.details ->> 'moved')::int = 1), 'role.deleted';
+  assert exists (select 1 from pg_temp.audit('staff.added') a where a.details ->> 'email' = 'role8@riyeser.test' and a.details -> 'perms' is not null), 'staff.added with permissions';
+end $$;
+-- staff changed through the older functions are in the history with before and after too
+set role authenticated;
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999');
+select public.hq_set_staff('e0e0e0e0-0000-4000-8000-000000000003', 'finance', false);
+select public.hq_set_staff('e0e0e0e0-0000-4000-8000-000000000003', 'finance', true);
+reset role;
+do $$ begin
+  assert exists (select 1 from pg_temp.audit('staff.changed') a where a.details ->> 'user_id' = 'e0e0e0e0-0000-4000-8000-000000000003'
+     and (a.details -> 'before' ->> 'active')::boolean and not (a.details -> 'after' ->> 'active')::boolean and jsonb_array_length(a.details -> 'after' -> 'perms') = 0), 'switched off: before/after';
+end $$;
+
 select 'ALL CHAT DATABASE TESTS PASSED' as result;
 select tablename from pg_publication_tables where pubname = 'supabase_realtime';
