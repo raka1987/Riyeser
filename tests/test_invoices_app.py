@@ -35,7 +35,7 @@ def test_invoices_app_shows_only_invoicing(tmp_path, monkeypatch):
         r = c.get(url)
         assert r.status_code == 302 and r.headers["Location"].endswith("/setup/accounting-basics"), url
     up = c.get("/setup/accounting-basics").get_data(as_text=True)
-    assert "RiyeserAccountingBasics-Setup.exe" in up and "same company file" in up
+    assert "/download/accounting-basics.html" in up and "same company file" in up
 
 
 def test_invoices_app_is_free_forever(tmp_path, monkeypatch):

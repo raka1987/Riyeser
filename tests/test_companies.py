@@ -198,7 +198,7 @@ def test_separate_basics_and_plus_apps_share_the_books(app, tmp_path, monkeypatc
     r = a.get("/payroll/")
     assert r.status_code == 302 and r.location.endswith("/editions")
     up = a.get("/editions").get_data(as_text=True)
-    assert "RiyeserAccountingPlus-Setup.exe" in up and "This is what you're using" in up
+    assert "/download/accounting.html" in up and "This is what you're using" in up
     assert 'name="edition"' not in a.get("/setup/company").get_data(as_text=True)  # no edition switch inside an app
     a.post("/cards/customer/new", data={"name": "Made In Basics", "active": "1"})
     # "install Plus": same books, Plus screens back, customer still there
@@ -207,7 +207,7 @@ def test_separate_basics_and_plus_apps_share_the_books(app, tmp_path, monkeypatc
     assert 'class="ed-plus"' in page and "Accounting Plus" in page and "Run payroll" in page
     assert a.get("/payroll/").status_code == 200
     assert "Made In Basics" in a.get("/cards/customer").get_data(as_text=True)
-    assert "RiyeserAccountingBasics-Setup.exe" in a.get("/editions").get_data(as_text=True)
+    assert "/download/accounting-basics.html" in a.get("/editions").get_data(as_text=True)
     # Plus after the trial with no licence: Plus screens locked (not removed), everyday screens still work
     _licence(tmp_path, monkeypatch)
     page = a.get("/").get_data(as_text=True)

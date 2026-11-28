@@ -61,6 +61,15 @@ else:
 args = [
     str(ROOT / "packaging" / "riyeser_desktop.py"),
     "--noconfirm", "--clean",
+    # Build at optimisation level 2 (same as python -OO): the bundled modules are compiled to .pyc with docstrings
+    # and asserts stripped, so the app carries no readable source or developer notes once the code repository goes
+    # private. PyInstaller only ever bundles bytecode (.pyc) in its archive, never the .py sources (checked: nothing
+    # in riyeser/ relies on asserts, docstrings or __debug__ at runtime, so stripping them is safe). PyInstaller 6+.
+    "--optimize", "2",
+    # Tests and docs live outside the riyeser package (top-level tests/ and docs/), so they are never collected; this
+    # keeps it so even if a test module is ever added next to the code.
+    "--exclude-module", "tests",
+    "--exclude-module", "pytest",
     "--name", APP_NAME.lower().replace(" ", "-") if system == "Linux" else APP_NAME,
     "--paths", str(ROOT),
     "--add-data", f"{PKG / 'templates'}{sep}riyeser/templates",

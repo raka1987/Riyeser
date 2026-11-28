@@ -351,6 +351,36 @@ jobs:
             gh release create "$TAG" -R "$DOWNLOADS_REPO" --title "$TITLE" --notes-file notes.md --latest "${files[@]}"
           fi
           echo "Published $TAG to https://github.com/$DOWNLOADS_REPO/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"
+      # So riyeser.com can show versions and recent releases without calling api.github.com: write versions.json and a
+      # small releases.json summary to the root of the downloads repository's gh-pages branch (the live site). The site
+      # build (publish-website.yml) also writes versions.json; this keeps both current between site rebuilds, and
+      # publish-website carries any existing releases.json across its rebuild. Best-effort: a problem here never fails
+      # the release (the pages fall back to api.github.com). Only tag + date are published - no code, no source.
+      - name: Update the site's versions.json and releases.json
+        if: ${{ !cancelled() }}
+        env: { GH_TOKEN: "${{ secrets.DOWNLOADS_TOKEN }}" }
+        run: |
+          set +e
+          [ -f out/versions.json ] || { echo "No versions.json in this release; skipping"; exit 0; }
+          # A short summary of recent, published releases (tag and date only).
+          gh api -X GET "repos/$DOWNLOADS_REPO/releases" -f per_page=8 \
+            --jq '[.[] | select(.draft | not) | {tag_name, published_at, draft: false}]' > releases.json || { echo "Could not read the release list; skipping"; exit 0; }
+          tmp="$(mktemp -d)"
+          if ! git clone --depth 1 -b gh-pages "https://x-access-token:${GH_TOKEN}@github.com/${DOWNLOADS_REPO}.git" "$tmp" 2>/dev/null; then
+            echo "The site's gh-pages branch isn't set up yet (docs/GOING-PRIVATE.md, step 6); skipping. The site falls back to api.github.com until then."
+            exit 0
+          fi
+          cp out/versions.json "$tmp/versions.json"
+          cp releases.json "$tmp/releases.json"
+          cd "$tmp"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add versions.json releases.json
+          if git diff --cached --quiet; then echo "versions.json and releases.json already up to date"; exit 0; fi
+          git commit -q -m "Site data: versions.json and releases.json for $TAG"
+          git push -q "https://x-access-token:${GH_TOKEN}@github.com/${DOWNLOADS_REPO}.git" gh-pages \
+            && echo "Updated versions.json and releases.json on $DOWNLOADS_REPO (gh-pages)" >> "$GITHUB_STEP_SUMMARY" \
+            || echo "Couldn't push site data (the site still works via api.github.com)"
       # The code repository's copy (transition: older Centrals look here). Still runs if the step above failed, so
       # older installs aren't left without the update; the run then shows as failed so the downloads copy gets redone.
       - if: ${{ !cancelled() && env.ALSO_CODE_REPO == 'true' }}
