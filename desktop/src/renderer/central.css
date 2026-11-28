@@ -319,9 +319,15 @@ body { display: flex; flex-direction: column; height: 100vh; }
 .wforgot { margin: -4px 0 6px; font-size: 13.5px; }
 #wf-msg[hidden] { display: none; }
 
-/* first-run: "Start blank" is the big choice; demo is a smaller one under it */
+/* first-run "Welcome to Riyeser": Just try it is the big choice; the sample business and signing in sit under it */
 .wbig.wprimary { padding: 22px; background: var(--accent-soft); } .wbig.wprimary b { font-size: 17px; }
 .wsecond { margin-top: 14px; } .wsecond .wbig { width: 100%; box-sizing: border-box; border-width: 1px; }
+.wchoices.wsecond { align-items: stretch; } .wfoot.wmore { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 4px 10px; margin-top: 16px; }
+.wfoot.wmore + .wfoot.wmore { margin-top: 10px; font-size: 13.5px; }
+.wgrid.wone { grid-template-columns: minmax(0, 420px); } .wtrynote { margin: -4px 0 18px; color: var(--muted); font-size: 13px; }
+/* "This needs a free Riyeser account": Not now on the left, Sign in and Create account on the right */
+.needdlg { width: min(480px, calc(100vw - 32px)); } .needbody .needic { font-size: 30px; margin-bottom: 6px; }
+.needbody .wrow { align-items: center; flex-wrap: wrap; } .needbody .wrow .grow { flex: 1; }
 
 /* Company page while signed out */
 .coout { text-align: center; padding: 36px 22px; } .coout > h3 { display: block; margin: 6px 0; padding: 0; font-size: 20px; } .coout p { color: var(--muted); margin: 0 0 16px; }

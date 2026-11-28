@@ -396,7 +396,7 @@ function clAction(it) {
   if (a.kind === 'wizard') return `<button class="btn sm" data-w="link">${CL_BTN.wizard}</button>`;
   if (a.kind === 'view' && a.view === 'apps') return (cl.planMissing || []).length ? `<button class="btn sm" data-cl="plan">${CL_BTN.apps}</button>` : '<button class="btn sm s" data-view="apps">Add a program</button>';
   if (a.kind === 'view') return `<button class="btn sm" data-view="${esc(a.view)}">${CL_BTN.company}</button>`;
-  if (a.kind === 'team') return `<button class="btn sm" data-act="team">${CL_BTN.team}</button>`;
+  if (a.kind === 'team') return `<button class="btn sm" data-act="team" data-needs="people">${CL_BTN.team}</button>`;   // inviting people needs an account
   if (a.kind === 'open') return `<button class="btn sm" data-open="${esc(a.id)}" data-page="${esc(a.page || '')}">Open ${esc(name)}</button>`;
   if (a.kind === 'install') return `<span class="instrow" data-instrow="${esc(a.id)}">${instRow(a.id, `<button class="btn sm" data-install="${esc(a.id)}">Install ${esc(name || 'it')}</button>`)}</span>`;
   return '';

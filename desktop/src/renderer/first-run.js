@@ -1,7 +1,7 @@
 // Riyeser Central's first run, "One installer" (central/first-run.js has the rules):
 //   Business: 1 Sign in -> 2 Install your plan (every program on it, one after another, a bar each) -> 3 Your business -> 4 Done
 //     a second PC of the same business first answers "What is this PC for?" (Office PC / Till / Reception / Everything)
-//   On your own: 1 Get started -> 2 Pick your programs -> 3 Done (no business set-up asked)
+//   On your own ("Just try it", no account): 1 Get started (an optional business name) -> 2 Pick your programs -> 3 Done
 // Nothing here pops up: progress carries on in a quiet panel on the home screen if the person keeps using Central.
 /* global $, esc, bridge, toast, safe, wiz, closeWizard, CO, coLoad, afterChange, logo, refresh, reportIssue, setView, COUNTRIES, field */
 const FR = { info: null, run: null, sum: null, screen: null, choosing: false, created: null, logoUrl: '', busy: false };
@@ -92,7 +92,7 @@ function frShowInstall() {
   const busy = s.waiting.length > 0;
   if (FR.choosing) {
     const now = new Set(run.items.map((i) => i.id));
-    wiz(`${frSteps(2)}<h1>Choose programs</h1><p class="wsub">Untick anything this PC doesn't need. You can add it later from <b>Get more apps</b>.</p>
+    wiz(`${frSteps(2)}<h1>Choose programs</h1><p class="wsub">Untick anything this PC doesn't need. You can add it later from <b>Add a program</b>.</p>
       <form id="frchoose"><div class="frlist">${frChoices().map((id) => frChooseRow(id, now.has(id))).join('')}</div>
       <div class="wrow"><button type="button" class="btn s" data-fr="choose-cancel">Back</button><button class="btn">Install these</button></div></form>`);
     $('#frchoose').onsubmit = (e) => { e.preventDefault(); const ids = [...e.target.querySelectorAll('input[name=fr]:checked:not([disabled])')].map((x) => x.value);
@@ -140,7 +140,7 @@ function frShowPicker() {
   FR.screen = 'picker';
   const on = new Set(FR.info.individualDefault);
   wiz(`${frSteps(2, 'individual')}<h1>Which programs would you like?</h1>
-    <p class="wsub">Tick what you need and Central installs it. The free ones stay free; the others are free to try. You can add more any time from <b>Get more apps</b>.</p>
+    <p class="wsub">Tick what you need and Central installs it. Free programs stay free; the others are free for 90 days, no account needed. You can add more any time from <b>Add a program</b>.</p>
     <form id="frpick"><div class="frlist">${FR.info.individual.map((id) => frChooseRow(id, on.has(id))).join('')}</div>
     <div class="frbtns"><button type="button" class="wlink" data-fr="skip">Not now</button><span class="grow"></span><button class="btn" id="frpickgo">Install</button></div></form>`);
   const form = $('#frpick');

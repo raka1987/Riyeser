@@ -270,7 +270,7 @@ test('Central wires the first run: its window steps, the IPC, offline resume, an
   for (const t of ['Install your plan', 'Your business', 'What is this PC for?', 'Choose programs instead', 'Get help', 'Keep using Central']) assert.ok(ui.includes(t), t);
   assert.doesNotMatch(ui, /\balert\(|confirm\(/);   // no pop-ups
   const cfg = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'builder.config.js'), 'utf8');
-  assert.match(cfg, /name: 'riyeser-central', version: '1\.9\.0'/);
+  assert.match(cfg, /name: 'riyeser-central', version: '1\.9\.1'/);
 });
 
 test('"Your business": the currency follows the country unless chosen', () => {

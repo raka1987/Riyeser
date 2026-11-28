@@ -107,7 +107,7 @@ function linkFacts(appData) {
 }
 
 function build({ company = null, lic = {}, demo = false, installed = [], known = [], names = {}, acc = {}, payroll = {}, link = {}, kind = null,
-  members = null, skipped = [], hidden = false } = {}) {
+  members = null, skipped = [], hidden = false, solo = false } = {}) {
   if (demo) return { demo: true, hidden, items: [], done: 0, total: 0, allDone: false, planMissing: [] };
   const has = (id) => installed.includes(id);
   const plan = planModules(lic);
@@ -119,13 +119,17 @@ function build({ company = null, lic = {}, demo = false, installed = [], known =
   const items = [];
   const add = (id, title, hint, done, action) => items.push({ id, title, hint, done: !!done, action });
 
-  add('signin', 'Sign in with your Riyeser account', 'One account for every Riyeser program, so your details fill themselves in.',
-    c.mode === 'online', { kind: 'wizard' });
+  // solo: someone just trying Riyeser on this PC ("Just try it"). Nothing here asks them for an account: it's asked
+  // for only where something works online.
+  if (!solo) {
+    add('signin', 'Sign in with your Riyeser account', 'One account for every Riyeser program, so your details fill themselves in.',
+      c.mode === 'online', { kind: 'wizard' });
+  }
   const missing = DETAIL_KEYS.filter((k) => !filled(c[k]));
   add('details', 'Check your business details',
     missing.length && company ? `Still to add: ${missing.map((k) => ({ name: 'business name', address: 'address', phone: 'phone', email: 'email', tax_number: 'tax number' }[k])).join(', ')}.` : 'Your name, address, phone, email and tax number go on every invoice.',
     !!company && !missing.length, { kind: 'view', view: 'company' });
-  add('programs', 'Install the programs on your plan',
+  if (!solo) add('programs', 'Install the programs on your plan',
     !lic || !lic.online ? 'Sign in first and we\'ll know which programs are on your plan.' : planMissing.length ? `Still to install: ${planMissing.map((p) => p.name).join(', ')}.` : 'Everything on your plan is installed.',
     !!(lic && lic.online) && !planMissing.length, { kind: 'view', view: 'apps' });
   // (No "Add your logo" item: Riyeser Accounting doesn't keep a company logo yet.)
@@ -135,7 +139,7 @@ function build({ company = null, lic = {}, demo = false, installed = [], known =
     books.found && books.customers > 0, accApp ? { kind: 'open', id: accApp } : { kind: 'install', id: 'invoices' });
   add('invoice', 'Send your first invoice or quote', 'Make one, check it, send it. Getting paid starts here.',
     books.found && books.salesDocs > 0, accApp ? { kind: 'open', id: accApp, page: 'invoice' } : { kind: 'install', id: 'invoices' });
-  if (kind !== 'personal') {
+  if (kind !== 'personal' && !solo) {
     add('team', 'Invite the people who help you', 'Staff, family or your bookkeeper. They chat with you in Riyeser Link.',
       members != null && members > 1, { kind: 'team' });
   }

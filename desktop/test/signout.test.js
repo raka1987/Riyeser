@@ -120,10 +120,10 @@ test('demo mode: only starts when the person confirmed it; signing out never sta
   assert.doesNotMatch(src('renderer/company.js'), /demo:start/);              // the wizard goes through startDemo (and its question)
   const signOut = src('renderer/company.js').match(/async function signOut\(\) \{[\s\S]*?\n\}/)[0];
   assert.doesNotMatch(signOut, /demo|showStart/);
-  // the first-run step: Start blank is the big choice, demo a smaller one under it
+  // the first-run step: Just try it is the big choice, demo a smaller one under it
   const html = ui.startHtml();
-  assert.ok(html.indexOf('data-w="blank"') < html.indexOf('data-w="demo"'));
-  assert.match(html, /class="wbig wmain wprimary" data-w="blank"/);
+  assert.ok(html.indexOf('data-w="try"') < html.indexOf('data-w="demo"'));
+  assert.match(html, /class="wbig wmain wprimary" data-w="try"/);
   assert.match(html, /class="wbig wsm" data-w="demo"/);
 });
 
