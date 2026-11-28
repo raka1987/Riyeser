@@ -18,7 +18,10 @@ const APPS = {
   assistant: { name: 'Riyeser Documents', appId: 'com.deskassistant.app', ico: 'build/icon.ico', out: 'dist', artifact: 'RiyeserDocuments',
     executableName: 'Riyeser Desk Assistant',
     extraMetadata: { name: 'desk-assistant', version: '1.0.0', productName: 'Riyeser Documents', description: 'Riyeser Documents (Riyeser Group): scan, file and find the office\'s documents.' } },
+  // 0.26.0: its installer adds the "Riyeser PDF" right-click menu for PDFs and pictures (this Windows user only), and
+  // the uninstaller removes it (build/pdf/installer.nsh)
   pdf: { name: 'Riyeser PDF', appId: 'com.deskassistant.pdf', ico: 'build/pdf/icon.ico', out: 'dist-pdf', artifact: 'RiyeserPDF',
+    include: 'build/pdf/installer.nsh',
     extraMetadata: { main: 'src/pdf-main.js', name: 'desk-pdf' } },
   central: { name: 'Riyeser Central', appId: 'com.riyeser.central', ico: 'build/central/icon.ico', out: 'dist-central', artifact: 'RiyeserCentral',
     extraMetadata: { main: 'src/central-main.js', name: 'riyeser-central', version: '1.9.0', productName: 'Riyeser Central' } },

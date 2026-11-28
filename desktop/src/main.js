@@ -183,7 +183,7 @@ function createMain() {
   mainWin.on('close', (e) => { if (!app.isQuitting) { e.preventDefault(); mainWin.hide(); } });
 }
 function showMain() { if (!mainWin || mainWin.isDestroyed()) createMain(); mainWin.show(); mainWin.focus(); }
-const openEditor = (file) => createEditorWindow(file, { store, icon: path.join(__dirname, 'renderer', process.platform === 'win32' ? 'icon-pdf.ico' : 'icon-pdf.png') });
+const openEditor = (file, task = null) => createEditorWindow(file, { store, task, icon: path.join(__dirname, 'renderer', process.platform === 'win32' ? 'icon-pdf.ico' : 'icon-pdf.png') });
 
 function handle(name, fn) {
   ipcMain.handle(name, async (_e, ...args) => {
