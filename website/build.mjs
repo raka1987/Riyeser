@@ -1785,6 +1785,40 @@ const bookShell = (title) => withCsp(`<!doctype html>
 `);
 writeFileSync(join(OUT, 'book', 'index.html'), bookShell('Book online · Riyeser'));
 
+// ---------- the signing page: riyeser.com/sign/?t=<link> (website/sign) ----------
+// For people asked to sign a PDF from Riyeser PDF ("Ask someone to sign"). Their emailed link is the key; the page talks
+// only to Riyeser's "sign" Edge Function (connect-src), draws the PDF with pdf.js (the same copy As Built uses) and
+// keeps nothing in the browser. Not for search engines: noindex here and Disallow: /sign/ in robots.txt.
+mkdirSync(join(OUT, 'sign', 'vendor'), { recursive: true });
+const SIGN_API = `${SUPABASE_ORIGIN || 'https://goaugynxeatzqzifpoes.supabase.co'}/functions/v1/sign`;
+const signJs = readFileSync(join(ROOT, 'sign', 'sign.js'), 'utf8').replace("'__RIYESER_SIGN__'", JSON.stringify(SIGN_API));
+const signCss = readFileSync(join(ROOT, 'sign', 'sign.css'), 'utf8');
+writeFileSync(join(OUT, 'sign', 'sign.js'), signJs);
+writeFileSync(join(OUT, 'sign', 'sign.css'), signCss);
+for (const f of ['pdf.min.mjs', 'pdf.worker.min.mjs']) cpSync(join(ROOT, 'services', 'vendor', f), join(OUT, 'sign', 'vendor', f));
+writeFileSync(join(OUT, 'sign', 'index.html'), withCsp(`<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow">
+<title>Sign a document · Riyeser</title>
+<meta name="description" content="Read and sign a document someone sent you with Riyeser PDF: an electronic signature with an audit trail.">
+<link rel="icon" href="${BASE}assets/favicon.png" type="image/png">
+<link rel="stylesheet" href="${BASE}sign/sign.css?v=${stamp8(signCss)}">
+</head>
+<body>
+<a class="skip" href="#main">Skip to the document</a>
+<header class="top"><a class="brand" href="${BASE}"><picture><source srcset="${BASE}assets/logo-wordmark-light.svg" media="(prefers-color-scheme: dark)"><img src="${BASE}assets/logo-wordmark.svg" alt="Riyeser" width="96" height="30"></picture></a><span class="tagline">Electronic signature with an audit trail</span></header>
+<div class="wrap" id="app"><main id="main" class="loading" tabindex="-1">Loading…</main></div>
+<footer class="foot">Sent with Riyeser PDF · <a href="${BASE}">riyeser.com</a><span id="live" class="sr" aria-live="polite"></span></footer>
+<script type="module" src="${BASE}sign/sign.js?v=${stamp8(signJs)}"></script>
+</body>
+</html>
+`));
+
 // ---------- old riyeser.com addresses keep working ----------
 const redirect = (path, to, label) => { const f = join(OUT, path); mkdirSync(dirname(f), { recursive: true });
   writeFileSync(f, `<!doctype html><meta charset="utf-8"><title>${label} — Riyeser</title><meta http-equiv="refresh" content="0; url=${to}"><link rel="canonical" href="${to}"><p>Moved to <a href="${to}">${label}</a>.</p>`); };
@@ -1803,9 +1837,9 @@ redirectKeep('help/desk-assistant.html', '../help/documents.html', 'Riyeser Docu
 cpSync(join(ROOT, 'assets'), join(OUT, 'assets'), { recursive: true });
 const SUBFOLDER = BASE !== '/';
 if (!SUBFOLDER) writeFileSync(join(OUT, 'CNAME'), 'riyeser.com\n');
-// Riyeser HQ (staff only) and the old /team/ copy of Riyeser Link stay out of search engines. The Link app (/link/), the
+// Riyeser HQ (staff only), the old /team/ copy of Riyeser Link and the signing page (/sign/) stay out of search engines. The Link app (/link/), the
 // download hand-off pages and the booking page shell carry a noindex tag instead, so crawlers can still read it.
-if (!SUBFOLDER) writeFileSync(join(OUT, 'robots.txt'), `User-agent: *\nAllow: /\nDisallow: /hq/\nDisallow: /team/\nSitemap: ${SITE}/sitemap.xml\n`);
+if (!SUBFOLDER) writeFileSync(join(OUT, 'robots.txt'), `User-agent: *\nAllow: /\nDisallow: /hq/\nDisallow: /team/\nDisallow: /sign/\nSitemap: ${SITE}/sitemap.xml\n`);
 const urls = ['', 'programs.html', 'industries.html', 'downloads.html', 'pricing.html', 'features.html', 'trust.html', 'hardware.html', 'countries.html', 'releases.html', 'help.html', 'terms.html', ...INDUSTRIES.map((i) => `industries/${i.id}.html`), ...PROGRAMS.map((p) => `programs/${p.id}.html`), ...guidesFor({ EMAIL, SERVICES_APP, up: '' }).map((g) => `help/${g.id}.html`), ...DEV_PAGES.map(([p]) => (p === 'index' ? 'developers/' : `developers/${p}.html`))];
 const LASTMOD = new Date().toISOString().slice(0, 10);
 writeFileSync(join(OUT, 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map((u) => `  <url><loc>${SITE}/${u}</loc><lastmod>${LASTMOD}</lastmod></url>`).join('\n')}\n</urlset>\n`);

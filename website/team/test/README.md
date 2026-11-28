@@ -225,3 +225,24 @@
   check, raw details), Move to another PC (a set-up code), removing the last relay (a warning first, then switched off),
   and a phone (one column, big buttons). `rules-test.sql` covers the database side (set-up codes, own keys, takeover,
   removal and the changed cluster secret, last relay, `relay_leave`, `relay_check`). Screenshots go to the folder given.
+- PDF signing requests (Riyeser PDF → Ask someone to sign): `sign-test.sql` (same set-up as `rules-test.sql`, on its own
+  empty database; it ends with `ALL SIGNING TESTS PASSED`): only the sender sees and changes a request (not staff, not the
+  business's owner, not another business, not someone who left), the private `sign-docs` bucket's rules (only that draft's
+  sender uploads, once, at `<business>/<request>/original.pdf`; only the sender reads or deletes), only a SHA-256 of each
+  emailed link is kept, signing in order (the next link is made when the one before signs), finishing (every field, "I
+  agree to sign electronically", PNG signatures only, the date is the day signed), the trusted address and the whole
+  forwarded chain recorded, completion (one copy at a time, the download links), decline with a reason, cancel, reminders
+  (a new link; the old one stops; once a day), expiry (the sender's date or 30 days; the hourly `sign_sweep`), the monthly
+  free quota (`sign.free_per_month`, last month's don't count), rate limits (wrong links per address, opens, actions;
+  counters keep a hash, not the address), file clean-up (keep 30/90/365/730 days, drafts after 2 days, the history stays),
+  and the audit trail can't be changed. `security-test.sql` also tries every signing function as another business and as
+  someone in no business, checks no HQ function reads the signing tables, HQ staff can't read the bucket, and nobody signed
+  in or out can run `sign_pub_*` (only the `sign` Edge Function's service role).
+- `sign-page-test.js`: the signing page riyeser.com/sign/?t=… (`website/sign`) against a pretend `sign` function: sign
+  (drawn and typed, every field, I agree), decline (a reason is needed), expired, a wrong link, a link of the wrong shape (never
+  sent), completed (download), too many tries, a document whose fingerprint doesn't match; nothing loaded from elsewhere, no
+  cookies or storage, no referrer, noindex and `Disallow: /sign/`, no CSP refusals, no sideways scrolling at 390, and with
+  `AXE=…/axe.min.js` axe-core on each screen. Run after `node website/build-combined.mjs`: `node website/team/test/sign-page-test.js <shots>`.
+  The function itself: `deno test --allow-env --allow-read --allow-net supabase/functions/sign` on branch main (with
+  `SIGN_TEST_PG=postgres://…` it also runs end to end on a local database with this team-chat.sql). Riyeser PDF's side:
+  `desktop/test/sign-request.test.js`.

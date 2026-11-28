@@ -1676,7 +1676,8 @@ create or replace function public.hq_settings_json() returns json
     'support.escalate_hours', public.hq_setting_num('support.escalate_hours', 48),
     'refunds.two_person_threshold', public.hq_setting_num('refunds.two_person_threshold', 200),
     'offers.self_limit_days', public.hq_setting_num('offers.self_limit_days', 31),
-    'billing.grace_days', public.hq_setting_num('billing.grace_days', 7))
+    'billing.grace_days', public.hq_setting_num('billing.grace_days', 7),
+    'sign.free_per_month', public.hq_setting_num('sign.free_per_month', 10))
 $$;
 create or replace function public.hq_get_settings() returns json
   language plpgsql stable security definer set search_path = public as $$
@@ -1685,7 +1686,8 @@ create or replace function public.hq_set_setting(setting text, val numeric) retu
   language plpgsql security definer set search_path = public as $$
 begin
   perform hq_need(array['settings.manage']);
-  if setting not in ('support.overdue_hours', 'support.escalate_hours', 'refunds.two_person_threshold', 'offers.self_limit_days', 'billing.grace_days') then
+  if setting not in ('support.overdue_hours', 'support.escalate_hours', 'refunds.two_person_threshold', 'offers.self_limit_days', 'billing.grace_days',
+                     'sign.free_per_month') then
     raise exception 'That isn''t a setting HQ can change.'; end if;
   if val is null or val <= 0 or val > 100000 then raise exception 'Choose a number above 0.'; end if;
   insert into hq_settings (key, value) values (setting, val::text) on conflict (key) do update set value = excluded.value;
@@ -2737,6 +2739,12 @@ begin
     update email_outbox set to_address = null, subject = '[removed]', body_text = '[removed]', body_html = null,
       status = case when status = 'queued' then 'held' else status end where workspace_id = ws;
     update billing_documents set doc = jsonb_set(doc, '{buyer,contact}', '{"name": "Removed person"}'::jsonb) where workspace_id = ws;
+    -- PDF signing requests: names, emails, signatures and addresses go; the files are deleted by the sign function's clean-up
+    if to_regclass('public.sign_requests') is not null then
+      update sign_signers set name = 'Removed person', email = 'removed@invalid', vals = null, decline_reason = null, ip = null, ip_chain = null, user_agent = null where workspace_id = ws;
+      update sign_events set ip = null, user_agent = null, detail = null where workspace_id = ws;
+      update sign_requests set title = '[removed]', message = null, sender_name = 'Removed person', files_delete_at = now() where workspace_id = ws;
+    end if;
     update workspaces set name = 'Removed business', legal_name = null, tax_number = null, address = null, phone = null, email = null,
       removal_state = 'removed', removed_at = now() where id = ws;
     n := n + 1;
@@ -9391,3 +9399,700 @@ end $$;
 revoke all on function public.link_relay_manage(uuid, text, text, boolean), public.link_relay_enroll_code(uuid, text, text, text, int), public.relay_enroll_claim(text) from public, anon;
 grant execute on function public.link_relay_manage(uuid, text, text, boolean), public.link_relay_enroll_code(uuid, text, text, text, int) to authenticated;
 grant execute on function public.relay_enroll_claim(text) to anon, authenticated;
+
+-- ===== PDF signing requests: Riyeser PDF "Ask someone to sign" =====
+-- An electronic signature with an audit trail (no claim of meeting any particular country's e-signature law).
+-- 1. In Riyeser PDF the sender (signed in to their Riyeser account, in an online business) places the fields and
+--    names the signers: sign_request_create makes a draft and the place to upload the PDF.
+-- 2. Riyeser PDF uploads the PDF to the private "sign-docs" bucket at <business>/<request>/original.pdf (only that
+--    draft's sender can, once: no overwriting), then sign_request_send records its SHA-256 and emails each signer
+--    (through the email outbox) their own link riyeser.com/sign/?t=<token>. Only a SHA-256 of each token is kept.
+-- 3. The signing page talks only to the "sign" Edge Function (supabase/functions/sign, branch main). It calls the
+--    sign_pub_* functions with the service role: signed-out visitors and signed-in people can't run them directly.
+--    The function checks the PDF's SHA-256 before showing it, records the internet address it trusts (see SEC-017),
+--    and when everyone has signed it stamps the fields into the PDF, adds a "Certificate of completion" page and
+--    stores signed.pdf next to the original (sign_pub_complete).
+-- Who sees what: the sender (while still in the business) and each signer through their own link. Nobody else: not
+-- the business's owner or admins, and not Riyeser HQ (no hq_ function reads these tables or the sign-docs bucket).
+-- Files are deleted keep_days after the request finishes (default 365; the sender chooses 30, 90, 365 or 730); the
+-- audit trail rows stay. A free number of requests a business can send each month: the HQ setting sign.free_per_month.
+create table if not exists public.sign_requests (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  created_by uuid not null references auth.users(id) on delete cascade,
+  sender_name text not null check (length(sender_name) between 1 and 80),
+  title text not null check (length(trim(title)) between 1 and 120),
+  message text check (length(message) <= 2000),
+  ordered boolean not null default false,
+  fields jsonb not null default '[]'::jsonb,
+  status text not null default 'draft' check (status in ('draft', 'sent', 'completed', 'declined', 'cancelled', 'expired')),
+  expires_at timestamptz not null,
+  keep_days int not null default 365 check (keep_days in (30, 90, 365, 730)),
+  original_path text,
+  original_sha256 text check (original_sha256 ~ '^[0-9a-f]{64}$'),
+  original_bytes int,
+  pages int check (pages between 1 and 500),
+  signed_path text,
+  signed_sha256 text check (signed_sha256 ~ '^[0-9a-f]{64}$'),
+  content_sha256 text check (content_sha256 ~ '^[0-9a-f]{64}$'),
+  created_at timestamptz not null default now(),
+  sent_at timestamptz,
+  finished_at timestamptz,
+  completing_at timestamptz,
+  files_delete_at timestamptz,
+  files_sweep_at timestamptz,
+  files_deleted_at timestamptz,
+  updated_at timestamptz not null default now()
+);
+create index if not exists sign_requests_ws on public.sign_requests (workspace_id, created_by, created_at desc);
+create index if not exists sign_requests_due on public.sign_requests (files_delete_at) where files_deleted_at is null;
+create table if not exists public.sign_signers (
+  id uuid primary key default gen_random_uuid(),
+  request_id uuid not null references public.sign_requests(id) on delete cascade,
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  position smallint not null check (position between 1 and 10),
+  name text not null check (length(trim(name)) between 1 and 80),
+  email text not null check (length(email) <= 320),
+  status text not null default 'waiting' check (status in ('waiting', 'sent', 'viewed', 'signed', 'declined')),
+  token_hash text unique check (token_hash ~ '^[0-9a-f]{64}$'),
+  copy_hash text unique check (copy_hash ~ '^[0-9a-f]{64}$'),
+  copy_until timestamptz,
+  sent_at timestamptz,
+  viewed_at timestamptz,
+  signed_at timestamptz,
+  declined_at timestamptz,
+  decline_reason text check (length(decline_reason) <= 500),
+  agreed_at timestamptz,
+  method text check (method in ('drawn', 'typed')),
+  vals jsonb,
+  ip text check (length(ip) <= 45),
+  ip_chain text check (length(ip_chain) <= 200),
+  user_agent text check (length(user_agent) <= 400),
+  reminded_at timestamptz,
+  reminders int not null default 0,
+  unique (request_id, position)
+);
+create table if not exists public.sign_events (
+  id bigint generated always as identity primary key,
+  request_id uuid not null references public.sign_requests(id) on delete cascade,
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  signer_id uuid references public.sign_signers(id) on delete set null,
+  event text not null check (event in ('created', 'sent', 'emailed', 'viewed', 'signed', 'declined', 'reminded', 'cancelled', 'expired', 'completed', 'files_deleted', 'keep_changed')),
+  at timestamptz not null default now(),
+  ip text check (length(ip) <= 45),
+  user_agent text check (length(user_agent) <= 400),
+  detail jsonb
+);
+create index if not exists sign_events_req on public.sign_events (request_id, id);
+-- the public endpoints' counters (per address and per link), kept a day
+create table if not exists public.sign_rate (
+  rkey text not null check (length(rkey) <= 200),
+  rwin timestamptz not null,
+  hits int not null default 1,
+  primary key (rkey, rwin)
+);
+-- which signing request an outbox email belongs to, so a finished request's links can be taken out of sent emails
+alter table public.email_outbox add column if not exists sign_request_id uuid;
+alter table public.sign_requests enable row level security;
+alter table public.sign_signers enable row level security;
+alter table public.sign_events enable row level security;
+alter table public.sign_rate enable row level security;
+revoke all on public.sign_requests, public.sign_signers, public.sign_events, public.sign_rate from anon, authenticated;
+
+-- The audit trail can't be changed, and only goes when its request does (or the business is removed).
+create or replace function public.sign_events_guard() returns trigger language plpgsql as $$
+begin
+  -- allowed only as part of removing its request (cascades) or the owner-approved removal of a closed business
+  if pg_trigger_depth() <= 1 and coalesce(current_setting('riyeser.removing', true), '') <> 'on' then
+    raise exception 'The signing history can''t be changed or deleted.';
+  end if;
+  return case when tg_op = 'DELETE' then old else new end;
+end $$;
+drop trigger if exists sign_events_guard on public.sign_events;
+create trigger sign_events_guard before update or delete on public.sign_events for each row execute function public.sign_events_guard();
+
+-- ---- settings (HQ settings, with these defaults)
+create or replace function public.sign_cfg(k text) returns numeric
+  language sql stable security definer set search_path = public as $$
+  select public.hq_setting_num(k, case k when 'sign.free_per_month' then 10 when 'sign.expiry_days' then 30 when 'sign.keep_days' then 365
+    when 'sign.max_signers' then 10 when 'sign.max_mb' then 20 when 'sign.open_per_10min' then 120 when 'sign.act_per_10min' then 30
+    when 'sign.bad_per_hour' then 30 when 'sign.copy_days' then 30 else 0 end)
+$$;
+create or replace function public.sign_settings() returns json
+  language sql stable security definer set search_path = public as $$
+  select json_build_object('free_per_month', sign_cfg('sign.free_per_month'), 'expiry_days', sign_cfg('sign.expiry_days'),
+    'keep_days', sign_cfg('sign.keep_days'), 'keep_choices', json_build_array(30, 90, 365, 730), 'max_signers', sign_cfg('sign.max_signers'),
+    'max_mb', sign_cfg('sign.max_mb'), 'copy_days', sign_cfg('sign.copy_days'))
+$$;
+-- Requests a business has sent this calendar month (UTC), and its free limit.
+create or replace function public.sign_used(ws uuid) returns int
+  language sql stable security definer set search_path = public as $$
+  select count(*)::int from sign_requests where workspace_id = ws and sent_at >= date_trunc('month', now() at time zone 'utc') at time zone 'utc'
+$$;
+create or replace function public.sign_quota(ws uuid) returns json
+  language plpgsql stable security definer set search_path = public as $$
+declare u int; l int;
+begin
+  if ws is null or not public.is_member(ws) then raise exception 'You''re not in that business.'; end if;
+  u := sign_used(ws); l := sign_cfg('sign.free_per_month')::int;
+  return json_build_object('used', u, 'limit', l, 'left', greatest(l - u, 0), 'month', to_char(now() at time zone 'utc', 'YYYY-MM'));
+end $$;
+
+create or replace function public.sign_log(req uuid, ws uuid, signer uuid, ev text, ip text, ua text, det jsonb) returns void
+  language sql security definer set search_path = public as $$
+  insert into sign_events (request_id, workspace_id, signer_id, event, ip, user_agent, detail)
+  values (req, ws, signer, ev, left(ip, 45), left(ua, 400), det)
+$$;
+create or replace function public.sign_hash(t text) returns text language sql immutable as $$
+  select encode(sha256(convert_to(coalesce(t, ''), 'UTF8')), 'hex')
+$$;
+-- "28 Nov 2026" in UTC, for emails and the certificate
+create or replace function public.sign_day(t timestamptz) returns text language sql stable as $$
+  select to_char(t at time zone 'utc', 'FMDD Mon YYYY')
+$$;
+-- Queue an email about a signing request (the same outbox and mailer as every other Riyeser email). Subjects never
+-- name the document: Riyeser HQ's Emails page shows subjects and addresses (never the text).
+create or replace function public.sign_email(req uuid, to_addr text, tmpl text, subj text, body text) returns void
+  language plpgsql security definer set search_path = public as $$
+declare a text := nullif(trim(coalesce(to_addr, '')), '');
+begin
+  if current_setting('riyeser.removing', true) = 'on' then return; end if;
+  insert into email_outbox (to_address, subject, body_text, body_html, template, workspace_id, sign_request_id, status)
+  values (a, left(subj, 200), left(body, 19000) || E'\n\nRiyeser\nriyeser.com', email_html(left(subj, 200), left(body, 19000)), tmpl,
+    (select workspace_id from sign_requests where id = req), req, case when a is null or a !~ '^[^@\s]+@[^@\s]+$' then 'held' else 'queued' end);
+end $$;
+-- A new link for one signer: a long random token (two random UUIDs, 244 random bits), emailed; only its SHA-256 is kept.
+create or replace function public.sign_issue(signer uuid, reminder boolean) returns void
+  language plpgsql security definer set search_path = public as $$
+declare s sign_signers; r sign_requests; tok text := replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', ''); co text;
+begin
+  select * into s from sign_signers where id = signer;
+  select * into r from sign_requests where id = s.request_id;
+  co := (select name from workspaces where id = r.workspace_id);
+  update sign_signers set token_hash = sign_hash(tok), status = case when status = 'waiting' then 'sent' else status end,
+    sent_at = coalesce(sent_at, now()), reminded_at = case when reminder then now() else reminded_at end,
+    reminders = reminders + case when reminder then 1 else 0 end where id = signer;
+  perform sign_email(r.id, s.email, case when reminder then 'sign.reminder' else 'sign.request' end,
+    case when reminder then 'Reminder: a document from ' || co || ' is waiting for your signature' else 'Please sign a document from ' || co end,
+    'Hello ' || s.name || E',\n\n' || r.sender_name || ' at ' || co || ' has asked you to sign "' || r.title || '".'
+      || case when coalesce(trim(r.message), '') <> '' then E'\n\nTheir message: ' || trim(r.message) else '' end
+      || E'\n\nOpen this link to read and sign it, or to decline (it works until ' || sign_day(r.expires_at) || E'):\nhttps://riyeser.com/sign/?t=' || tok
+      || case when reminder then E'\n\nThis is a new link: any earlier link for this request has stopped working.' else '' end
+      || E'\n\nThe link is just for you, so please don''t forward it. This is an electronic signature with an audit trail, sent through Riyeser for '
+      || r.sender_name || E'. If you weren''t expecting it, you can ignore this email.');
+  perform sign_log(r.id, r.workspace_id, signer, case when reminder then 'reminded' else 'emailed' end, null, null, null);
+end $$;
+-- The owner of a request (its sender, while still in the business), or an error.
+create or replace function public.sign_mine(req uuid) returns public.sign_requests
+  language plpgsql stable security definer set search_path = public as $$
+declare r sign_requests;
+begin
+  select * into r from sign_requests where id = req and created_by = auth.uid();
+  if r.id is null or not public.is_member(r.workspace_id) then raise exception 'That signing request isn''t yours.'; end if;
+  return r;
+end $$;
+-- Close a request: links stop working, files are kept keep_days from now; its link emails not sent yet aren't sent.
+create or replace function public.sign_finish_req(req uuid, st text) returns void
+  language plpgsql security definer set search_path = public as $$
+begin
+  update sign_requests set status = st, finished_at = now(), updated_at = now(),
+    files_delete_at = now() + make_interval(days => keep_days) where id = req;
+  if st <> 'completed' then
+    -- outbox rows are never deleted: a link email not yet sent loses its link and isn't sent
+    update email_outbox set status = 'failed', last_error = 'Not sent: the signing request closed first.',
+        body_text = regexp_replace(body_text, 'https://riyeser\.com/sign/\?t=[0-9a-f]+', '[link no longer needed]', 'g'),
+        body_html = regexp_replace(body_html, 'https://riyeser\.com/sign/\?t=[0-9a-f]+', '[link no longer needed]', 'g')
+      where sign_request_id = req and status = 'queued' and template in ('sign.request', 'sign.reminder');
+  end if;
+end $$;
+create or replace function public.sign_expire(req uuid) returns void
+  language plpgsql security definer set search_path = public as $$
+declare r sign_requests;
+begin
+  select * into r from sign_requests where id = req and status = 'sent' and expires_at < now() for update;
+  if r.id is null then return; end if;
+  perform sign_finish_req(req, 'expired');
+  perform sign_log(req, r.workspace_id, null, 'expired', null, null, null);
+  perform sign_email(req, (select email::text from auth.users where id = r.created_by), 'sign.expired', 'A signing request expired',
+    'Hello ' || r.sender_name || E',\n\nYour request to sign "' || r.title || '" expired on ' || sign_day(r.expires_at)
+      || E' before everyone had signed. Open Riyeser PDF → Sent for signing to see who signed, or send it again.');
+end $$;
+
+-- ---- what the sender does (signed in, in the business)
+create or replace function public.sign_request_create(ws uuid, title text, note text, ordered boolean, expires timestamptz, keep int,
+    fields jsonb, signers jsonb) returns json
+  language plpgsql security definer set search_path = public as $$
+declare rid uuid := gen_random_uuid(); n int; f jsonb; s jsonb; i int := 0; me text; ids text[] := '{}';
+begin
+  if auth.uid() is null or ws is null or not public.is_member(ws) then raise exception 'Sign in to Riyeser and choose your business first.'; end if;
+  if sign_used(ws) >= sign_cfg('sign.free_per_month') then
+    raise exception 'Your business has sent its % free signing requests this month. More can be sent from the 1st of next month.', sign_cfg('sign.free_per_month')::int;
+  end if;
+  if (select count(*) from sign_requests x where x.created_by = auth.uid() and x.created_at > now() - interval '1 day') >= 50 then
+    raise exception 'That''s a lot of signing requests today. Try again tomorrow.'; end if;
+  if length(trim(coalesce(title, ''))) not between 1 and 120 then raise exception 'Give the document a name (up to 120 characters).'; end if;
+  if length(coalesce(note, '')) > 2000 then raise exception 'Keep the message under 2,000 characters.'; end if;
+  if jsonb_typeof(signers) <> 'array' or jsonb_array_length(signers) < 1 then raise exception 'Add at least one person to sign.'; end if;
+  n := jsonb_array_length(signers);
+  if n > sign_cfg('sign.max_signers') then raise exception 'Up to % people can sign one document.', sign_cfg('sign.max_signers')::int; end if;
+  for s in select * from jsonb_array_elements(signers) loop
+    if length(trim(coalesce(s ->> 'name', ''))) not between 1 and 80 then raise exception 'Type each signer''s name.'; end if;
+    if coalesce(s ->> 'email', '') !~ '^[^@\s<>",;]+@[^@\s<>",;]+\.[^@\s<>",;]+$' or length(s ->> 'email') > 320 then
+      raise exception 'Check the email address for %.', trim(s ->> 'name'); end if;
+  end loop;
+  if (select count(distinct lower(trim(x ->> 'email'))) from jsonb_array_elements(signers) x) <> n then raise exception 'Each signer needs their own email address.'; end if;
+  if jsonb_typeof(fields) <> 'array' or jsonb_array_length(fields) not between 1 and 200 then raise exception 'Place at least one field for each signer.'; end if;
+  for f in select * from jsonb_array_elements(fields) loop
+    if coalesce(f ->> 'id', '') !~ '^[A-Za-z0-9_-]{1,24}$' or (f ->> 'id') = any (ids)
+       or coalesce(f ->> 'kind', '') not in ('signature', 'initials', 'date', 'name', 'text')
+       or coalesce(f ->> 'signer', '') !~ '^[0-9]{1,2}$' or (f ->> 'signer')::int not between 1 and n
+       or coalesce(f ->> 'page', '') !~ '^[0-9]{1,3}$' or (f ->> 'page')::int < 1
+       or jsonb_typeof(f -> 'x') <> 'number' or jsonb_typeof(f -> 'y') <> 'number' or jsonb_typeof(f -> 'w') <> 'number' or jsonb_typeof(f -> 'h') <> 'number'
+       or (f ->> 'x')::numeric < 0 or (f ->> 'y')::numeric < 0 or (f ->> 'w')::numeric not between 0.01 and 1 or (f ->> 'h')::numeric not between 0.005 and 1
+       or (f ->> 'x')::numeric + (f ->> 'w')::numeric > 1.001 or (f ->> 'y')::numeric + (f ->> 'h')::numeric > 1.001 then
+      raise exception 'One of the fields isn''t right. Place it on the page again.';
+    end if;
+    ids := ids || (f ->> 'id');
+  end loop;
+  for i in 1 .. n loop
+    if not exists (select 1 from jsonb_array_elements(fields) x where (x ->> 'signer')::int = i) then
+      raise exception 'Place at least one field for %.', trim(signers -> (i - 1) ->> 'name'); end if;
+  end loop;
+  expires := coalesce(expires, now() + make_interval(days => sign_cfg('sign.expiry_days')::int));
+  if expires < now() + interval '1 hour' or expires > now() + interval '366 days' then raise exception 'Choose an end date between tomorrow and a year from now.'; end if;
+  keep := coalesce(keep, sign_cfg('sign.keep_days')::int);
+  if keep not in (30, 90, 365, 730) then raise exception 'Choose how long to keep the files: 30 days, 90 days, 1 year or 2 years.'; end if;
+  select display_name into me from members where workspace_id = ws and user_id = auth.uid();
+  insert into sign_requests (id, workspace_id, created_by, sender_name, title, message, ordered, fields, expires_at, keep_days, original_path)
+  values (rid, ws, auth.uid(), left(coalesce(nullif(trim(me), ''), 'Someone'), 80), trim(title), nullif(trim(coalesce(note, '')), ''), coalesce(ordered, false),
+    (select jsonb_agg(jsonb_build_object('id', x ->> 'id', 'kind', x ->> 'kind', 'signer', (x ->> 'signer')::int, 'page', (x ->> 'page')::int,
+       'x', round((x ->> 'x')::numeric, 5), 'y', round((x ->> 'y')::numeric, 5), 'w', round((x ->> 'w')::numeric, 5), 'h', round((x ->> 'h')::numeric, 5),
+       'label', left(nullif(trim(coalesce(x ->> 'label', '')), ''), 40))) from jsonb_array_elements(fields) x),
+    expires, keep, ws::text || '/' || rid::text || '/original.pdf');
+  i := 0;
+  for s in select * from jsonb_array_elements(signers) loop
+    i := i + 1;
+    insert into sign_signers (request_id, workspace_id, position, name, email) values (rid, ws, i, trim(s ->> 'name'), lower(trim(s ->> 'email')));
+  end loop;
+  perform sign_log(rid, ws, null, 'created', null, null, jsonb_build_object('signers', n, 'fields', jsonb_array_length(fields)));
+  return json_build_object('id', rid, 'path', ws::text || '/' || rid::text || '/original.pdf', 'bucket', 'sign-docs');
+end $$;
+
+-- Storage rules for the sign-docs bucket (only the sender; never anyone else in the business, never HQ).
+create or replace function public.sign_upload_ok(path text) returns boolean
+  language sql stable security definer set search_path = public as $$
+  select coalesce((select public.is_member(r.workspace_id) from sign_requests r
+    where r.original_path = path and r.created_by = auth.uid() and r.status = 'draft'), false)
+$$;
+create or replace function public.sign_file_ok(path text) returns boolean
+  language sql stable security definer set search_path = public as $$
+  select coalesce((select public.is_member(r.workspace_id) from sign_requests r
+    where (r.original_path = path or r.signed_path = path) and r.created_by = auth.uid() and r.files_deleted_at is null), false)
+$$;
+create or replace function public.sign_file_delete_ok(path text) returns boolean
+  language sql stable security definer set search_path = public as $$
+  select coalesce((select public.is_member(r.workspace_id) from sign_requests r
+    where (r.original_path = path or r.signed_path = path) and r.created_by = auth.uid() and r.status <> 'sent'), false)
+$$;
+
+create or replace function public.sign_request_send(req uuid, sha256 text, bytes int, pages int) returns json
+  language plpgsql security definer set search_path = public as $$
+declare r sign_requests := public.sign_mine(req); have boolean := true; s record;
+begin
+  if r.status <> 'draft' then raise exception 'That request has already been sent.'; end if;
+  if coalesce(sha256, '') !~ '^[0-9a-f]{64}$' then raise exception 'The document''s fingerprint is missing. Try again.'; end if;
+  if bytes is null or bytes < 1 or bytes > sign_cfg('sign.max_mb') * 1048576 then raise exception 'The PDF can be up to % MB.', sign_cfg('sign.max_mb')::int; end if;
+  if pages is null or pages < 1 or pages > 500 or exists (select 1 from jsonb_array_elements(r.fields) f where (f ->> 'page')::int > pages) then
+    raise exception 'A field is on a page the PDF doesn''t have.'; end if;
+  if to_regclass('storage.objects') is not null then
+    execute 'select exists (select 1 from storage.objects where bucket_id = ''sign-docs'' and name = $1)' into have using r.original_path;
+  end if;
+  if not have then raise exception 'The PDF hasn''t finished uploading. Try again.'; end if;
+  if sign_used(r.workspace_id) >= sign_cfg('sign.free_per_month') then
+    raise exception 'Your business has sent its % free signing requests this month. More can be sent from the 1st of next month.', sign_cfg('sign.free_per_month')::int;
+  end if;
+  update sign_requests set status = 'sent', sent_at = now(), original_sha256 = sign_request_send.sha256, original_bytes = bytes,
+    pages = sign_request_send.pages, updated_at = now() where id = req;
+  perform sign_log(req, r.workspace_id, null, 'sent', null, null, jsonb_build_object('sha256', sign_request_send.sha256, 'ordered', r.ordered));
+  for s in select id from sign_signers where request_id = req and (not r.ordered or position = 1) order by position loop
+    perform sign_issue(s.id, false);
+  end loop;
+  return json_build_object('id', req, 'status', 'sent', 'quota', public.sign_quota(r.workspace_id));
+end $$;
+
+-- The sender's list: their own requests in this business, newest first (no tokens, no signatures, no addresses).
+create or replace function public.sign_requests_mine(ws uuid) returns json
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  if ws is null or not public.is_member(ws) then raise exception 'You''re not in that business.'; end if;
+  return (select coalesce(json_agg(x order by x.created_at desc), '[]') from (
+    select r.id, r.title, r.status, r.ordered, r.created_at, r.sent_at, r.expires_at, r.finished_at, r.keep_days, r.files_delete_at, r.files_deleted_at,
+      r.pages, r.original_sha256, r.signed_sha256, r.content_sha256, r.signed_path is not null as has_signed, r.updated_at,
+      (select json_agg(json_build_object('position', s.position, 'name', s.name, 'email', s.email, 'status', s.status, 'sent_at', s.sent_at,
+          'viewed_at', s.viewed_at, 'signed_at', s.signed_at, 'declined_at', s.declined_at, 'decline_reason', s.decline_reason,
+          'reminded_at', s.reminded_at) order by s.position) from sign_signers s where s.request_id = r.id) signers
+    from sign_requests r where r.workspace_id = ws and r.created_by = auth.uid() and r.status <> 'draft'
+    order by r.created_at desc limit 200) x);
+end $$;
+create or replace function public.sign_request_history(req uuid) returns json
+  language plpgsql stable security definer set search_path = public as $$
+declare r sign_requests := public.sign_mine(req);
+begin
+  return (select coalesce(json_agg(json_build_object('event', e.event, 'at', e.at, 'signer', s.name, 'ip', e.ip) order by e.id), '[]')
+    from sign_events e left join sign_signers s on s.id = e.signer_id where e.request_id = r.id);
+end $$;
+-- Send a reminder (a fresh link) to everyone still to sign: at most once a day each, 5 times in all.
+create or replace function public.sign_request_remind(req uuid) returns int
+  language plpgsql security definer set search_path = public as $$
+declare r sign_requests := public.sign_mine(req); s record; n int := 0;
+begin
+  if r.status = 'sent' and r.expires_at < now() then perform sign_expire(req); raise exception 'That request has expired.'; end if;
+  if r.status <> 'sent' then raise exception 'Only requests still waiting for signatures can have reminders.'; end if;
+  for s in select id, reminded_at, reminders, sent_at from sign_signers where request_id = req and status in ('sent', 'viewed') order by position loop
+    if s.reminders < 5 and coalesce(s.reminded_at, s.sent_at, now() - interval '2 days') < now() - interval '23 hours' then
+      perform sign_issue(s.id, true); n := n + 1;
+    end if;
+  end loop;
+  if n = 0 then raise exception 'A reminder was sent in the last day. You can send another tomorrow.'; end if;
+  return n;
+end $$;
+create or replace function public.sign_request_cancel(req uuid) returns void
+  language plpgsql security definer set search_path = public as $$
+declare r sign_requests := public.sign_mine(req); s record;
+begin
+  if r.status <> 'sent' then raise exception 'Only requests still waiting for signatures can be cancelled.'; end if;
+  perform sign_finish_req(req, 'cancelled');
+  perform sign_log(req, r.workspace_id, null, 'cancelled', null, null, null);
+  for s in select name, email from sign_signers where request_id = req and status in ('sent', 'viewed', 'signed') loop
+    perform sign_email(req, s.email, 'sign.cancelled', 'A signing request was cancelled',
+      'Hello ' || s.name || E',\n\n' || r.sender_name || ' has cancelled the request to sign "' || r.title || E'". You don''t need to do anything, and the link no longer works.');
+  end loop;
+end $$;
+create or replace function public.sign_request_keep(req uuid, keep int) returns json
+  language plpgsql security definer set search_path = public as $$
+declare r sign_requests := public.sign_mine(req);
+begin
+  if keep not in (30, 90, 365, 730) then raise exception 'Choose 30 days, 90 days, 1 year or 2 years.'; end if;
+  if r.files_deleted_at is not null then raise exception 'The files have already been deleted.'; end if;
+  update sign_requests set keep_days = keep, updated_at = now(),
+    files_delete_at = case when finished_at is not null then finished_at + make_interval(days => keep) end where id = req;
+  perform sign_log(req, r.workspace_id, null, 'keep_changed', null, null, jsonb_build_object('days', keep));
+  return json_build_object('keep_days', keep, 'files_delete_at', (select files_delete_at from sign_requests where id = req));
+end $$;
+-- Where the sender's files are, to download them through Storage (its rules check again).
+create or replace function public.sign_request_file(req uuid) returns json
+  language plpgsql stable security definer set search_path = public as $$
+declare r sign_requests := public.sign_mine(req);
+begin
+  return json_build_object('bucket', 'sign-docs', 'original', case when r.files_deleted_at is null then r.original_path end,
+    'signed', case when r.files_deleted_at is null then r.signed_path end, 'signed_sha256', r.signed_sha256, 'original_sha256', r.original_sha256);
+end $$;
+-- After the sender deleted the files (Delete files now): the signatures go too; the history stays.
+create or replace function public.sign_request_forget(req uuid) returns void
+  language plpgsql security definer set search_path = public as $$
+declare r sign_requests := public.sign_mine(req); left_over boolean := false;
+begin
+  if r.status = 'sent' then raise exception 'Cancel the request first.'; end if;
+  if to_regclass('storage.objects') is not null then
+    execute 'select exists (select 1 from storage.objects where bucket_id = ''sign-docs'' and name in ($1, $2))' into left_over using r.original_path, coalesce(r.signed_path, '-');
+  end if;
+  if left_over then raise exception 'The files are still there. Try Delete files again.'; end if;
+  perform sign_files_gone_one(req);
+end $$;
+create or replace function public.sign_files_gone_one(req uuid) returns void
+  language plpgsql security definer set search_path = public as $$
+declare r sign_requests;
+begin
+  select * into r from sign_requests where id = req for update;
+  if r.id is null or r.files_deleted_at is not null then return; end if;
+  if r.status = 'draft' then delete from sign_requests where id = req; return; end if;
+  update sign_requests set files_deleted_at = now(), updated_at = now() where id = req;
+  update sign_signers set vals = null where request_id = req;
+  perform sign_log(req, r.workspace_id, null, 'files_deleted', null, null, null);
+end $$;
+
+-- ---- the public signing page, through the "sign" Edge Function only (service role)
+-- Rate limits: a counter per key per window; true while under the limit.
+create or replace function public.sign_hit(key text, lim int, secs int) returns boolean
+  language plpgsql security definer set search_path = public as $$
+declare w timestamptz := to_timestamp(floor(extract(epoch from now()) / secs) * secs); c int;
+begin
+  insert into sign_rate (rkey, rwin, hits) values (left(key, 200), w, 1)
+    on conflict (rkey, rwin) do update set hits = sign_rate.hits + 1 returning hits into c;
+  return c <= lim;
+end $$;
+create or replace function public.sign_hits(key text, secs int) returns int
+  language sql stable security definer set search_path = public as $$
+  select coalesce(sum(hits), 0)::int from sign_rate where rkey = left(key, 200) and rwin > now() - make_interval(secs => secs)
+$$;
+create or replace function public.sign_ipkey(ip text) returns text language sql immutable as $$
+  select left(public.sign_hash('sign-ip|' || coalesce(ip, '')), 24)
+$$;
+-- The signer a link belongs to (or null), counting wrong links per address.
+create or replace function public.sign_link(tok_hash text, ip text, copy_ok boolean) returns public.sign_signers
+  language plpgsql security definer set search_path = public as $$
+declare s sign_signers;
+begin
+  if coalesce(tok_hash, '') ~ '^[0-9a-f]{64}$' then
+    select * into s from sign_signers where token_hash = tok_hash or (copy_ok and copy_hash = tok_hash and copy_until > now());
+  end if;
+  if s.id is null then perform sign_hit('bad:' || sign_ipkey(ip), 1000000, 3600); end if;
+  return s;
+end $$;
+create or replace function public.sign_pub_open(tok_hash text, ip text, ip_chain text, ua text) returns jsonb
+  language plpgsql security definer set search_path = public as $$
+declare s sign_signers; r sign_requests; co text; st text; info jsonb;
+begin
+  if sign_hits('bad:' || sign_ipkey(ip), 3600) >= sign_cfg('sign.bad_per_hour') or not sign_hit('open:' || sign_ipkey(ip), sign_cfg('sign.open_per_10min')::int, 600) then
+    return jsonb_build_object('state', 'busy'); end if;
+  s := sign_link(tok_hash, ip, true);
+  if s.id is null then return jsonb_build_object('state', 'unknown'); end if;
+  select * into r from sign_requests where id = s.request_id for update;
+  if r.status = 'sent' and r.expires_at < now() then perform sign_expire(r.id); r.status := 'expired'; end if;
+  co := (select name from workspaces where id = r.workspace_id);
+  st := case when r.status = 'completed' then case when r.files_deleted_at is null and coalesce(s.copy_until, now()) >= now() then 'completed' else 'gone' end
+    when r.status in ('expired', 'cancelled') then r.status
+    when r.status = 'declined' then case when s.status = 'declined' then 'you_declined' else 'declined' end
+    when s.status = 'signed' then case when not exists (select 1 from sign_signers x where x.request_id = r.id and x.status <> 'signed') then 'finishing' else 'signed' end
+    else 'ready' end;
+  if st = 'ready' and s.viewed_at is null then
+    update sign_signers set status = 'viewed', viewed_at = now() where id = s.id;
+    perform sign_log(r.id, r.workspace_id, s.id, 'viewed', ip, ua, case when ip_chain is not null then jsonb_build_object('chain', left(ip_chain, 200)) end);
+  end if;
+  info := jsonb_build_object('state', st, 'request', jsonb_build_object('id', r.id, 'title', r.title, 'sender', r.sender_name, 'company', co,
+    'expires_at', r.expires_at, 'pages', r.pages, 'finished_at', r.finished_at),
+    'signer', jsonb_build_object('name', s.name, 'position', s.position, 'signed_at', s.signed_at));
+  if st = 'ready' then
+    info := info || jsonb_build_object('message', r.message, 'sha256', r.original_sha256,
+      'fields', (select coalesce(jsonb_agg(f), '[]') from jsonb_array_elements(r.fields) f where (f ->> 'signer')::int = s.position),
+      'others', (select count(*) from sign_signers x where x.request_id = r.id and x.id <> s.id));
+  end if;
+  if st = 'finishing' then info := info || jsonb_build_object('_complete', r.id); end if;
+  if st = 'completed' then info := info || jsonb_build_object('signed_sha256', r.signed_sha256); end if;
+  return info;
+end $$;
+-- Which file the page may show for this link: the original while it can be signed, the signed copy once completed.
+create or replace function public.sign_pub_doc(tok_hash text, ip text) returns jsonb
+  language plpgsql security definer set search_path = public as $$
+declare s sign_signers; r sign_requests;
+begin
+  if sign_hits('bad:' || sign_ipkey(ip), 3600) >= sign_cfg('sign.bad_per_hour') or not sign_hit('open:' || sign_ipkey(ip), sign_cfg('sign.open_per_10min')::int, 600) then
+    return jsonb_build_object('state', 'busy'); end if;
+  s := sign_link(tok_hash, ip, true);
+  if s.id is null then return jsonb_build_object('state', 'unknown'); end if;
+  select * into r from sign_requests where id = s.request_id;
+  if r.files_deleted_at is not null then return jsonb_build_object('state', 'gone'); end if;
+  if r.status = 'completed' and r.signed_path is not null and coalesce(s.copy_until, now()) >= now() then
+    return jsonb_build_object('state', 'completed', 'path', r.signed_path, 'sha256', r.signed_sha256, 'name', r.title);
+  end if;
+  if r.status = 'sent' and r.expires_at >= now() and s.token_hash = tok_hash and s.status in ('sent', 'viewed', 'signed') then
+    return jsonb_build_object('state', 'ready', 'path', r.original_path, 'sha256', r.original_sha256, 'name', r.title);
+  end if;
+  return jsonb_build_object('state', 'closed');
+end $$;
+-- Finish: every one of this signer's fields filled in, and "I agree to sign electronically" ticked.
+create or replace function public.sign_do_finish(tok_hash text, ip text, ip_chain text, ua text, vals jsonb, agreed boolean, method text, local_day text) returns jsonb
+  language plpgsql security definer set search_path = public as $$
+declare s sign_signers; r sign_requests; f jsonb; v text; clean jsonb := '{}'::jsonb; nxt uuid; done boolean; d date;
+begin
+  s := sign_link(tok_hash, ip, false);
+  if s.id is null then raise exception 'This link isn''t working. Use the newest email you were sent.'; end if;
+  select * into r from sign_requests where id = s.request_id for update;
+  if r.status = 'sent' and r.expires_at < now() then perform sign_expire(r.id); raise exception 'This request has expired.'; end if;
+  if r.status <> 'sent' then raise exception 'This request is closed, so it can''t be signed now.'; end if;
+  select * into s from sign_signers where id = s.id for update;
+  if s.status = 'signed' then raise exception 'You''ve already signed this document.'; end if;
+  if s.status not in ('sent', 'viewed') then raise exception 'It isn''t your turn to sign yet.'; end if;
+  if agreed is not true then raise exception 'Tick "I agree to sign electronically" first.'; end if;
+  if coalesce(method, '') not in ('drawn', 'typed') then raise exception 'Adopt your signature first.'; end if;
+  if jsonb_typeof(vals) <> 'object' then raise exception 'Fill in every field first.'; end if;
+  begin d := local_day::date; exception when others then d := null; end;
+  if d is null or d not between (now() at time zone 'utc')::date - 1 and (now() at time zone 'utc')::date + 1 then d := (now() at time zone 'utc')::date; end if;
+  for f in select * from jsonb_array_elements(r.fields) x where (x ->> 'signer')::int = s.position loop
+    v := vals ->> (f ->> 'id');
+    if f ->> 'kind' in ('signature', 'initials') then
+      if coalesce(v, '') !~ '^data:image/png;base64,[A-Za-z0-9+/]+=*$' or length(v) > 400000 then raise exception 'Adopt your signature and initials first.'; end if;
+    elsif f ->> 'kind' = 'date' then
+      v := to_char(d, 'FMDD Mon YYYY');
+    else
+      v := trim(coalesce(v, ''));
+      if length(v) not between 1 and 120 or v ~ '[[:cntrl:]]' then raise exception 'Fill in every field first.'; end if;
+    end if;
+    clean := clean || jsonb_build_object(f ->> 'id', v);
+  end loop;
+  update sign_signers set status = 'signed', signed_at = now(), agreed_at = now(), method = sign_do_finish.method, vals = clean,
+    ip = left(sign_do_finish.ip, 45), ip_chain = left(sign_do_finish.ip_chain, 200), user_agent = left(ua, 400) where id = s.id;
+  perform sign_log(r.id, r.workspace_id, s.id, 'signed', ip, ua, jsonb_build_object('method', method, 'agreed', true));
+  if r.ordered then
+    select id into nxt from sign_signers where request_id = r.id and status = 'waiting' order by position limit 1;
+    if nxt is not null then perform sign_issue(nxt, false); end if;
+  end if;
+  done := not exists (select 1 from sign_signers where request_id = r.id and status <> 'signed');
+  update sign_requests set updated_at = now() where id = r.id;
+  return jsonb_build_object('state', case when done then 'finishing' else 'signed' end, '_complete', case when done then r.id end);
+end $$;
+create or replace function public.sign_do_decline(tok_hash text, ip text, ip_chain text, ua text, reason text) returns jsonb
+  language plpgsql security definer set search_path = public as $$
+declare s sign_signers; r sign_requests;
+begin
+  s := sign_link(tok_hash, ip, false);
+  if s.id is null then raise exception 'This link isn''t working. Use the newest email you were sent.'; end if;
+  select * into r from sign_requests where id = s.request_id for update;
+  if r.status = 'sent' and r.expires_at < now() then perform sign_expire(r.id); raise exception 'This request has expired.'; end if;
+  if r.status <> 'sent' or s.status not in ('sent', 'viewed') then raise exception 'This request is closed, so it can''t be declined now.'; end if;
+  reason := trim(coalesce(reason, ''));
+  if length(reason) not between 2 and 500 then raise exception 'Say briefly why you''re declining (up to 500 characters).'; end if;
+  update sign_signers set status = 'declined', declined_at = now(), decline_reason = reason, ip = left(sign_do_decline.ip, 45),
+    ip_chain = left(sign_do_decline.ip_chain, 200), user_agent = left(ua, 400) where id = s.id;
+  perform sign_finish_req(r.id, 'declined');
+  perform sign_log(r.id, r.workspace_id, s.id, 'declined', ip, ua, null);
+  perform sign_email(r.id, (select email::text from auth.users where id = r.created_by), 'sign.declined', 'A signing request was declined',
+    'Hello ' || r.sender_name || E',\n\n' || s.name || ' (' || s.email || ') declined to sign "' || r.title || E'".\n\nTheir reason: ' || reason
+      || E'\n\nThe request is closed. Open Riyeser PDF → Sent for signing to see the details.');
+  return jsonb_build_object('state', 'you_declined');
+end $$;
+-- The page's two actions. The counters are kept even when the action is refused (the refusal comes back as {error}).
+create or replace function public.sign_pub_finish(tok_hash text, ip text, ip_chain text, ua text, vals jsonb, agreed boolean, method text, local_day text) returns jsonb
+  language plpgsql security definer set search_path = public as $$
+begin
+  if sign_hits('bad:' || sign_ipkey(ip), 3600) >= sign_cfg('sign.bad_per_hour') or not sign_hit('act:' || sign_ipkey(ip), sign_cfg('sign.act_per_10min')::int, 600) then
+    return jsonb_build_object('error', 'Too many tries from here. Wait a few minutes and try again.', 'busy', true); end if;
+  begin
+    return sign_do_finish(tok_hash, ip, ip_chain, ua, vals, agreed, method, local_day);
+  exception when others then
+    if sqlerrm like 'This link isn''t working%' then perform sign_hit('bad:' || sign_ipkey(ip), 1000000, 3600); end if;
+    return jsonb_build_object('error', sqlerrm);
+  end;
+end $$;
+create or replace function public.sign_pub_decline(tok_hash text, ip text, ip_chain text, ua text, reason text) returns jsonb
+  language plpgsql security definer set search_path = public as $$
+begin
+  if sign_hits('bad:' || sign_ipkey(ip), 3600) >= sign_cfg('sign.bad_per_hour') or not sign_hit('act:' || sign_ipkey(ip), sign_cfg('sign.act_per_10min')::int, 600) then
+    return jsonb_build_object('error', 'Too many tries from here. Wait a few minutes and try again.', 'busy', true); end if;
+  begin
+    return sign_do_decline(tok_hash, ip, ip_chain, ua, reason);
+  exception when others then
+    if sqlerrm like 'This link isn''t working%' then perform sign_hit('bad:' || sign_ipkey(ip), 1000000, 3600); end if;
+    return jsonb_build_object('error', sqlerrm);
+  end;
+end $$;
+-- Everything the certificate needs, once everyone has signed (and the claim, so only one copy is made at a time).
+create or replace function public.sign_pub_claim(req uuid) returns jsonb
+  language plpgsql security definer set search_path = public as $$
+declare r sign_requests;
+begin
+  update sign_requests set completing_at = now() where id = req and status = 'sent'
+    and (completing_at is null or completing_at < now() - interval '5 minutes')
+    and not exists (select 1 from sign_signers s where s.request_id = req and s.status <> 'signed')
+  returning * into r;
+  if r.id is null then return null; end if;
+  return jsonb_build_object('id', r.id, 'workspace_id', r.workspace_id, 'title', r.title, 'company', (select name from workspaces where id = r.workspace_id),
+    'sender', r.sender_name, 'sender_email', (select email::text from auth.users where id = r.created_by), 'created_at', r.created_at, 'sent_at', r.sent_at,
+    'original_path', r.original_path, 'original_sha256', r.original_sha256, 'pages', r.pages, 'fields', r.fields, 'ordered', r.ordered,
+    'signers', (select jsonb_agg(jsonb_build_object('position', s.position, 'name', s.name, 'email', s.email, 'sent_at', s.sent_at, 'viewed_at', s.viewed_at,
+        'signed_at', s.signed_at, 'agreed_at', s.agreed_at, 'method', s.method, 'ip', s.ip, 'user_agent', s.user_agent, 'vals', s.vals) order by s.position)
+      from sign_signers s where s.request_id = r.id),
+    'events', (select jsonb_agg(jsonb_build_object('event', e.event, 'at', e.at, 'signer', x.position, 'ip', e.ip) order by e.id)
+      from sign_events e left join sign_signers x on x.id = e.signer_id where e.request_id = r.id));
+end $$;
+create or replace function public.sign_pub_complete(req uuid, path text, sha256 text, content_sha256 text) returns jsonb
+  language plpgsql security definer set search_path = public as $$
+declare r sign_requests; s record; tok text; days int := sign_cfg('sign.copy_days')::int;
+begin
+  select * into r from sign_requests where id = req for update;
+  if r.id is null or r.status <> 'sent' or exists (select 1 from sign_signers x where x.request_id = req and x.status <> 'signed') then
+    return jsonb_build_object('state', coalesce(r.status, 'unknown')); end if;
+  if coalesce(sha256, '') !~ '^[0-9a-f]{64}$' or coalesce(content_sha256, '') !~ '^[0-9a-f]{64}$' or path <> r.workspace_id::text || '/' || r.id::text || '/signed.pdf' then
+    raise exception 'That signed copy isn''t right.'; end if;
+  update sign_requests set signed_path = path, signed_sha256 = sign_pub_complete.sha256, content_sha256 = sign_pub_complete.content_sha256 where id = req;
+  perform sign_finish_req(req, 'completed');
+  perform sign_log(req, r.workspace_id, null, 'completed', null, null, jsonb_build_object('sha256', sha256, 'content_sha256', content_sha256));
+  for s in select id, name, email from sign_signers where request_id = req order by position loop
+    tok := replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', '');
+    update sign_signers set copy_hash = sign_hash(tok), copy_until = now() + make_interval(days => days) where id = s.id;
+    perform sign_email(req, s.email, 'sign.completed', 'Everyone has signed: your copy is ready',
+      'Hello ' || s.name || E',\n\nEveryone has signed "' || r.title || E'". Download your copy, with its certificate of completion, here (the link works for '
+        || days || E' days):\nhttps://riyeser.com/sign/?t=' || tok || E'\n\nThe signed file''s SHA-256 fingerprint: ' || sign_pub_complete.sha256
+        || E'\n\nThis is an electronic signature with an audit trail, sent through Riyeser for ' || r.sender_name || '.');
+  end loop;
+  perform sign_email(req, (select email::text from auth.users where id = r.created_by), 'sign.completed', 'Everyone has signed your document',
+    'Hello ' || r.sender_name || E',\n\nEveryone has signed "' || r.title || E'". Open Riyeser PDF → Sent for signing to download the signed copy with its certificate of completion.'
+      || E'\n\nThe signed file''s SHA-256 fingerprint: ' || sign_pub_complete.sha256
+      || E'\n\nThe files are kept until ' || sign_day(now() + make_interval(days => r.keep_days)) || ', then deleted. You can change that in Riyeser PDF.');
+  return jsonb_build_object('state', 'completed');
+end $$;
+-- Clean-up for the function: files whose time is up (finished requests after keep_days, unsent drafts after 2 days).
+create or replace function public.sign_pub_files_due(lim int) returns jsonb
+  language plpgsql security definer set search_path = public as $$
+declare res jsonb;
+begin
+  with due as (
+    select id from sign_requests where files_deleted_at is null and (files_sweep_at is null or files_sweep_at < now() - interval '1 hour')
+      and ((status not in ('draft', 'sent') and files_delete_at < now()) or (status = 'draft' and created_at < now() - interval '2 days'))
+    order by coalesce(files_delete_at, created_at) limit least(greatest(coalesce(lim, 20), 1), 100) for update skip locked),
+  upd as (update sign_requests r set files_sweep_at = now() from due where r.id = due.id returning r.id, r.original_path, r.signed_path)
+  select coalesce(jsonb_agg(jsonb_build_object('id', id, 'paths', to_jsonb(array_remove(array[original_path, signed_path], null)))), '[]') into res from upd;
+  return res;
+end $$;
+create or replace function public.sign_pub_files_gone(ids uuid[]) returns int
+  language plpgsql security definer set search_path = public as $$
+declare i uuid; n int := 0;
+begin
+  foreach i in array coalesce(ids, '{}') loop perform sign_files_gone_one(i); n := n + 1; end loop;
+  return n;
+end $$;
+-- The hourly job (HQ jobs): expire requests past their end date, take the links out of sent emails of finished
+-- requests, and forget old rate-limit counters.
+create or replace function public.sign_sweep() returns jsonb
+  language plpgsql security definer set search_path = public as $$
+declare r record; n_exp int := 0; n_scrub int; n_rate int;
+begin
+  for r in select id from sign_requests where status = 'sent' and expires_at < now() loop perform sign_expire(r.id); n_exp := n_exp + 1; end loop;
+  update email_outbox o set body_text = regexp_replace(body_text, 'https://riyeser\.com/sign/\?t=[0-9a-f]+', '[link no longer needed]', 'g'),
+      body_html = regexp_replace(body_html, 'https://riyeser\.com/sign/\?t=[0-9a-f]+', '[link no longer needed]', 'g')
+    from sign_requests x where o.sign_request_id = x.id and o.status <> 'queued' and o.body_text ~ 'riyeser\.com/sign/\?t='
+      and (x.files_deleted_at is not null or (x.status in ('declined', 'cancelled', 'expired')) or (x.status = 'completed' and o.template <> 'sign.completed')
+           or (o.template = 'sign.completed' and x.finished_at < now() - make_interval(days => sign_cfg('sign.copy_days')::int)));
+  get diagnostics n_scrub = row_count;
+  delete from sign_rate where rwin < now() - interval '1 day';
+  get diagnostics n_rate = row_count;
+  return jsonb_build_object('expired', n_exp, 'links_removed', n_scrub, 'rate_rows_removed', n_rate);
+end $$;
+
+revoke all on function public.sign_cfg(text), public.sign_settings(), public.sign_used(uuid), public.sign_quota(uuid),
+  public.sign_log(uuid, uuid, uuid, text, text, text, jsonb), public.sign_email(uuid, text, text, text, text), public.sign_issue(uuid, boolean),
+  public.sign_mine(uuid), public.sign_finish_req(uuid, text), public.sign_expire(uuid),
+  public.sign_request_create(uuid, text, text, boolean, timestamptz, int, jsonb, jsonb), public.sign_upload_ok(text), public.sign_file_ok(text),
+  public.sign_file_delete_ok(text), public.sign_request_send(uuid, text, int, int), public.sign_requests_mine(uuid), public.sign_request_history(uuid),
+  public.sign_request_remind(uuid), public.sign_request_cancel(uuid), public.sign_request_keep(uuid, int), public.sign_request_file(uuid),
+  public.sign_request_forget(uuid), public.sign_files_gone_one(uuid), public.sign_hit(text, int, int), public.sign_hits(text, int),
+  public.sign_link(text, text, boolean), public.sign_pub_open(text, text, text, text), public.sign_pub_doc(text, text),
+  public.sign_pub_finish(text, text, text, text, jsonb, boolean, text, text), public.sign_pub_decline(text, text, text, text, text),
+  public.sign_do_finish(text, text, text, text, jsonb, boolean, text, text), public.sign_do_decline(text, text, text, text, text),
+  public.sign_pub_claim(uuid), public.sign_pub_complete(uuid, text, text, text), public.sign_pub_files_due(int), public.sign_pub_files_gone(uuid[]),
+  public.sign_sweep() from public, anon, authenticated;
+-- the sender's side (each checks the sender itself)
+grant execute on function public.sign_settings(), public.sign_quota(uuid), public.sign_request_create(uuid, text, text, boolean, timestamptz, int, jsonb, jsonb),
+  public.sign_upload_ok(text), public.sign_file_ok(text), public.sign_file_delete_ok(text), public.sign_request_send(uuid, text, int, int),
+  public.sign_requests_mine(uuid), public.sign_request_history(uuid), public.sign_request_remind(uuid), public.sign_request_cancel(uuid),
+  public.sign_request_keep(uuid, int), public.sign_request_file(uuid), public.sign_request_forget(uuid) to authenticated;
+-- the public page's side: only the Edge Function (service role)
+grant execute on function public.sign_pub_open(text, text, text, text), public.sign_pub_doc(text, text),
+  public.sign_pub_finish(text, text, text, text, jsonb, boolean, text, text), public.sign_pub_decline(text, text, text, text, text),
+  public.sign_pub_claim(uuid), public.sign_pub_complete(uuid, text, text, text), public.sign_pub_files_due(int), public.sign_pub_files_gone(uuid[]),
+  public.sign_sweep() to service_role;
+
+-- The private bucket and its rules (only where Supabase Storage is there; it always is on Supabase).
+do $$ begin
+  if exists (select 1 from information_schema.tables where table_schema = 'storage' and table_name = 'objects')
+     and exists (select 1 from information_schema.tables where table_schema = 'storage' and table_name = 'buckets') then
+    insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types) values ('sign-docs', 'sign-docs', false, 20971520, array['application/pdf'])
+      on conflict (id) do update set public = false, file_size_limit = 20971520, allowed_mime_types = array['application/pdf'];
+    execute 'drop policy if exists sign_docs_read on storage.objects';
+    execute 'create policy sign_docs_read on storage.objects for select to authenticated using (bucket_id = ''sign-docs'' and public.sign_file_ok(name))';
+    execute 'drop policy if exists sign_docs_add on storage.objects';
+    execute 'create policy sign_docs_add on storage.objects for insert to authenticated with check (bucket_id = ''sign-docs'' and public.sign_upload_ok(name))';
+    execute 'drop policy if exists sign_docs_delete on storage.objects';
+    execute 'create policy sign_docs_delete on storage.objects for delete to authenticated using (bucket_id = ''sign-docs'' and public.sign_file_delete_ok(name))';
+  end if;
+end $$;

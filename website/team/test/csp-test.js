@@ -1,6 +1,7 @@
 // The website's Content-Security-Policy (a <meta> on every page built by build.mjs): nothing on the pages is refused,
 // and what they do still works: the phone menu, the price calculator and its Buy links, the Help Centre search,
-// "Sign in" to Riyeser Link, fonts and images, the hosted booking page (/book/); an injected inline script is refused.
+// "Sign in" to Riyeser Link, fonts and images, the hosted booking page (/book/), the signing page (/sign/); an injected inline script
+// is refused.
 // Run: build the site, serve website/public on 8090 (or LINK_BASE), then `node website/team/test/csp-test.js`. Exits 1 on failure.
 const { chromium } = require('playwright');
 const BASE = process.env.LINK_BASE || 'http://127.0.0.1:8090';
@@ -18,7 +19,7 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
     pg.refused = async () => [...refused, ...(await pg.evaluate(() => window.__csp))];
     return pg;
   };
-  const pages = ['/index.html', '/pricing.html', '/programs.html', '/downloads.html', '/help.html', '/help/link.html', '/programs/payroll.html', '/programs/link-office.html', '/help/link-office.html', '/terms.html', '/developers/', '/developers/api.html', '/developers/widget.html', '/book/?b=demo', '/404.html'];
+  const pages = ['/index.html', '/pricing.html', '/programs.html', '/downloads.html', '/help.html', '/help/link.html', '/programs/payroll.html', '/programs/link-office.html', '/help/link-office.html', '/terms.html', '/developers/', '/developers/api.html', '/developers/widget.html', '/book/?b=demo', '/sign/', '/404.html'];
   for (const path of pages) {
     const pg = await open(path);
     const meta = await pg.$eval('meta[http-equiv="Content-Security-Policy"]', (m) => m.content).catch(() => '');
