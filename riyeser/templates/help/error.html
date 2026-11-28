@@ -1,4 +1,5 @@
 <!doctype html><html><head><meta charset="utf-8"><title>Something went wrong · Riyeser</title><link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}"></head>
 <body><div class="login"><h1>Sorry, something went wrong</h1>
 <p>Nothing was saved from that last step. The problem has been recorded so support can see it.</p>
+{% if ref %}<p class="muted">Reference {{ ref }}. Support can find it under Setup → Support diagnostics.</p>{% endif %}
 <p><a class="btn pri" href="{{ url_for('core.dashboard') }}">Back to the dashboard</a> <a class="btn" href="{{ url_for('help.diagnostics_view') }}">Support Diagnostics</a></p></div></body></html>

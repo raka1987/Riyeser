@@ -238,6 +238,8 @@ def payrun(rid):
     db = get_db()
     r = db.execute("SELECT r.*, e.voided FROM payruns r LEFT JOIN journal_entries e ON e.id=r.entry_id"
                    " WHERE r.id=?", (rid,)).fetchone()
+    if r is None:
+        abort(404)
     slips = db.execute("SELECT s.*, e.first_name, e.last_name FROM payslips s JOIN employees e ON e.id=s.employee_id"
                        " WHERE s.payrun_id=? ORDER BY e.last_name", (rid,)).fetchall()
     return render_template("payroll/payrun.html", r=r, slips=slips)
@@ -249,6 +251,8 @@ def payslip(sid):
     s = db.execute("SELECT s.*, e.*, s.id sid, r.pay_date, r.period_start, r.period_end FROM payslips s"
                    " JOIN employees e ON e.id=s.employee_id JOIN payruns r ON r.id=s.payrun_id WHERE s.id=?",
                    (sid,)).fetchone()
+    if s is None:
+        abort(404)
     ytd = db.execute("SELECT SUM(gross) g, SUM(tax) t, SUM(super) s, SUM(net) n FROM payslips p"
                      " JOIN payruns r ON r.id=p.payrun_id JOIN journal_entries je ON je.id=r.entry_id"
                      " WHERE p.employee_id=? AND r.pay_date<=? AND je.voided=0",

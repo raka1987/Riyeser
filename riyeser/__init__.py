@@ -283,20 +283,51 @@ def create_app(test_config=None):
 
     @app.errorhandler(500)
     def server_error(e):
-        """Record the error (for diagnostics / support) and show a friendly page."""
+        """Record the error (for diagnostics / support) and show a friendly page with a reference. It goes in the
+        company file's audit log (Support Diagnostics → Recent errors) and, with where in the code it happened, in
+        riyeser-errors.log next to the company file (a desktop build has no console to print it to)."""
+        import secrets
         err = getattr(e, "original_exception", e)
+        ref = "ER-" + secrets.token_hex(3).upper()
         try:
             db = get_db()
             db.rollback()
             db.execute("INSERT INTO audit_log (user_id, action, details) VALUES (?,?,?)",
                        (g.user["id"] if g.get("user") else None, "error",
-                        f"{request.method} {request.path}: {type(err).__name__}: {err}"[:500]))
+                        f"{ref} {request.method} {request.path}: {type(err).__name__}: {err}"[:500]))
             db.commit()
         except Exception:
             pass
-        app.logger.error("".join(traceback.format_exception(err)))
-        return render_template("help/error.html"), 500
+        text = "".join(traceback.format_exception(type(err), err, err.__traceback__))
+        app.logger.error(text)
+        write_error_log(app, ref, f"{request.method} {request.path}", err, text)
+        return render_template("help/error.html", ref=ref), 500
     return app
+
+
+def error_log_file(app):
+    """riyeser-errors.log in the company file's folder (%USERPROFILE%\\.riyeser on Windows unless moved)."""
+    return os.path.join(os.path.dirname(os.path.abspath(app.config["DATABASE"])), "riyeser-errors.log")
+
+
+def write_error_log(app, ref, where, err, text):
+    """One entry per error page: when, the reference shown on the page, the program and version, and the last lines
+    of the traceback (file names and line numbers only: no customer details). Kept under 512 KB (one old copy)."""
+    from datetime import datetime
+    import platform
+    import sys
+    try:
+        f = error_log_file(app)
+        if os.path.exists(f) and os.path.getsize(f) > 512 * 1024:
+            os.replace(f, f + ".1")
+        from .edition import app_product
+        tail = "\n".join(text.rstrip().splitlines()[-14:])
+        with open(f, "a", encoding="utf-8") as fh:
+            fh.write(f"{datetime.now():%Y-%m-%d %H:%M:%S} {ref} {app_product() or 'source'} {__version__} "
+                     f"({platform.system()} {platform.release()}, Python {platform.python_version()}, "
+                     f"optimize={sys.flags.optimize}) {where}: {type(err).__name__}: {str(err)[:300]}\n{tail}\n\n")
+    except Exception:
+        pass   # the page must still show
 
 
 # Riyeser POS is the till plus what a shop needs to run it: products and stock, customers, users, help.

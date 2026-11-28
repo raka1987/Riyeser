@@ -14,7 +14,7 @@
 ;   ISCC /DEdition=plus   /DAppVersion=2.0.0 packaging\installer.iss -> dist\RiyeserAccountingPlus-Setup-2.0.0.exe
 ;   ISCC /DEdition=pos    /DAppVersion=2.3.0 packaging\installer.iss -> dist\RiyeserPOS-Setup-2.3.0.exe
 ;   ISCC /DEdition=invoices /DAppVersion=2.4.0 packaging\installer.iss -> dist\RiyeserInvoices-Setup-2.4.0.exe
-;   ISCC /DEdition=estimate /DAppVersion=2.11.0 packaging\installer.iss -> dist\RiyeserEstimate-Setup-2.11.0.exe
+;   ISCC /DEdition=estimate /DAppVersion=2.11.1 packaging\installer.iss -> dist\RiyeserEstimate-Setup-2.11.1.exe
 ;
 ; Riyeser Invoices (free), Riyeser Bookings and Riyeser Estimate also install NEXT TO Accounting and open the same
 ; company files.
