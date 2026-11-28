@@ -1335,3 +1335,9 @@ section.conn { padding: 0; scroll-margin-top: 76px; }
 .hfloat small { color: #56627e; }
 .cn-bk span, .cn-bk.one span { color: #3f4a5c; }
 .cmod .users.sm { opacity: .7; } .cmod .users.sm .ul, .cmod .users.sm input { color: #2c3a5a; }
+@media (max-width: 640px) {
+  .ptable.stack td > .st, .ptable.stack td > .yn { justify-self: start; }
+  .cats { grid-template-columns: 1fr 1fr; gap: 10px; } .cat { padding: 12px 10px 6px; } .cat p { display: none; } .cat h3 { font-size: 16px; }
+  .cat li a { gap: 8px; padding: 4px 2px; font-size: 14.5px; } .cat .ci { width: 26px; height: 26px; }
+  .cats-sec { padding-top: 40px; }
+}

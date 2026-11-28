@@ -997,7 +997,7 @@ ${MBAR}`,
 // ---------- all programs ----------
 page({
   path: 'programs.html', title: 'All programs — Riyeser', active: 'programs',
-  description: `Every Riyeser program: Central, Invoices, Bookings, Riyeser Link, Riyeser Link Office, Accounting Basics, Accounting Plus, Payroll, Riyeser Documents${ASBUILT ? ', PDF and As Built' : ' and PDF'}.`,
+  description: `All ${PROGRAMS.length} Riyeser programs for small businesses: accounting, invoicing, point of sale, bookings, estimating, payroll, team chat, phones, documents and PDF.`,
   body: (up) => `${bandHero({ eyebrow: 'Programs', title: 'All programs', lead: 'A complete range of Riyeser programs to run and support your business. Start with Riyeser Central and add what you need.' })}
 <section class="c blk first">${progGrid(PROGRAMS.filter((p) => p.id !== 'services'), up, (t) => `<div class="shead small"><h2>${esc(t)}</h2></div>`)}</section>
 ${ASBUILT ? `<section class="c blk">${shead('For the building industry', 'A separate program for trades and construction, priced on its own.')}<div class="grid pgrid">${progCard(prog('services'), up)}</div></section>` : ''}
@@ -1036,7 +1036,7 @@ for (const p of PROGRAMS.filter((x) => !x.custom)) {
     path: `programs/${p.id}.html`, title: SEO_TITLE[p.id] || `${p.name} — ${p.pitch}`, active: 'programs',
     description: `${p.name}: ${p.one}`,
     ogImage: SHOTS[p.id] ? `assets/shots/${SHOTS[p.id][0][0]}.webp` : p.shot ? `assets/${p.shot}` : undefined,
-    jsonld: [appLd(p), crumbs([['Home', ''], ['Programs', 'programs.html'], [p.name, `programs/${p.id}.html`]])],
+    jsonld: [ORG, appLd(p), crumbs([['Home', ''], ['Programs', 'programs.html'], [p.name, `programs/${p.id}.html`]])],
     body: (up) => `
 <div class="hero phero"><div class="c">
   <div>
@@ -1537,7 +1537,7 @@ box.addEventListener('keydown',function(e){if(e.key==='Enter'){var a=out.querySe
 
   page({
     path: 'help.html', title: 'Help Centre — Riyeser', active: 'help',
-    description: `Step-by-step help for every Riyeser program: Central, Accounting Basics, Accounting Plus, Payroll, Riyeser Documents${ASBUILT ? ', PDF and As Built' : ' and PDF'}.`,
+    description: 'Step-by-step help for every Riyeser program, from accounting and point of sale to payroll, Riyeser Link and connecting your website.',
     body: (up) => {
       const G = guides(up);
       const popular = G.flatMap((g) => g.groups.flatMap((grp) => grp.items.filter((it) => it[3]).map((it) => [g, it]))).filter((_, i) => i % 2 === 0).slice(0, 8);

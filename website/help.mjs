@@ -281,7 +281,7 @@ export function helpGuides({ EMAIL, SERVICES_APP, up }) {
         ] },
         { title: 'Payroll in Accounting', items: [
           ['payroll-import', 'Bring in pay runs from Riyeser Payroll', '<p>Finished pay runs from Riyeser Payroll appear under <b>Banking → Import from Riyeser Payroll</b>. Import each one to record the wages, tax and employer contributions in your books. When the pay run had a published roster, an <b>Hours</b> line shows rostered hours, paid hours and the difference; open it to see each person.</p>', true],
-          ['payroll-builtin', 'Pay staff inside Accounting Plus', `<p>Add employees under <b>Payroll → Employees &amp; pay runs</b>, then click <b>Payroll → Run payroll</b>.</p>${warn('Tax withheld is an estimate using Australian 2024-25 rates. Check it before you lodge.')}`],
+          ['payroll-builtin', 'Pay staff inside Accounting Plus', `<p>Add employees under <b>Payroll → Employees &amp; pay runs</b>, then click <b>Payroll → Run payroll</b>.</p>${warn('Not for real pay runs yet: tax withheld is an estimate using Australian 2024-25 rates (not the ATO\'s tax tables), and Single Touch Payroll reporting isn\'t included. Check every amount with the ATO\'s tax withheld calculator before paying anyone.')}`],
         ] },
         { title: 'GST, BAS and reports', items: [
           ['bas', 'Get my BAS figures', '<p>Click <b>Reports → BAS / GST</b>. It shows G1, 1A, 1B, W1, W2 and the other BAS boxes for the dates you choose.</p>', true],
