@@ -70,6 +70,27 @@ def _read(path):
         return {}
 
 
+def _demo():
+    """Demo mode (Riyeser Central's demo.json): the trial is never started, moved or recorded."""
+    try:
+        from .demo_mode import demo_on
+        return demo_on()
+    except Exception:  # pragma: no cover
+        return False
+
+
+def _suite_trial(riyeser_dir, now, path, start_now=True, write=True):
+    """The shared trial: the earliest of licence.json, the markers and trial_guard.py's places (registry, company files,
+    Riyeser online's PC record), counted from the latest time seen. Kept everywhere (never in demo mode)."""
+    from . import signed_licence as S
+    from . import trial_guard as G
+    w = write and not _demo()
+    t = S.local_trial(riyeser_dir, own_dir(), now, write=w, start_now=start_now, lic_file=path, extra=G.extra_for(riyeser_dir, "suite"))
+    if t and w:
+        G.record(riyeser_dir, "suite", start=t["start"], latest=t["seen"], now=S._now_s(now))
+    return t
+
+
 def own_dir():
     """Accounting's own data folder (RIYESER_HOME, else ~/.riyeser, as riyeser/cli.py): a second place the first-run
     date and the latest time seen are kept (signed_licence.py), so deleting licence.json doesn't start a new trial."""
@@ -131,11 +152,11 @@ def status(now=None, path=None, product=_AUTO):
             # no licence: a PC that has had a real plan from Riyeser gets no new local trial
             if first_use:
                 t = first_use_status(module, now, riyeser_dir)
-                if t["mode"] == "trial" and not S.local_trial(riyeser_dir, own_dir(), now, write=False, lic_file=path)["linked"]:
+                if t["mode"] == "trial" and not _suite_trial(riyeser_dir, now, path, write=False)["linked"]:
                     return dict(t, message=ev["message"], source="local")
                 return {"mode": "expired", "untrusted": ev["problem"], "message": ev["message"], "buy_url": BUY_URL,
                         "extra_companies": 0, "module": module, "source": "online"}
-            t = S.local_trial(riyeser_dir, own_dir(), now, lic_file=path)
+            t = _suite_trial(riyeser_dir, now, path)
             if not t["linked"] and t["active"]:
                 return {"mode": "trial", "days_left": t["days_left"], "buy_url": BUY_URL, "message": ev["message"], "source": "local"}
             return {"mode": "expired", "untrusted": ev["problem"], "message": ev["message"], "buy_url": BUY_URL, "extra_companies": 0,
@@ -153,7 +174,7 @@ def status(now=None, path=None, product=_AUTO):
         return first_use_status(module, now, riyeser_dir)
     # The trial: the earlier of licence.json's trialStart and this app's own marker. Before licences are signed, a PC
     # where Riyeser Central never started one shows nothing, as before; after, the trial starts now.
-    t = S.local_trial(riyeser_dir, own_dir(), now, start_now=bool(S.built_in_key()), lic_file=path)
+    t = _suite_trial(riyeser_dir, now, path, start_now=bool(S.built_in_key()))
     if not t:
         return {"mode": "unknown"}
     if t["active"]:
@@ -196,6 +217,7 @@ def first_use_status(module, now=None, riyeser_dir=None):
     Kept in two places (this program's own folder and the Riyeser folder): the earliest start and the latest time seen
     count, so deleting one file or putting the clock back gives no days back. Not started yet: 90 days left."""
     import math
+    from . import trial_guard as G
     now = now or datetime.now(timezone.utc)
     t = now.timestamp()
     starts, seen = [], [t]
@@ -206,18 +228,28 @@ def first_use_status(module, now=None, riyeser_dir=None):
             starts.append(s.timestamp())
         if isinstance(l, (int, float)):
             seen.append(float(l))
+    # the registry, company files and Riyeser online's PC record (trial_guard.py): the earliest start, the latest time seen
+    ex = G.sources(riyeser_dir or os.path.dirname(licence_file()), module) if module in G.PROGRAMS else {}
+    starts += [x for x in (ex.get("registry"), ex.get("company_file"), ex.get("online")) if x is not None]
+    if ex.get("latest"):
+        seen.append(ex["latest"])
     if not starts:
         return {"mode": "trial", "days_left": TRIAL_DAYS, "buy_url": BUY_URL, "started": False}
-    ends = min(starts) + TRIAL_DAYS * 86400
+    ends = min(starts) + (TRIAL_DAYS + int(ex.get("extra_days") or 0)) * 86400
     latest = max(seen)
     if latest < ends:
-        return {"mode": "trial", "days_left": max(0, math.ceil((ends - latest) / 86400)), "buy_url": BUY_URL, "started": True}
-    return {"mode": "expired", "buy_url": BUY_URL, "started": True}
+        return {"mode": "trial", "days_left": max(0, math.ceil((ends - latest) / 86400)), "buy_url": BUY_URL, "started": True,
+                "start": min(starts)}
+    return {"mode": "expired", "buy_url": BUY_URL, "started": True, "start": min(starts)}
 
 
 def start_first_use(module, now=None, riyeser_dir=None):
-    """The program is being used: start its trial on this PC if it hasn't started (and note the latest time seen)."""
+    """The program is being used: start its trial on this PC if it hasn't started (and note the latest time seen).
+    Demo mode: nothing is started or written."""
+    from . import trial_guard as G
     now = now or datetime.now(timezone.utc)
+    if _demo():
+        return first_use_status(module, now, riyeser_dir)
     t = now.timestamp()
     found = []
     dirs = _first_use_dirs(riyeser_dir)
@@ -225,6 +257,9 @@ def start_first_use(module, now=None, riyeser_dir=None):
         d = _read(_trial_marker(x, module))
         found.append(d)
     starts = [s.timestamp() for s in (_when(d.get("firstUse")) for d in found) if s]
+    known = first_use_status(module, now, riyeser_dir)   # includes the registry, company files and Riyeser online
+    if known.get("start") is not None:
+        starts.append(known["start"])
     start = min(starts + [t])
     latest = max([t] + [float(d["latest"]) for d in found if isinstance(d.get("latest"), (int, float))])
     data = {"module": module, "firstUse": datetime.fromtimestamp(start, timezone.utc).isoformat(), "latest": latest}
@@ -240,4 +275,6 @@ def start_first_use(module, now=None, riyeser_dir=None):
             os.replace(tmp, f)
         except OSError:
             pass
+    if module in G.PROGRAMS:
+        G.record(riyeser_dir or os.path.dirname(licence_file()), module, start=start, latest=latest, now=t)
     return first_use_status(module, now, riyeser_dir)
