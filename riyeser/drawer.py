@@ -192,6 +192,12 @@ def money(cents):
     return f"{sign}${cents // 100:,}.{cents % 100:02d}"
 
 
+def _wrap(text, width):
+    """A header or footer line broken at spaces to fit the paper (never cut off); at most 3 lines."""
+    import textwrap
+    return (textwrap.wrap(str(text or ""), max(width, 1), break_long_words=True) or [""])[:3]
+
+
 def receipt_bytes(r, kick=False, width=WIDTH):
     """An ESC/POS receipt from a plain dict: company, number, date, lines [(qty, description, amount)], total, tax,
     tax_name, tenders [(label, amount)], change, footer. kick: the drawer pulse first, so the drawer opens as the
@@ -199,9 +205,9 @@ def receipt_bytes(r, kick=False, width=WIDTH):
     b = bytearray()
     if kick:
         b += PULSE
-    b += INIT + CENTRE + BOLD_ON + DOUBLE + _enc(r.get("company", "")[:width // 2]) + b"\n" + NORMAL + BOLD_OFF
+    b += INIT + CENTRE + BOLD_ON + DOUBLE + _enc("\n".join(_wrap(r.get("company", ""), width // 2))) + b"\n" + NORMAL + BOLD_OFF
     for line in r.get("header", []):
-        b += _enc(line[:width]) + b"\n"
+        b += _enc("\n".join(_wrap(line, width))) + b"\n"
     b += LEFT + _enc("-" * width + "\n")
     b += _enc(_row(f"Receipt {r.get('number', '')}", r.get("date", ""), width))
     if r.get("label"):
@@ -218,6 +224,6 @@ def receipt_bytes(r, kick=False, width=WIDTH):
         b += _enc(_row("Change", money(r["change"]), width))
     b += _enc("-" * width + "\n") + CENTRE
     for line in r.get("footer", ["Thank you!"]):
-        b += _enc(line[:width] + "\n")
+        b += _enc("\n".join(_wrap(line, width)) + "\n")
     b += _enc(datetime.now().strftime("%d/%m/%Y %H:%M") + "\n") + LEFT + CUT
     return bytes(b)

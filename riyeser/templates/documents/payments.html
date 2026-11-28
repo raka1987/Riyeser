@@ -6,7 +6,7 @@
 {{ ls.bar(lst) }}
 <div class="tbl"><table><tr>{{ ls.th(lst, 'date') }}{{ ls.th(lst, 'cname') }}{{ ls.th(lst, 'bank') }}{{ ls.th(lst, 'reference') }}{{ ls.th(lst, 'memo') }}{{ ls.th(lst, 'amount', cls='n') }}<th></th></tr>
 {% for p in rows %}<tr style="{{ 'background:#f0faf8' if p.id==hl }}"><td>{{ p.date }}</td><td>{{ p.cname }}</td><td>{{ p.bank }}</td><td>{{ p.reference or '' }}</td><td>{{ p.memo or '' }}</td><td class="n">{{ p.amount|money }}</td>
-<td>{% if p.voided %}<span class="badge void">void</span>{% else %}<a class="btn sm" href="{{ url_for('core.entry', eid=p.entry_id) }}">Journal</a>
+<td>{% if p.voided %}<span class="badge void">void</span>{% else %}{% if side == 'sale' %}<a data-inapp class="btn sm" href="{{ url_for('documents.payment_receipt', pid=p.id) }}">Receipt</a> {% endif %}<a class="btn sm" href="{{ url_for('core.entry', eid=p.entry_id) }}">Journal</a>
 <form method="post" class="inline" action="{{ url_for('documents.payment_void', pid=p.id) }}" data-confirm="Void this payment? Invoices/bills will re-open."><button class="btn sm danger">Void</button></form>{% endif %}</td></tr>
 {% else %}<tr><td colspan="7" class="muted">{{ 'Nothing matches these filters.' if lst.filtered else 'No payments yet.' }}</td></tr>{% endfor %}
 {% if rows %}<tr class="grand"><td colspan="5">{{ lst.shown }} payment{{ '' if lst.shown == 1 else 's' }} (voided ones not added in)</td><td class="n">{{ paid|money }}</td><td></td></tr>{% endif %}</table></div>

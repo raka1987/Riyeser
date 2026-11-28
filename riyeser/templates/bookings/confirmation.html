@@ -1,0 +1,12 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Booking confirmation · {{ b.cname or c.what }}</title><link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}"></head>
+<body><div class="doc-print">
+{% import "_brand.html" as brand %}{{ brand.letterhead('Booking confirmation', 'B-%04d'|format(b.id), [('Booked', b.created_at[:10]|ddate if b.created_at else '')]) }}
+<p><span class="muted">For</span><br><b>{{ b.cname or b.title or '' }}</b></p>
+<table class="totals" style="max-width:520px"><tr><td class="muted">{{ m.what }}</td><td><b>{{ c.what }}</b></td></tr>
+<tr><td class="muted">When</td><td><b>{{ c.when.strftime('%A %d %B %Y') }}</b> at <b>{{ c.when.strftime('%H:%M') }}</b> ({{ b.minutes }} minutes)</td></tr>
+{% if b.resource %}<tr><td class="muted">With</td><td>{{ b.resource }}</td></tr>{% endif %}
+{% if b.address %}<tr><td class="muted">Where</td><td>{{ b.address }}</td></tr>{% endif %}
+{% if b.party %}<tr><td class="muted">People</td><td>{{ b.party }}</td></tr>{% endif %}</table>
+{{ brand.doc_footer('booking') }}
+<p class="noprint" style="margin-top:24px"><button class="btn pri" onclick="print()">Print / Save PDF</button> <a class="btn" href="{{ url_for('bookings.edit', bid=b.id) }}">Back</a></p>
+</div></body></html>

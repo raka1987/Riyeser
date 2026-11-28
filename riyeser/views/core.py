@@ -300,18 +300,23 @@ def _save_company():
         fmt = lambda d: __import__("datetime").date.fromisoformat(d).strftime("%d/%m/%Y") if d else "(none)"
         audit(db, "lock_date", f"Lock date changed from {fmt(old_lock)} to {fmt(f.get('lock_date') or None)} by "
                                f"{g.user['username']}")  # M18
-    db.execute("UPDATE company SET name=?, abn=?, address=?, phone=?, email=?, fy_start_month=?, lock_date=?,"
+    if "name" in f:   # the business's own details are on Setup, Business details & branding now (older forms)
+        if not f["name"].strip():
+            raise ValueError("Enter your business name.")
+        db.execute("UPDATE company SET name=?, abn=?, address=?, phone=?, email=? WHERE id=1",
+                   (f["name"], f.get("abn"), f.get("address"), f.get("phone"), f.get("email")))
+    db.execute("UPDATE company SET fy_start_month=?, lock_date=?,"
                " gst_registered=?, invoice_prefix=?, bill_prefix=?, next_invoice_no=?, next_bill_no=?,"
                " default_terms_days=? WHERE id=1",
-               (f["name"], f.get("abn"), f.get("address"), f.get("phone"), f.get("email"),
-                int(f.get("fy_start_month") or 7), f.get("lock_date") or None, 1 if f.get("gst_registered") else 0,
+               (int(f.get("fy_start_month") or 7), f.get("lock_date") or None, 1 if f.get("gst_registered") else 0,
                 f.get("invoice_prefix") or "INV", f.get("bill_prefix") or "PO", int(f.get("next_invoice_no") or 1),
                 int(f.get("next_bill_no") or 1), int(f.get("default_terms_days") or 30)))
     db.execute("UPDATE company SET auto_pdf=? WHERE id=1", (1 if f.get("auto_pdf") else 0,))
-    db.execute("UPDATE company SET bank_name=?, bank_account_name=?, bank_bsb=?, bank_account_no=?,"
-               " payment_instructions=? WHERE id=1",
-               tuple((f.get(k) or "").strip() or None for k in ("bank_name", "bank_account_name", "bank_bsb",
-                                                                  "bank_account_no", "payment_instructions")))
+    if any(k in f for k in ("bank_name", "bank_account_name", "bank_bsb", "bank_account_no", "payment_instructions")):
+        db.execute("UPDATE company SET bank_name=?, bank_account_name=?, bank_bsb=?, bank_account_no=?,"
+                   " payment_instructions=? WHERE id=1",
+                   tuple((f.get(k) or "").strip() or None for k in ("bank_name", "bank_account_name", "bank_bsb",
+                                                                      "bank_account_no", "payment_instructions")))
     cur = (f.get("currency") or "").strip().upper()
     if cur:
         if len(cur) != 3 or not cur.isalpha():

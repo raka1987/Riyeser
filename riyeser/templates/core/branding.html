@@ -1,0 +1,42 @@
+{% extends "base.html" %}{% block title %}Business details & branding{% endblock %}
+{% import "_brand.html" as bmac %}
+{% block content %}
+<div class="head"><div><h1>Business details &amp; branding</h1><p class="sub">Your logo and details on every invoice, quote, credit note, statement, receipt, purchase order, booking confirmation, payslip and email, in every Riyeser program that opens this company file.</p></div></div>
+<form method="post" enctype="multipart/form-data" action="{{ url_for('branding.save') }}">
+<div class="card"><h3>Your business</h3>{% if prefill %}<p class="muted" style="margin-top:0">Details marked <b>From Riyeser Central</b> came from Central's "Your business" step. Check them, then save.</p>{% endif %}<div class="fields">
+<div><label for="b-name">Business name (trading name)</label><input id="b-name" name="name" value="{{ co.name }}" required maxlength="200"></div>
+<div><label for="b-legal">Legal name <span class="muted">(optional)</span></label><input id="b-legal" name="legal_name" value="{{ co.legal_name or '' }}" placeholder="If it's different, e.g. Smith Holdings Pty Ltd">{% if prefill.legal_name %}<small class="muted">From Riyeser Central</small>{% endif %}</div>
+<div><label for="b-tax">{{ tl.tax_id }}</label><input id="b-tax" name="abn" value="{{ co.abn or '' }}">{% if prefill.abn %}<small class="muted">From Riyeser Central</small>{% endif %}</div>
+<div><label for="b-phone">Phone</label><input id="b-phone" name="phone" value="{{ co.phone or '' }}" autocomplete="tel">{% if prefill.phone %}<small class="muted">From Riyeser Central</small>{% endif %}</div>
+<div><label for="b-email">Email</label><input id="b-email" name="email" type="email" value="{{ co.email or '' }}" autocomplete="email">{% if prefill.email %}<small class="muted">From Riyeser Central</small>{% endif %}</div>
+<div><label for="b-web">Website</label><input id="b-web" name="website" value="{{ co.website or '' }}" placeholder="e.g. www.yourbusiness.com"></div>
+<div class="wide"><label for="b-addr">Address</label><textarea id="b-addr" name="address" rows="2" placeholder="Street, town, postcode (a new line prints as a new line)">{{ co.address or '' }}</textarea>{% if prefill.address %}<small class="muted">From Riyeser Central</small>{% endif %}</div>
+</div><p class="muted small" style="margin:10px 0 0">The label <b>{{ tl.tax_id }}</b> comes from your <a href="{{ url_for('core.country') }}">country and tax settings</a>.</p></div>
+
+<div class="card"><h3>Logo</h3>
+<div class="logo-box"><div class="logo-prev">{% if brand.logo_uri %}<img src="{{ brand.logo_uri }}" alt="Your logo">{% else %}<span class="muted">No logo yet</span>{% endif %}</div>
+{% if brand.logo_mono_uri %}<div><div class="logo-prev mono"><img src="{{ brand.logo_mono_uri }}" alt="Your logo in black and white" {% if brand.logo_mono_is_greyscale %}style="filter:grayscale(1)"{% endif %}></div><small class="muted">On till receipts</small></div>{% endif %}
+<div style="min-width:0;flex:1 1 260px"><label for="b-logo">{{ 'Replace the logo' if brand.has_logo else 'Add your logo' }}</label><input id="b-logo" type="file" name="logo" accept=".png,.jpg,.jpeg,.svg,image/png,image/jpeg,image/svg+xml">
+<p class="muted small" style="margin:6px 0 0">A PNG, JPG or SVG, up to {{ max_mb }} MB. Empty margins are trimmed for you, and it's never stretched. It's kept inside your company file, so it's in your backups.</p>
+{% if brand.logo_from_central %}<p class="small" style="margin:6px 0 0">Showing the logo from <b>Riyeser Central</b>. <button class="btn sm" name="logo_action" value="central">Keep it in this company file</button></p>
+{% elif central_differs %}<p class="small" style="margin:6px 0 0"><img src="{{ central_logo_uri }}" alt="" style="max-height:24px;max-width:80px;vertical-align:middle;object-fit:contain"> Riyeser Central has a different logo. <button class="btn sm" name="logo_action" value="central">Use the logo from Riyeser Central</button></p>{% endif %}
+{% if brand.has_logo %}<p style="margin:10px 0 0"><button class="btn sm danger" name="logo_action" value="remove" data-confirm="Remove the logo from your documents?">Remove logo</button></p>{% endif %}</div></div></div>
+
+<div class="card"><h3>How customers pay you</h3><p class="muted">Printed as "How to pay" on invoices and statements.</p><div class="fields">
+<div><label for="bank_account_name">Account name</label><input id="bank_account_name" name="bank_account_name" value="{{ co.bank_account_name or '' }}"></div>
+<div><label for="bank_name">Bank</label><input id="bank_name" name="bank_name" value="{{ co.bank_name or '' }}"></div>
+<div><label for="bank_bsb">BSB</label><input id="bank_bsb" name="bank_bsb" value="{{ co.bank_bsb or '' }}"></div>
+<div><label for="bank_account_no">Account number</label><input id="bank_account_no" name="bank_account_no" value="{{ co.bank_account_no or '' }}"></div>
+<div class="wide"><label for="payment_instructions">Other payment instructions</label><input id="payment_instructions" name="payment_instructions" value="{{ co.payment_instructions or '' }}" placeholder="e.g. Please use the invoice number as the reference"></div></div></div>
+
+<div class="card"><h3>Footer notes</h3><p class="muted">A short note at the bottom of each kind of document. Leave one empty for none.</p><div class="fields">
+{% for k, label in footer_kinds %}<div><label for="footer_{{ k }}">{{ label }}</label><textarea id="footer_{{ k }}" name="footer_{{ k }}" rows="2" maxlength="300" placeholder="{{ hints[k] }}">{{ footers[k] }}</textarea></div>{% endfor %}</div></div>
+
+<div class="card"><h3>Accent colour</h3><div class="fields">
+<div><label for="b-accent">Titles and the line under your letterhead</label><input id="b-accent" type="color" name="accent_colour" value="{{ brand.accent }}" style="height:var(--ctl-h);padding:2px;width:90px"></div>
+<label class="check"><input type="checkbox" name="accent_default" value="1" {{ 'checked' if not co.accent_colour }}> Use the standard navy</label></div></div>
+
+<div class="card"><h3>Preview</h3><p class="muted" style="margin-top:0">The top of an invoice (save to update).</p>
+<div class="brand-prev">{{ bmac.letterhead(tl.invoice, (co.invoice_prefix or 'INV') ~ '00123', [('Date', today()|ddate)], b=brand) }}</div></div>
+<button class="btn pri">Save business details</button></form>
+{% endblock %}

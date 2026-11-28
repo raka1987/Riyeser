@@ -287,3 +287,37 @@ def test_no_print_or_pdf_link_leaves_the_app():
     base = (ROOT / "riyeser/templates/base.html").read_text()
     pos = (ROOT / "riyeser/templates/pos/_pos.html").read_text()
     assert "inapp.js" in base and "inapp.js" in pos
+
+
+def test_receipts_carry_the_business_branding(shop):
+    """Both print paths use "Business details & branding" (business_brand()) with the till's layout: the logo (the
+    black-and-white copy, as an ESC/POS raster straight to the printer), the legal name, the tax number with the
+    country's label, the contacts and the receipt note; the receipt settings still turn each part off."""
+    import io
+    from tests.test_branding import _details, logo_png
+    s, c, pr = shop, shop["admin"], shop["printer"]
+    r = _details(c, logo=(io.BytesIO(logo_png()), "logo.png"))
+    assert r.status_code == 200
+    setup_receipt(c, 1, PRN)
+    c.post("/pos/hardware/save", data={"what": "adjust", "target": "till:1", "paper": "58", "chars": "auto", "left": "0",
+                                       "right": "0", "top": "0", "bottom": "0", "scale": "100", "font": "normal",
+                                       "logo_mm": "30", "feed": "3", "cut": "1"})
+    c.post("/pos/shift/open", json={"till_id": 1, "float": "0"})
+    sid = sale(c, s).get_json()["sale_id"]
+    c.post(f"/pos/receipt/{sid}/raw", json={"till_id": 1})
+    job = pr.jobs[-1][1]
+    text = strip_escpos(job).replace(b"\n", b" ")                                       # long lines wrap on 58 mm
+    assert b"\x1dv0\x00" in job                                                         # the logo, as a raster
+    assert all(len(x) <= 32 for x in strip_escpos(job).split(b"\n")[1:])                # nothing cut off or too wide
+    for want in (b"Coral Coast Bakehouse", b"Coral Coast Holdings Pty Ltd", b"51 824 753 556", b"Suva",
+                 b"Thank you! Returns within 14 days."):
+        assert want in text, want
+    html = c.get(f"/pos/receipt/{sid}").get_data(as_text=True)                          # the Windows print path
+    assert 'class="rb-logo' in html and "Coral Coast Holdings Pty Ltd" in html and "Returns within 14 days." in html
+    assert "@page{size:58mm auto" in html and 'class="r p58"' in html and "max-width:min(30mm,100%)" in html
+    # the receipt settings: logo off, no tax number, own footer
+    c.post("/pos/hardware/save", data={"what": "layout", "show_name": "1", "show_address": "1",
+                                       "show_phone": "1", "footer": "See you soon"})
+    html = c.get(f"/pos/receipt/{sid}").get_data(as_text=True)
+    assert "<img class=\"rb-logo" not in html and "51 824 753 556" not in html and "See you soon" in html and "Suva" in html
+    assert "Returns within 14 days." not in html

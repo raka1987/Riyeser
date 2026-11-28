@@ -44,11 +44,14 @@ def receipt_ctx(db, till_id=None, rs=None, lay=None, preview=False):
     co = db.execute("SELECT * FROM company WHERE id=1").fetchone()
     rs = rs or PP.receipt_settings(db)
     t = db.execute("SELECT * FROM pos_tills WHERE id=?", (till_id,)).fetchone() if till_id else None
-    lay = lay or PP.layout_of(t)
+    if lay is None:
+        lay = PP.layout_of(t)
+        if request.args.get("paper") in ("58", "80"):   # a quick check of the other paper width (?paper=58)
+            lay = PP.computed(PP.clean_layout(dict(lay, paper=request.args["paper"])))
     logo, logo_url = PP.brand_logo(db)
-    return dict(rs=rs, lc=PP.css_vars(lay), header=PP.header_lines(co, rs, labels(co)),
-                footer=PP.footer_lines(rs), show_logo=bool(rs["logo"] and logo_url), preview=preview,
-                logo_url=logo_url)
+    name, header, footer = PP.receipt_brand(db, co, rs, labels(co))
+    return dict(rs=rs, lc=PP.css_vars(lay), name=name, header=header, footer=footer,
+                show_logo=bool(rs["logo"] and logo_url), preview=preview, logo_url=logo_url)
 
 
 def _target(db, key):
@@ -281,7 +284,7 @@ def hardware_test_print():
     co = db.execute("SELECT * FROM company WHERE id=1").fetchone()
     rs = PP.receipt_settings(db)
     job = PP.alignment_job(lay, row["name"]) if align else \
-        PP.receipt_job(PP.sample_receipt(co, rs, labels(co)), lay, logo=PP.brand_logo(db)[0] if rs["logo"] else None)
+        PP.receipt_job(PP.sample_receipt(co, rs, labels(co), db), lay, logo=PP.brand_logo(db)[0] if rs["logo"] else None)
     err = None
     try:
         D.backend().send(printer, job, job="Riyeser POS alignment test" if align else "Riyeser POS test receipt")

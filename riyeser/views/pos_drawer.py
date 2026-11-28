@@ -169,14 +169,14 @@ def receipt_data(db, sid, part=None):
         label, total = f"Split bill: {p['label'] or 'part ' + str(p['n'])} ({p['n']} of {n})", p["amount"]
     from .. import pos_print as PP
     rs = PP.receipt_settings(db)
-    head = PP.header_lines(co, rs, tl)
-    return dict(company=(co["name"] or "") if rs["show_name"] else "", header=head,
+    name, head, foot = PP.receipt_brand(db, co, rs, tl)
+    return dict(company=name, header=head,
                 number=s["number"], date=s["date"], label=label,
                 lines=[(l["qty"], l["description"], l["net_amount"] + l["tax_amount"]) for l in lines],
                 total=total, tax=0 if part or not tax_name else s["tax_total"], tax_name=tax_name,
                 tenders=[(METHOD_LABELS.get(t["method"], t["method"]), t["amount"]) for t in tenders],
                 change=sum(t["change_given"] for t in tenders),
-                footer=PP.footer_lines(rs) + [f"Served by {s['full_name'] or s['username']}"]), \
+                footer=foot + [f"Served by {s['full_name'] or s['username']}"]), \
         any(t["method"] == "cash" for t in tenders)
 
 

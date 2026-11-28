@@ -6,7 +6,8 @@ Windows print spooler (riyeser/drawer.py, the same path as the cash drawer): no 
 fails falls back to the Windows print box inside the app, with a plain message. Most 80 mm and 58 mm receipt
 printers installed in Windows understand ESC/POS; real printers haven't been tested by Riyeser yet (Beta).
 
-The receipt logo is the business's own logo (shared business details, see brand_logo below). It prints as an ESC/POS
+The receipt's logo, name, address, tax number, contacts and footer note come from "Business details & branding"
+(riyeser/branding.py business_brand(), see brand_logo and receipt_brand below); the settings here choose what shows. It prints as an ESC/POS
 raster image (GS v 0), decoded here without extra libraries (8-bit PNG, not interlaced: what most tools save).
 """
 import json
@@ -128,28 +129,67 @@ def css_vars(lay):
                 logo=f"{lay['logo_mm']}mm")
 
 
+def _brand(db):
+    from .branding import business_brand
+    try:
+        return business_brand(db)
+    except Exception:  # noqa: BLE001 - no company row yet (a brand-new file): print without branding
+        return None
+
+
 def brand_logo(db):
-    """The business logo as (PNG bytes, URL) or (None, None).
-    TODO(feat/branding): return the logo from business_brand() once the shared "Business details & branding" lands.
-    Until then there is no logo, so receipts print without one (the on/off switch is kept)."""
-    return None, None
+    """The business logo from "Business details & branding" (business_brand()) as (PNG bytes for ESC/POS, data URI for
+    the on-screen/Windows-print receipt), or (None, None) when there's no logo. Both are the black-and-white copy made
+    for receipt printers. An SVG logo shows on the HTML receipt (greyscale) but isn't sent to the printer as a picture."""
+    b = _brand(db)
+    if not b or not b["has_logo"]:
+        return None, None
+    mono, png = (b["logo"] or {}).get("mono"), None
+    if mono:
+        try:   # the stored copy is a 1-bit PNG; the ESC/POS raster reader takes an ordinary 8-bit one
+            import io
+            from PIL import Image
+            out = io.BytesIO()
+            Image.open(io.BytesIO(mono)).convert("L").save(out, "PNG")
+            png = out.getvalue()
+            check_logo(png)
+        except Exception:  # noqa: BLE001 - a logo the printer can't take: the receipt prints without it
+            png = None
+    return png, b["logo_mono_uri"]
 
 
-def header_lines(co, rs, labels):
-    """TODO(feat/branding): read the name, address, tax number and phone from business_brand() instead."""
-    """The lines under the business name, as the settings say (address, tax number with the country's label, phone)."""
+def header_lines(co, rs, labels, brand=None):
+    """The lines under the business name, as the settings say: the legal name (with the name), the address, the tax
+    number with the country's label, the phone (and the email and website from the business details with it)."""
+    b = brand or {}
     out = []
-    if rs["show_address"] and co["address"]:
-        out += [x.strip() for x in str(co["address"]).replace("\r", "").split("\n") if x.strip()]
-    if rs["show_tax_id"] and co["abn"]:
-        out.append(f"{labels['tax_id']} {co['abn']}")
-    if rs["show_phone"] and co["phone"]:
-        out.append(str(co["phone"]))
-    return out
+    if rs["show_name"] and b.get("legal_name"):
+        out.append(b["legal_name"])
+    address = b.get("address_lines") if brand else [x.strip() for x in str(co["address"] or "").replace("\r", "").split("\n") if x.strip()]
+    if rs["show_address"] and address:
+        out += address
+    tax_no = b.get("tax_number") if brand else co["abn"]
+    if rs["show_tax_id"] and tax_no:
+        out.append(f"{labels['tax_id']} {tax_no}")
+    if rs["show_phone"]:
+        out += [x for x in ((b.get("phone"), b.get("email"), b.get("website")) if brand else (co["phone"],)) if x]
+    return [str(x) for x in out]
 
 
-def footer_lines(rs):
-    return [x for x in (rs.get("footer") or "").replace("\r", "").split("\n") if x.strip()][:4]
+def footer_lines(rs, brand=None):
+    """The receipt's footer. Left at the standard "Thank you!", it uses the receipt note from the business details."""
+    text = (rs.get("footer") or "").replace("\r", "")
+    note = ((brand or {}).get("footers") or {}).get("receipt")
+    if note and text.strip() == RECEIPT_DEFAULTS["footer"]:
+        text = str(note).replace("\r", "")
+    return [x for x in text.split("\n") if x.strip()][:4]
+
+
+def receipt_brand(db, co, rs, labels):
+    """(name, header lines, footer lines) for a receipt, from the business details and the receipt settings."""
+    b = _brand(db)
+    name = ((b["name"] if b else co["name"]) or "") if rs["show_name"] else ""
+    return name, header_lines(co, rs, labels, b), footer_lines(rs, b)
 
 
 # ------------------------------------------------------------ the logo: PNG -> 1-bit raster
@@ -320,13 +360,15 @@ def alignment_job(lay, name=""):
     return _body(bytes(b), lay)
 
 
-def sample_receipt(co, rs, labels):
+def sample_receipt(co, rs, labels, db=None):
     """What the preview and a test print show."""
-    return dict(company=co["name"] if rs["show_name"] else "", header=header_lines(co, rs, labels),
+    name, head, foot = receipt_brand(db, co, rs, labels) if db is not None else (
+        co["name"] if rs["show_name"] else "", header_lines(co, rs, labels), footer_lines(rs))
+    return dict(company=name, header=head,
                 number="TEST", date=datetime.now().strftime("%Y-%m-%d"), label="Test print",
                 lines=[(2, "Flat White", 910), (1, "Banana Bread", 650)], total=1560,
                 tax=142 if labels.get("has_tax") else 0, tax_name=labels.get("tax"),
-                tenders=[("Cash", 2000)], change=440, footer=footer_lines(rs) or [""])
+                tenders=[("Cash", 2000)], change=440, footer=foot or [""])
 
 
 def printer_status(name, printers, available):

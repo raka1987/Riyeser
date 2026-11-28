@@ -68,8 +68,21 @@ def _wordmark():
     return None if svg is None else io.BytesIO(svg)
 
 
+def _brand_without_db(company):
+    """The details from the company row alone (no logo): for a PDF made without the company file open."""
+    from .branding import business_brand
+
+    class _NoLogo:
+        def execute(self, *a):
+            class _R:
+                def fetchone(self):
+                    return None
+            return _R()
+    return business_brand(_NoLogo(), company)
+
+
 class _PDF(FPDF):
-    def __init__(self, company):
+    def __init__(self, company, db=None, brand=None):
         super().__init__(format="A4")
         self.add_font(FONT, "", str(FONTS / "DejaVuSans.ttf"))
         self.add_font(FONT, "B", str(FONTS / "DejaVuSans-Bold.ttf"))
@@ -82,6 +95,9 @@ class _PDF(FPDF):
         except ImportError:
             pass
         self.company = company
+        from .branding import business_brand
+        self.brand = brand if brand is not None else business_brand(db, company) if db is not None else \
+            _brand_without_db(company)
         self.tl = C.labels(company)          # GST / VAT / Tax, ABN / TIN / VAT number (riyeser/countries.py)
         _MONEY.set(C.money_format(company))
         self.set_auto_page_break(True, 18)
@@ -110,34 +126,92 @@ class _PDF(FPDF):
         self.image(logo, x=x + tw + gap, y=y + 1.2, h=h, alt_text="Riyeser")
 
     def header_block(self, title, number, rows):
-        c = self.company
-        self.set_font(FONT, "B", 22)
-        self.set_text_color(*BRAND)
-        self.cell(100, 10, _t(title))
+        """The business's own letterhead: its logo, name, tax number and contact details on the left (Setup,
+        Business details & branding), the document's title, number and dates on the right, an accent rule under."""
+        from .branding import fit
+        b = self.brand
+        left, right = self.l_margin, self.w - self.r_margin
+        rw = 76                                  # the title column
+        lw = right - left - rw - 8               # the business column (long names wrap, never run under the title)
+        top = self.get_y()
+        y = top
+        if b["has_logo"]:
+            w, h = fit(b["logo_ratio"], 64, 22)  # never stretched: the logo's own proportions inside 64 x 22 mm
+            try:
+                self.image(io.BytesIO(b["logo"]["image"]), x=left, y=y, w=w, h=h, alt_text=_t(b["name"]))
+                y += h + 3
+            except Exception:  # noqa: BLE001 - a picture fpdf can't draw: the letterhead without it
+                pass
+        self.set_xy(left, y)
+        self.set_font(FONT, "B", 13)
+        self.set_text_color(*INK)
+        self.multi_cell(lw, 5.8, _t(b["name"]), align="L", new_x="LMARGIN", new_y="NEXT")
+        self.set_font(FONT, "", 8.5)
+        self.set_text_color(*MUTED)
+        if b["legal_name"]:
+            self.multi_cell(lw, 4.3, _t(b["legal_name"]), align="L", new_x="LMARGIN", new_y="NEXT")
+        lines = ([b["tax_line"]] if b["tax_line"] else []) + b["address_lines"]
+        cur = ""
+        for item in b["contact_lines"]:   # phone · email · website, a new line rather than a dangling dot
+            joined = f"{cur}  ·  {item}" if cur else item
+            if cur and self.get_string_width(_t(joined)) > lw:
+                lines.append(cur)
+                cur = item
+            else:
+                cur = joined
+        if cur:
+            lines.append(cur)
+        for line in lines:
+            self.set_x(left)
+            self.multi_cell(lw, 4.3, _t(line), align="L", new_x="LMARGIN", new_y="NEXT")
+        left_end = self.get_y()
+        # the title (shrunk to fit its column: "Request for Quote (VOID)" stays on one line), number and dates
+        x = right - rw
+        size = 20
+        self.set_font(FONT, "B", size)
+        while size > 12 and self.get_string_width(_t(title)) > rw:
+            size -= 1
+            self.set_font(FONT, "B", size)
+        self.set_text_color(*b["accent_rgb"])
+        self.set_xy(x, top)
+        self.cell(rw, 9, _t(title), align="R", new_x="LMARGIN", new_y="NEXT")
         self.set_font(FONT, "B", 11)
         self.set_text_color(*INK)
-        self.cell(0, 6, _t(c["name"]), align="R", new_x="LMARGIN", new_y="NEXT")
-        self.set_font(FONT, "", 9)
-        self.set_text_color(*MUTED)
-        right = [c["address"] or "", f"{self.tl['tax_id']} {c['abn']}" if c["abn"] else "", c["phone"] or "", c["email"] or ""]
-        y = self.get_y()
-        self.set_xy(16, y + 2)
-        self.set_font(FONT, "B", 11)
-        self.set_text_color(*INK)
-        self.cell(100, 6, _t(number))
-        self.set_font(FONT, "", 9)
-        self.set_text_color(*MUTED)
-        for i, line in enumerate([r for r in right if r]):
-            self.set_xy(110, y + i * 4.6)
-            self.cell(0, 4.6, _t(line), align="R")
-        self.set_xy(16, y + 9)
+        self.set_x(x)
+        self.multi_cell(rw, 6, _t(number), align="R", new_x="LMARGIN", new_y="NEXT")
+        self.ln(1)
         for label, val in rows:
-            self.set_x(16)
-            self.cell(24, 5, _t(label))
-            self.set_text_color(*INK)
-            self.cell(70, 5, _t(val), new_x="LMARGIN", new_y="NEXT")
+            self.set_font(FONT, "", 9)
             self.set_text_color(*MUTED)
-        self.ln(4)
+            y0 = self.get_y()
+            self.set_xy(x, y0)
+            self.cell(rw - 46, 5, _t(label), align="R")
+            self.set_text_color(*INK)
+            self.set_xy(right - 44, y0)
+            self.multi_cell(44, 5, _t(val), align="R", new_x="LMARGIN", new_y="NEXT")
+        y = max(left_end, self.get_y()) + 3
+        self.set_draw_color(*b["accent_rgb"])
+        self.set_line_width(0.5)
+        self.line(left, y, right, y)
+        self.set_line_width(0.2)
+        self.set_draw_color(*LINE)
+        self.set_xy(left, y + 5)
+        self.set_text_color(*INK)
+
+    def doc_footer(self, kind):
+        """The business's own note for this kind of document (e.g. "Thank you! Returns within 14 days")."""
+        note = self.brand["footers"].get(kind) or ""
+        if not note:
+            return
+        self.ln(6)
+        if self.get_y() > self.h - 34:
+            self.add_page()
+        self.set_draw_color(*LINE)
+        self.line(self.l_margin, self.get_y(), self.w - self.r_margin, self.get_y())
+        self.ln(3)
+        self.set_font(FONT, "", 9)
+        self.set_text_color(*MUTED)
+        self.multi_cell(0, 4.6, _t(note), align="L", new_x="LMARGIN", new_y="NEXT")
 
     def party(self, label, name, address=None, abn=None):
         self.set_font(FONT, "", 8.5)
@@ -225,11 +299,21 @@ def doc_title(doc, company=None):
                           (tl["invoice"] if tl else "Tax Invoice") if doc["side"] == "sale" else "Bill")
 
 
+def footer_kind(doc):
+    """Which of the business's footer notes a document carries (Setup, Business details & branding)."""
+    kind = doc["kind"] if "kind" in doc.keys() else "invoice"
+    if doc["side"] == "purchase":
+        return "purchase" if doc["status"] in ("order", "quote") else None   # a bill is the supplier's document
+    if kind in ("credit", "payment_credit"):
+        return "credit"
+    return "quote" if doc["status"] == "quote" else "invoice"
+
+
 def document_pdf(db, doc_id) -> bytes:
     doc = db.execute("SELECT d.*, c.name cname, c.address caddress, c.abn cabn FROM documents d"
                      " JOIN contacts c ON c.id=d.contact_id WHERE d.id=?", (doc_id,)).fetchone()
     lines = db.execute("SELECT * FROM document_lines WHERE document_id=? ORDER BY id", (doc_id,)).fetchall()
-    pdf = _PDF(_company(db))
+    pdf = _PDF(_company(db), db)
     pdf.add_page()
     title = doc_title(doc, pdf.company) + (" (VOID)" if doc["status"] == "void" else "")
     day = lambda v: C.show_date(v, pdf.company)   # the company's date format (ISO unless chosen)
@@ -259,9 +343,11 @@ def document_pdf(db, doc_id) -> bytes:
              fmt_money(l["net_amount"] + (l["tax_amount"] if incl else 0))] for l in lines]
     co = pdf.company
     taxn = pdf.tl["tax"]   # GST, VAT, Sales tax... (Country and tax settings; "Tax" where there's none)
+    kind = footer_kind(doc)
     if opts:
         _options(pdf, opts, taxn, bool(doc["tax_inclusive"]))
         pdf.notes(doc["notes"])
+        pdf.doc_footer(kind)
         from .measure.drawing import add_page
         add_page(pdf, db, doc_id, FONT)
         from .measure.photos import add_pdf_pages
@@ -278,6 +364,7 @@ def document_pdf(db, doc_id) -> bytes:
     pdf.notes(doc["notes"])
     if doc["side"] == "sale" and doc["status"] in ("open", "paid") and (doc["kind"] or "invoice") == "invoice":
         pdf.how_to_pay(db)
+    pdf.doc_footer(kind)
     if doc["side"] == "sale" and doc["status"] == "quote":
         from .measure.drawing import add_page
         add_page(pdf, db, doc_id, FONT)   # Riyeser Estimate: what was measured, and the drawing (never map imagery)
@@ -439,7 +526,7 @@ def statement_pdf(db, contact_id, start=None, end=None, pdf=None) -> bytes:
     st = statement(db, contact_id, start, end)
     c = st["contact"]
     own = pdf is None
-    pdf = pdf or _PDF(_company(db))
+    pdf = pdf or _PDF(_company(db), db)
     pdf.add_page()
     pdf.header_block("Statement", f"{start} to {end}", [("Balance", fmt_money(st["closing"]))])
     pdf.party(st["label"], c["name"], c["address"], c["abn"])
@@ -458,6 +545,7 @@ def statement_pdf(db, contact_id, start=None, end=None, pdf=None) -> bytes:
     pdf.totals([("Balance " + ("due" if st["closing"] >= 0 else "in credit"), fmt_money(st["closing"]))])
     if st["side"] == "sale":
         pdf.how_to_pay(db)
+        pdf.doc_footer("statement")
     return bytes(pdf.output()) if own else b""
 
 
@@ -465,7 +553,7 @@ def payslip_pdf(db, slip_id) -> bytes:
     s = db.execute("SELECT s.*, e.first_name, e.last_name, e.pay_basis, e.pay_frequency, e.super_rate, e.super_fund,"
                    " r.pay_date, r.period_start, r.period_end FROM payslips s JOIN employees e ON e.id=s.employee_id"
                    " JOIN payruns r ON r.id=s.payrun_id WHERE s.id=?", (slip_id,)).fetchone()
-    pdf = _PDF(_company(db))
+    pdf = _PDF(_company(db), db)
     pdf.add_page()
     pdf.header_block("Payslip", f"{s['first_name']} {s['last_name']}",
                      [("Period", f"{s['period_start']} to {s['period_end']}"), ("Paid", s["pay_date"])])
@@ -479,7 +567,37 @@ def payslip_pdf(db, slip_id) -> bytes:
     pdf.set_font(FONT, "", 8)
     pdf.set_text_color(150, 80, 0)
     pdf.multi_cell(0, 4, NOT_FOR_REAL_PAY)  # F12
+    pdf.doc_footer("payslip")
     return bytes(pdf.output())
+
+
+def receipt_pdf(db, payment_id) -> bytes:
+    """A receipt for a customer's payment: who paid, how much, and the invoices it paid."""
+    p = db.execute("SELECT p.*, c.name cname, c.address caddress, c.abn cabn FROM payments p"
+                   " JOIN contacts c ON c.id=p.contact_id WHERE p.id=?", (payment_id,)).fetchone()
+    allocs = db.execute("SELECT d.number, d.date, d.total, a.amount FROM payment_allocations a"
+                        " JOIN documents d ON d.id=a.document_id WHERE a.payment_id=? ORDER BY d.date, d.id",
+                        (payment_id,)).fetchall()
+    pdf = _PDF(_company(db), db)
+    pdf.add_page()
+    day = lambda v: C.show_date(v, pdf.company)
+    meta = [("Date", day(p["date"]))]
+    if p["reference"]:
+        meta.append(("Reference", p["reference"]))
+    pdf.header_block("Receipt" + (" (VOID)" if p["voided"] else ""), receipt_number(p), meta)
+    pdf.party("Received from", p["cname"], p["caddress"], p["cabn"])
+    if allocs:
+        pdf.table(["Invoice", "Date", "Invoice total", "Paid now"],
+                  [[a["number"], day(a["date"]), fmt_money(a["total"]), fmt_money(a["amount"])] for a in allocs],
+                  [62, 36, 40, 40], ["L", "L", "R", "R"])
+    pdf.totals([("Amount received", fmt_money(p["amount"]))])
+    pdf.notes(p["memo"])
+    pdf.doc_footer("receipt")
+    return bytes(pdf.output())
+
+
+def receipt_number(p):
+    return f"RCT-{p['id']:05d}"
 
 
 def document_filename(db, doc_id):

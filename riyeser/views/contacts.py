@@ -219,7 +219,7 @@ def statements_all():
     if request.args.get("pdf"):
         from flask import Response
         from .. import pdf as pdfmod
-        doc = pdfmod._PDF(pdfmod._company(db))
+        doc = pdfmod._PDF(pdfmod._company(db), db)
         for c in people:
             pdfmod.statement_pdf(db, c["id"], start, end, pdf=doc)
         if not people:

@@ -251,8 +251,12 @@ def create_app(test_config=None):
     app.register_blueprint(bookings.bp)
     app.register_blueprint(links.bp)
     app.register_blueprint(help.bp)
+    from .views import branding as branding_view
+    app.register_blueprint(branding_view.bp)
     app.jinja_env.globals["help_section"] = help.section_for
     app.jinja_env.globals["riyeser_version"] = __version__
+    from .branding import request_brand
+    app.jinja_env.globals["business_brand"] = request_brand   # the business's logo and details on documents
     app.jinja_env.globals["central_demo"] = bool(app.config["DEMO_MODE"])
     app.jinja_env.globals["demo_login"] = (demo_mode.DEMO_USER, demo_mode.DEMO_PASSWORD)
     app.jinja_env.globals["editions"] = dbmod.EDITIONS
@@ -339,8 +343,8 @@ def _separate_app_redirect(endpoint):
     """Keep each app to its own screens. Riyeser POS shows only the till (and products, customers, users, help);
     Accounting Basics and Plus send the till's screens to Riyeser POS. Both open the same company file."""
     from .edition import is_pos_app, is_accounting_app, is_invoices_app, is_bookings_app, is_estimate_app
-    if endpoint in ("core.country", "core.country_review"):
-        return None   # every app sets the business's country and tax (the same company file)
+    if endpoint in ("core.country", "core.country_review") or endpoint.startswith("branding."):
+        return None   # every app sets the business's country and tax, and its details & branding (the same file)
     if is_estimate_app():
         return _estimate_app_redirect(endpoint)
     if endpoint.startswith("estimate.") and \

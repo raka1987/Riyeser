@@ -337,3 +337,23 @@ h3.qopts-on{margin-top:var(--sp-4)}
 .rc-sub.off{opacity:.5}.rc-opt{display:flex;gap:10px;align-items:flex-start;margin:0 0 10px;cursor:pointer}.rc-form .rc-opt input[type=radio]{margin:3px 0 0;flex:none;width:18px;height:18px;min-height:0;padding:0}.rc-opt>span{flex:1;min-width:0}
 .rc-opt small{display:block;margin-top:2px}.rc-go{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
 @media (max-width:520px){.rc-sub{margin-left:18px}}
+/* Business details & branding: the business's letterhead on printed documents (templates/_brand.html) */
+.brand-head{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;padding-bottom:16px;margin-bottom:24px;border-bottom:2px solid var(--doc-accent,#102344)}
+.brand-head .bh-biz{min-width:0;flex:1 1 55%;overflow-wrap:anywhere}
+.brand-head .bh-logo{display:block;max-width:240px;max-height:80px;width:auto;height:auto;object-fit:contain;margin-bottom:10px}
+.brand-head .bh-name{font-size:17px;font-weight:700;color:var(--ink);line-height:1.3}
+.brand-head .bh-legal,.brand-head .bh-lines{font-size:12.5px;color:var(--muted);line-height:1.5}
+.brand-head .bh-c+.bh-c::before{content:"·";margin:0 7px}
+.brand-head .bh-doc{flex:0 1 40%;text-align:right;min-width:0;overflow-wrap:anywhere}
+.doc-print .brand-head h1,.brand-head h1{font-size:28px;color:var(--doc-accent,#102344);margin:0 0 4px;line-height:1.15}
+.brand-head .bh-no{font-weight:700;font-size:15px;margin-bottom:4px}
+.brand-head .bh-meta{font-size:13px}.brand-head .bh-meta span{color:var(--muted)}
+.brand-foot{margin-top:28px;padding-top:10px;border-top:1px solid var(--line);color:var(--muted);font-size:13px;white-space:pre-line}
+@media (max-width:560px){.brand-head{flex-direction:column}.brand-head .bh-doc{text-align:left}}
+/* the Business details & branding page */
+.logo-box{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.logo-prev{display:flex;align-items:center;justify-content:center;width:260px;height:110px;border:1px dashed var(--line-2);border-radius:var(--r-md);padding:10px;background:#fff repeating-conic-gradient(#f1f5f9 0 25%,#fff 0 50%) 0 0/16px 16px}
+.logo-prev img{max-width:100%;max-height:100%;object-fit:contain}
+.logo-prev.mono{width:150px;height:70px;background:#fff}
+.brand-prev{border:1px solid var(--line);border-radius:var(--r-md);padding:20px;background:#fff;max-width:760px}
+.brand-prev .brand-head{margin-bottom:0}

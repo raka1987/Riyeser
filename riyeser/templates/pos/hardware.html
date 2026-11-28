@@ -110,7 +110,7 @@
 <form class="card hw-wide" id="layout" method="post" action="{{ url_for('pos.hardware_save') }}"><input type="hidden" name="what" value="layout"><input type="hidden" name="till_id" value="{{ t.id }}">
   <div class="hw-h"><div><h2>What the receipt says</h2><p>For every till. The preview shows it as it prints.</p></div></div>
   <div class="hw-prev"><fieldset {{ 'disabled' if not can_change }} style="border:0;padding:0;margin:0;min-width:0"><div class="hw-f">
-    <div class="full hw-checks"><label><input type="checkbox" name="logo" value="1" {{ 'checked' if rs.logo }} data-live> <span>Business logo at the top<small>{% if has_logo %}Uses your business logo.{% else %}Uses your business logo once one is added to your business details.{% endif %}</small></span></label></div>
+    <div class="full hw-checks"><label><input type="checkbox" name="logo" value="1" {{ 'checked' if rs.logo }} data-live> <span>Business logo at the top<small>{% if has_logo %}Uses your business logo.{% else %}Uses your business logo once one is added in <a href="{{ url_for('branding.index') }}">Business details &amp; branding</a>.{% endif %}</small></span></label></div>
     <div class="full hw-checks"><span class="lb" style="font-weight:600;font-size:13.5px">Header lines</span>
       <label><input type="checkbox" name="show_name" value="1" {{ 'checked' if rs.show_name }} data-live> Business name</label>
       <label><input type="checkbox" name="show_address" value="1" {{ 'checked' if rs.show_address }} data-live> Address</label>

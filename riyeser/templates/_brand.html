@@ -1,0 +1,10 @@
+{# Business details & branding (riyeser/branding.py): the business's own letterhead and footer note on printed
+   documents. b = business_brand(). The logo keeps its own proportions (max height and width, never stretched). #}
+{% macro letterhead(title, number=None, meta=[], b=None) %}{% set b = b or business_brand() %}
+<div class="brand-head" style="--doc-accent:{{ b.accent }}">
+<div class="bh-biz">{% if b.logo_uri %}<img class="bh-logo" src="{{ b.logo_uri }}" alt="{{ b.name }}">{% endif %}
+<div class="bh-name">{{ b.name }}</div>{% if b.legal_name %}<div class="bh-legal">{{ b.legal_name }}</div>{% endif %}
+<div class="bh-lines">{% if b.tax_line %}<div>{{ b.tax_line }}</div>{% endif %}{% for l in b.address_lines %}<div>{{ l }}</div>{% endfor %}{% if b.contact_lines %}<div>{% for c in b.contact_lines %}<span class="bh-c">{{ c }}</span>{% endfor %}</div>{% endif %}</div></div>
+<div class="bh-doc"><h1>{{ title }}</h1>{% if number %}<div class="bh-no">{{ number }}</div>{% endif %}{% for k, v in meta if v %}<div class="bh-meta"><span>{{ k }}</span> {{ v }}</div>{% endfor %}{{ caller() if caller }}</div>
+</div>{% endmacro %}
+{% macro doc_footer(kind, b=None) %}{% set b = b or business_brand() %}{% if b.footers[kind] %}<p class="brand-foot">{{ b.footers[kind] }}</p>{% endif %}{% endmacro %}

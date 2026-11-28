@@ -155,7 +155,7 @@ def job_sheet_pdf(db, jid) -> bytes:
                         " WHERE b.job_id=? AND b.status NOT IN ('cancelled','no_show') ORDER BY b.starts_at, b.id",
                         (jid,)).fetchall()
     co = db.execute("SELECT * FROM company WHERE id=1").fetchone()
-    pdf = _PDF(co)
+    pdf = _PDF(co, db)
     pdf.set_title(f"Job sheet J-{jid:04d}")
     pdf.add_page()
     total = db.execute("SELECT COALESCE(SUM(minutes),0) FROM booking_time WHERE job_id=?", (jid,)).fetchone()[0]
@@ -239,6 +239,7 @@ def job_sheet_pdf(db, jid) -> bytes:
         pdf.ln(3)
     if not visits:
         para("No visits on this job yet.", muted=True)
+    pdf.doc_footer("booking")
     return bytes(pdf.output())
 
 

@@ -248,6 +248,8 @@ def view(doc_id):
     if doc["source_document_id"]:
         extra["source_doc"] = db.execute("SELECT id, number FROM documents WHERE id=?",
                                          (doc["source_document_id"],)).fetchone()
+    extra["doc_title"] = pdfmod.doc_title(doc, g.company) + (" (VOID)" if doc["status"] == "void" else "")
+    extra["footer_kind"] = pdfmod.footer_kind(doc)   # the business's footer note for this kind of document
     return render_template(tpl, doc=doc, lines=lines, pays=pays, L=LABELS[doc["side"]], **extra)
 
 
@@ -498,6 +500,19 @@ def payments(side):
                      ("in" if side == "sale" else "out",), sums=("CASE WHEN voided=0 THEN amount ELSE 0 END",))
     return render_template("documents/payments.html", rows=rows, side=side, L=L, hl=opt_int(request.args.get("hl")),
                            lst=lst, paid=lst.sums["CASE WHEN voided=0 THEN amount ELSE 0 END"])
+
+
+@bp.route("/payment/<int:pid>/receipt")
+def payment_receipt(pid):
+    """A receipt (PDF) for a customer's payment, with the business's logo and details."""
+    db = get_db()
+    p = db.execute("SELECT p.*, c.name cname FROM payments p JOIN contacts c ON c.id=p.contact_id WHERE p.id=?",
+                   (pid,)).fetchone()
+    if not p or p["direction"] != "in":
+        abort(404)
+    name = pdfmod.safe_name(f"{p['date']} {p['cname']} Receipt {pdfmod.receipt_number(p)}") + ".pdf"
+    return Response(pdfmod.receipt_pdf(db, pid), mimetype="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="{name}"'})
 
 
 @bp.route("/payment/<int:pid>/void", methods=["POST"])

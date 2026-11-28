@@ -1,8 +1,6 @@
 <!doctype html><html><head><meta charset="utf-8"><title>{{ doc.number }}</title><link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}"></head>
 <body><div class="doc-print">
-<div class="hdr"><div><h1>{% if doc.side=='sale' %}{{ {'quote':'Quote','order':'Sales Order'}.get(doc.status, tl.invoice) }}{% else %}{{ {'quote':'Request for Quote','order':'Purchase Order'}.get(doc.status, 'Bill') }}{% endif %}</h1>
-<div><b>{{ doc.number }}</b></div><div class="muted">Date {{ doc.date|ddate }}{% if doc.due_date and doc.status not in ('quote',) %} · Due {{ doc.due_date|ddate }}{% endif %}{% if doc.status == 'quote' and doc.valid_until %} · Valid until {{ doc.valid_until|ddate }}{% endif %}</div></div>
-<div class="right"><b>{{ company.name }}</b><br>{{ company.address or '' }}<br>{% if company.abn %}{{ tl.tax_id }} {{ company.abn }}<br>{% endif %}{{ company.email or '' }}</div></div>
+{% import "_brand.html" as brand %}{{ brand.letterhead(doc_title, doc.number, [('Date', doc.date|ddate), ('Due', doc.due_date|ddate if doc.due_date and doc.status not in ('quote',) else ''), ('Valid until', doc.valid_until|ddate if doc.status == 'quote' and doc.valid_until else ''), ('Reference', doc.reference or '')]) }}
 <p><span class="muted">{{ 'Bill to' if doc.side=='sale' else 'Supplier' }}</span><br><b>{{ doc.cname }}</b><br>{{ doc.caddress or '' }}{% if doc.cabn %}<br>{{ tl.tax_id }} {{ doc.cabn }}{% endif %}</p>
 {% if qoptions %}<h3>Choose one option</h3>{% for o in qoptions %}<p style="margin:14px 0 4px"><b>{{ o.name }}</b>{% if o.chosen %} · chosen{% elif o.recommended %} · recommended{% endif %} · total {{ o.total|money }}</p>
 <table><tr><th>Description</th><th class="n">Qty</th><th class="n">Unit price</th><th class="n">Amount</th></tr>{% for l in o.lines %}<tr><td>{{ l.description }}</td><td class="n">{{ '%g'|format(l.qty) }}</td><td class="n">{{ l.unit_price|money }}</td><td class="n">{{ l.amount|money }}</td></tr>{% endfor %}
@@ -14,5 +12,7 @@
 <table class="totals" style="margin-top:14px"><tr><td>Subtotal (ex {{ tl.tax }})</td><td class="n">{{ doc.subtotal|money }}</td></tr><tr><td>{{ tl.tax }}</td><td class="n">{{ doc.tax_total|money }}</td></tr>
 <tr><td>Total{% if doc.amount_paid %} (paid {{ doc.amount_paid|money }}){% endif %}</td><td class="n">{{ (doc.total - doc.amount_paid)|money }}</td></tr></table>
 {% if doc.notes %}<p style="margin-top:24px">{{ doc.notes }}</p>{% endif %}
+{% if doc.side == 'sale' and doc.status in ('open', 'paid') and (doc.kind or 'invoice') == 'invoice' and business_brand().pay_lines %}<p style="margin-top:20px"><b>How to pay</b>{% for l in business_brand().pay_lines %}<br>{{ l }}{% endfor %}</p>{% endif %}
+{% if footer_kind %}{{ brand.doc_footer(footer_kind) }}{% endif %}
 <p class="noprint" style="margin-top:24px"><button class="btn pri" onclick="print()">Print / Save PDF</button></p>
 </div></body></html>

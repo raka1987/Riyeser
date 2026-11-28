@@ -3,21 +3,13 @@
 {% block content %}
 <div class="head"><div><h1>Company Information &amp; Preferences</h1><p class="sub">Only administrators can change these settings.</p></div></div>
 <form method="post">
-<div class="card"><h3>Company</h3><div class="fields">
-<div><label>Company name</label><input name="name" value="{{ company.name }}" required></div>
-<div><label>{{ tl.tax_id }}</label><input name="abn" value="{{ company.abn or '' }}"></div>
-<div><label>Phone</label><input name="phone" value="{{ company.phone or '' }}"></div>
-<div><label>Email</label><input name="email" value="{{ company.email or '' }}"></div>
-<div class="wide"><label>Address</label><input name="address" value="{{ company.address or '' }}"></div></div></div>
+{% set b = business_brand() %}<div class="card"><h3>Business details &amp; branding</h3><div class="logo-box">{% if b.logo_uri %}<div class="logo-prev" style="width:180px;height:72px"><img src="{{ b.logo_uri }}" alt="Your logo"></div>{% endif %}
+<div style="min-width:0;flex:1 1 260px;overflow-wrap:anywhere"><b>{{ b.name }}</b>{% if b.legal_name %} · {{ b.legal_name }}{% endif %}<br><span class="muted">{{ b.tax_line or (tl.tax_id ~ ' not entered') }}{% for l in b.address_lines %} · {{ l }}{% endfor %}{% for c in b.contact_lines %} · {{ c }}{% endfor %}</span></div>
+<a class="btn" href="{{ url_for('branding.index') }}">Edit business details &amp; branding…</a></div>
+<p class="muted small" style="margin:8px 0 0">Your name, {{ tl.tax_id }}, address, phone, email, logo, footer notes and how customers pay you are all on that page.</p></div>
 <div class="card"><h3>Country and tax</h3><p style="margin:0">{% if company.country %}<b>{{ country_name }}</b> · {% endif %}{{ tl.tax if tl.has_tax else 'No sales tax' }} · {{ tl.tax_id }} · {{ company.currency or 'AUD' }} · {{ tl.report }}{% if company.timezone %} · {{ company.timezone }}{% endif %}</p>
 <p class="muted" style="margin:6px 0 10px">{% if company.country_confirmed_at %}Confirmed by {{ company.country_confirmed_by }} on {{ company.country_confirmed_at[:10]|ddate }}. {% else %}No country chosen yet (Riyeser's Australian settings). {% endif %}Choose a country to fill in its tax, currency, dates and time zone; you check everything before it's saved.</p>
 <a class="btn" href="{{ url_for('core.country') }}">Change country or tax settings…</a></div>
-<div class="card"><h3>How customers pay you</h3><p class="muted">Printed as "How to pay" on invoices and statements.</p><div class="fields">
-<div><label for="bank_account_name">Account name</label><input id="bank_account_name" name="bank_account_name" value="{{ company.bank_account_name or '' }}"></div>
-<div><label for="bank_name">Bank</label><input id="bank_name" name="bank_name" value="{{ company.bank_name or '' }}"></div>
-<div><label for="bank_bsb">BSB</label><input id="bank_bsb" name="bank_bsb" value="{{ company.bank_bsb or '' }}"></div>
-<div><label for="bank_account_no">Account number</label><input id="bank_account_no" name="bank_account_no" value="{{ company.bank_account_no or '' }}"></div>
-<div class="wide"><label for="payment_instructions">Other payment instructions</label><input id="payment_instructions" name="payment_instructions" value="{{ company.payment_instructions or '' }}" placeholder="e.g. Please use the invoice number as the reference"></div></div></div>
 {% if product.separate %}<div class="card"><h3>Edition</h3><p style="margin:0">This is <b>{{ product.app }}</b>. <a href="{{ url_for('core.upgrade') }}">{{ 'Upgrade to ' ~ editions.enterprise.title if product.key == 'basic' else 'Switch to ' ~ editions.basic.title }} →</a> Your books stay exactly as they are.</p></div>
 {% else %}<div class="card"><h3>Edition</h3><div class="fields">
 <div><label>Riyeser Accounting edition</label><select name="edition"><option value="basic" {{ 'selected' if company.edition=='basic' }}>{{ editions.basic.name }} ({{ prices.basic }} a month per business, free for 90 days): invoicing, stock and inventory</option><option value="enterprise" {{ 'selected' if company.edition!='basic' }}{{ ' disabled' if not company.enterprise_allowed }}>{{ editions.enterprise.name }} (licence): everything</option></select></div>
