@@ -292,6 +292,44 @@ def remind(bid):
     return redirect(url_for("bookings.edit", bid=bid))
 
 
+def confirmation(db, bid):
+    """The booking confirmation: {'to', 'subject', 'body', 'b', 'when', 'what'} (to is None without an email)."""
+    b = db.execute("SELECT b.*, c.name cname, c.email cemail, s.name service, r.name resource FROM bookings b"
+                   " LEFT JOIN contacts c ON c.id=b.contact_id LEFT JOIN booking_services s ON s.id=b.service_id"
+                   " LEFT JOIN booking_resources r ON r.id=b.resource_id WHERE b.id=?", (bid,)).fetchone()
+    if not b:
+        abort(404)
+    co = db.execute("SELECT name, phone FROM company WHERE id=1").fetchone()
+    when = datetime.fromisoformat(b["starts_at"])
+    what = b["service"] or b["title"] or M()["one"]
+    subject = f"Booking confirmed: {what} on {when:%a %d %b} at {when:%H:%M} with {co['name']}"
+    body = (f"Hello {b['cname'] or ''},\n\nThank you for your booking. Your {what.lower()} with {co['name']} is "
+            f"booked for {when:%A %d %B %Y} at {when:%H:%M}" + (f", at {b['address']}" if b["address"] else "")
+            + ".\n\nTo change the time, reply to this email or call us"
+            + (f" on {co['phone']}" if co["phone"] else "") + f".\n\nThank you,\n{co['name']}")
+    return dict(to=(b["cemail"] or "").strip() or None, subject=subject, body=body, b=b, when=when, what=what)
+
+
+@bp.route("/<int:bid>/confirmation")
+def confirmation_page(bid):
+    """A booking confirmation to print or save as PDF, with the business's logo and details."""
+    c = confirmation(get_db(), bid)
+    return render_template("bookings/confirmation.html", c=c, b=c["b"], m=M())
+
+
+@bp.route("/<int:bid>/confirm-email", methods=["POST"])
+@guarded
+def confirm_email(bid):
+    """Email the booking confirmation (when email is set up)."""
+    from .email import send_or_queue
+    db = get_db()
+    c = confirmation(db, bid)
+    if not c["to"]:
+        raise PostingError("Add the customer's email address first.")
+    flash(send_or_queue(db, c["to"], c["subject"], c["body"], kind="booking_confirmation", ref_id=bid), "ok")
+    return redirect(url_for("bookings.edit", bid=bid))
+
+
 def _lanes(items):
     """Give each booking a lane (and how many lanes its overlapping group has)."""
     items.sort(key=lambda i: (i["top"], -i["height"]))

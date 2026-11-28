@@ -1,7 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><title>Statement · {{ c.name }}</title><link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}"></head>
 <body><div class="doc-print">
-<div class="hdr"><div><h1>Statement</h1><div class="muted">{{ st.start }} to {{ st.end }}</div></div>
-<div class="right"><b>{{ company.name }}</b><br>{{ company.address or '' }}<br>{% if company.abn %}{{ tl.tax_id }} {{ company.abn }}{% endif %}</div></div>
+{% import "_brand.html" as brand %}{{ brand.letterhead('Statement', st.start ~ ' to ' ~ st.end) }}
 <p><span class="muted">{{ st.label }}</span><br><b>{{ c.name }}</b><br>{{ c.address or '' }}</p>
 <form class="filters noprint"><div><label for="st-start">From</label><input id="st-start" type="date" name="start" value="{{ st.start }}"></div><div><label for="st-end">To</label><input id="st-end" type="date" name="end" value="{{ st.end }}"></div><div><button class="btn">Show</button></div></form>
 <table><tr><th>Date</th><th>Transaction</th><th>Reference</th><th class="n">Amount</th><th class="n">Balance</th></tr>
@@ -11,6 +10,7 @@
 <table style="margin-top:14px"><tr>{% for b in st.buckets %}<th class="n">{{ b }}</th>{% endfor %}</tr><tr>{% for v in st.ages %}<td class="n {{ 'neg' if loop.index0 > 0 and v > 0 }}">{{ v|money }}</td>{% endfor %}</tr></table>
 {% if st.overdue %}<p class="neg" role="alert"><b>Overdue:</b> {% for o in st.overdue %}{{ o.number }} ({{ o.days }} days, {{ o.due|money }}){{ ', ' if not loop.last }}{% endfor %}</p>{% endif %}
 {% if how_to_pay and st.side == 'sale' %}<h3>How to pay</h3>{% for l in how_to_pay %}<p style="margin:2px 0">{{ l }}</p>{% endfor %}{% endif %}
+{% if st.side == 'sale' %}{{ brand.doc_footer('statement') }}{% endif %}
 <p class="noprint" style="margin-top:24px"><button class="btn pri" onclick="print()">Print</button> <a class="btn" href="?pdf=1&start={{ st.start }}&end={{ st.end }}">Download PDF</a> <a class="btn" href="{{ url_for('contacts.view', cid=c.id) }}">Back</a></p>
 {% if c.email %}<form method="post" class="noprint" action="{{ url_for('contacts.email_statement', cid=c.id) }}"><input type="hidden" name="start" value="{{ st.start }}"><input type="hidden" name="end" value="{{ st.end }}"><button class="btn">Email to {{ c.email }}</button></form>{% endif %}
 </div></body></html>

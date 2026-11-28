@@ -1,10 +1,11 @@
 <!doctype html><html><head><meta charset="utf-8"><title>Receipt {{ s.number }}</title>
+{% import "pos/_receipt_brand.html" as rb %}{% set paper = paper|default(request.args.get('paper') or '80') %}
 <style>body{font:13px/1.4 "Courier New",monospace;margin:0;background:#fff;color:#000}.r{width:72mm;margin:0 auto;padding:10px 4px}
 h1{font-size:16px;text-align:center;margin:0}.c{text-align:center}hr{border:0;border-top:1px dashed #000;margin:8px 0}
 table{width:100%;border-collapse:collapse}td{padding:2px 0;vertical-align:top}td.n{text-align:right;white-space:nowrap}.t td{font-weight:bold;font-size:15px}
-@media print{.np{display:none}@page{size:80mm auto;margin:0}}</style></head>
-<body onload="setTimeout(()=>window.print(),300)"><div class="r">
-<h1>{{ company.name }}</h1><div class="c">{{ company.address or '' }}{% if company.abn %}<br>{{ tl.tax_id }} {{ company.abn }}{% endif %}{% if company.phone %}<br>{{ company.phone }}{% endif %}</div>
+@media print{.np{display:none}}{{ rb.styles(paper) }}</style></head>
+<body onload="setTimeout(()=>window.print(),300)"><div class="r{{ ' p58' if paper == '58' }}">
+{{ rb.head(tl, show_logo|default(true)) }}
 <hr><div class="c"><b>{{ tl.invoice|upper }}</b><br>{{ s.number }} · {{ s.created_at }}{% if s.voided %}<br><b>*** VOIDED ***</b>{% endif %}</div><hr>
 <table>{% for l in lines %}<tr><td colspan="2">{{ l.description }}</td></tr>
 <tr><td>&nbsp; {{ '%g'|format(l.qty) }} x {{ l.unit_price|money }}{% if l.discount_pct %} -{{ '%g'|format(l.discount_pct) }}%{% endif %}</td><td class="n">{{ (l.net_amount + l.tax_amount)|money }}</td></tr>{% endfor %}</table>
@@ -26,6 +27,6 @@ table{width:100%;border-collapse:collapse}td{padding:2px 0;vertical-align:top}td
 {% endif %}{% endif %}{% else %}{% if s.total %}<tr><td>{{ methods[s.method] or ('Paid online' if s.method == 'online' else s.method) }}</td><td class="n">{{ s.tendered|money }}</td></tr>
 {% if s.method == 'cash' %}<tr><td>Change</td><td class="n">{{ s.change_given|money }}</td></tr>{% endif %}{% endif %}{% endfor %}</table>
 {% for t in tenders if t.receipt %}<hr><div style="white-space:pre-wrap;font-size:12px">{{ t.receipt|join('\n') }}</div>{% endfor %}
-<hr><div class="c">{% if s.cname != 'Walk-in Customer' %}Customer: {{ s.cname }}<br>{% endif %}Served by {{ s.full_name or s.username }}<br>Thank you!</div>
+<hr><div class="c">{% if s.cname != 'Walk-in Customer' %}Customer: {{ s.cname }}<br>{% endif %}Served by {{ s.full_name or s.username }}<br>{{ rb.thanks(receipt_footer|default(none)) }}</div>
 <p class="c np"><button onclick="print()">Print</button>
 {% if request.args.back %}<a href="{{ url_for('pos.register') }}"><button>New sale</button></a>{% else %}<button onclick="close()">Close</button>{% endif %}</p></div></body></html>

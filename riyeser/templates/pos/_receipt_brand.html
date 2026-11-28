@@ -1,0 +1,11 @@
+{# Business details & branding on till receipts (feat/branding). Kept in this one file so it merges cleanly with
+   the receipt printer settings (paper width, logo on/off, receipt footer): pass paper='58' or '80' and
+   show_logo=False from those settings; ?paper=58 works for a quick check. The logo is the black-and-white copy made
+   for receipt printers, centred, and never stretched or wider than the paper. #}
+{% macro styles(paper) %}.r.p58{width:48mm;font-size:12px}.r .rb-logo{display:block;margin:0 auto 6px;max-width:60%;max-height:22mm;width:auto;height:auto;object-fit:contain}
+.r .rb-logo.grey{filter:grayscale(1) contrast(1.2)}.r h1{overflow-wrap:anywhere}.r .rb-small{font-size:.86em}.r .c{overflow-wrap:anywhere}
+@media print{@page{size:{{ '58mm' if paper == '58' else '80mm' }} auto;margin:0}}{% endmacro %}
+{% macro head(tl, show_logo=True) %}{% set b = business_brand() %}
+{% if show_logo and b.logo_mono_uri %}<img class="rb-logo{{ ' grey' if b.logo_mono_is_greyscale }}" src="{{ b.logo_mono_uri }}" alt="{{ b.name }}">{% endif %}
+<h1>{{ b.name }}</h1><div class="c">{% if b.legal_name %}<span class="rb-small">{{ b.legal_name }}</span><br>{% endif %}{% for l in b.address_lines %}{{ l }}<br>{% endfor %}{% if b.tax_line %}{{ b.tax_line }}<br>{% endif %}{% if b.phone %}{{ b.phone }}<br>{% endif %}{% for x in (b.email, b.website) if x %}<span class="rb-small">{{ x }}</span><br>{% endfor %}</div>{% endmacro %}
+{% macro thanks(footer=None) %}{% set note = footer or business_brand().footers.receipt %}{% if note %}<span style="white-space:pre-line">{{ note }}</span>{% else %}Thank you!{% endif %}{% endmacro %}

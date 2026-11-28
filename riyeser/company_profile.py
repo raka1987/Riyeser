@@ -38,5 +38,10 @@ def apply_to_new_file(db, profile=None):
     db.execute("UPDATE company SET abn=COALESCE(NULLIF(abn,''),?), address=COALESCE(NULLIF(address,''),?),"
                " phone=COALESCE(NULLIF(phone,''),?), email=COALESCE(NULLIF(email,''),?) WHERE id=1",
                (p.get("tax_number") or None, p.get("address") or None, p.get("phone") or None, p.get("email") or None))
+    try:   # the legal name too (Business details & branding); Central's logo is used until the file has its own
+        db.execute("UPDATE company SET legal_name=COALESCE(NULLIF(legal_name,''),?) WHERE id=1",
+                   (p.get("legal_name") or None,))
+    except Exception:  # noqa: BLE001 - a file from before branding: nothing to fill
+        pass
     db.commit()
     return True
