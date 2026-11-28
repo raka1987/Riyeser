@@ -1,0 +1,15 @@
+{% extends "base.html" %}{% block title %}Stock transfers{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Stock transfers</h1><p class="sub">Send stock from one location to another. It's "in transit" until the other location receives it, and it can arrive in parts.</p></div>
+<div class="actions"><a class="btn" href="{{ url_for('inventory.locations') }}">Locations</a>{% if several %}<a class="btn pri" href="{{ url_for('inventory.transfer_edit') }}">New transfer</a>{% endif %}</div></div>
+{% if not several %}<div class="card"><p style="margin:0">You have one location. <a href="{{ url_for('inventory.locations') }}">Add another location</a> (a second shop, a storeroom, a van) to transfer stock between them.</p></div>{% endif %}
+<div class="tabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">{% for k, n in [('', 'All'), ('open', 'Open')] + status.items()|list %}<a class="btn sm{{ ' pri' if st == k }}" href="{{ url_for('inventory.transfers', st=k or None) }}">{{ n }}</a>{% endfor %}</div>
+<div class="tbl"><table>
+<tr><th>Transfer</th><th>From</th><th>To</th><th class="n">Lines</th><th class="n">Units</th><th>Status</th><th>Made</th><th></th></tr>
+{% for t in rows %}<tr><td><a href="{{ url_for('inventory.transfer_view', tid=t.id) }}"><b>{{ t.number }}</b></a></td><td>{{ t.from_name }}</td><td>{{ t.to_name }}</td>
+<td class="n">{{ t.n }}</td><td class="n">{{ '%g'|format(t.units) }}</td>
+<td><span class="badge {{ {'draft':'quote','sent':'open','partial':'open','received':'paid','cancelled':'void'}[t.status] }}">{{ status[t.status] }}</span></td>
+<td>{{ t.created_at[:16] }}</td><td><a class="btn sm" href="{{ url_for('inventory.transfer_view', tid=t.id) }}">Open</a></td></tr>
+{% else %}<tr><td colspan="8">No transfers{{ ' here' if st }} yet.</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

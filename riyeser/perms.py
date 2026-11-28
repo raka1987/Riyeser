@@ -21,6 +21,8 @@ AREAS = [
     ("banking", "Banking", "Bank accounts, money in and out, transfers, reconciling and statement import"),
     ("stock", "Stock", "Stock items, stocktake and adjustments"),
     ("bookings", "Bookings", "The bookings calendar: jobs, appointments and table bookings"),
+    ("kitchen", "Kitchen screen", "Riyeser POS kitchen display: order tickets to cook and bump. No prices or "
+                                  "customers. Add & edit: bump and recall tickets"),
     ("payroll", "Payroll", "Employees, pay rates, pay runs and payslips"),
     ("expenses", "Expense claims", "Staff paid for something and want it back. Add & edit: claim your own. "
                                    "Full: see everyone's, approve or decline, and pay them back"),
@@ -31,9 +33,10 @@ AREA_KEYS = [a for a, _, _ in AREAS]
 PRESETS = {
     "owner": ("Owner / manager", {a: FULL for a in AREA_KEYS}),
     "bookkeeper": ("Bookkeeper", {**{a: FULL for a in AREA_KEYS}, "setup": EDIT}),
-    "sales": ("Sales staff", {"sales": EDIT, "bookings": EDIT, "purchases": HIDDEN, "banking": HIDDEN, "stock": VIEW, "payroll": HIDDEN,
+    "kitchen": ("Kitchen staff (kitchen screen only)", {**{a: HIDDEN for a in AREA_KEYS}, "kitchen": EDIT}),
+    "sales": ("Sales staff", {"sales": EDIT, "bookings": EDIT, "kitchen": EDIT, "purchases": HIDDEN, "banking": HIDDEN, "stock": VIEW, "payroll": HIDDEN,
                               "accounts": HIDDEN, "setup": HIDDEN, "expenses": EDIT}),
-    "payroll": ("Payroll officer", {"sales": HIDDEN, "bookings": VIEW, "purchases": HIDDEN, "banking": VIEW, "stock": HIDDEN, "payroll": FULL,
+    "payroll": ("Payroll officer", {"sales": HIDDEN, "bookings": VIEW, "kitchen": HIDDEN, "purchases": HIDDEN, "banking": VIEW, "stock": HIDDEN, "payroll": FULL,
                                     "accounts": HIDDEN, "setup": HIDDEN, "expenses": EDIT}),
     "readonly": ("Read-only (no payroll)", {**{a: VIEW for a in AREA_KEYS}, "payroll": HIDDEN}),
 }
@@ -183,6 +186,8 @@ def area_of(endpoint, view_args, args, db):
         return "setup"  # how the till is set up is a setup decision, not a sales one
     if bp == "pos":
         return "sales"
+    if bp == "kds":
+        return None if endpoint == "kds.pair" else "kitchen"  # the kitchen screen has its own permission
     if bp == "banking":
         return "banking"
     if bp == "inventory":

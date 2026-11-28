@@ -1,8 +1,12 @@
 {% extends "base.html" %}{% block title %}Stocktake{% endblock %}
 {% block content %}
-<div class="head"><div><h1>Stocktake</h1><p class="sub">Enter counted quantities; differences post to Inventory Adjustments. Leave blank to skip.</p></div></div>
-<form method="post" class="card"><div class="fields"><div><label>Count date</label><input type="date" name="date" value="{{ today() }}"></div></div>
-<table><tr><th>SKU</th><th>Name</th><th class="n">On hand</th><th class="n">Avg cost</th><th class="n" style="width:140px">Counted</th></tr>
-{% for i in items %}<tr><td>{{ i.sku }}</td><td>{{ i.name }}</td><td class="n">{{ '%g'|format(i.qty_on_hand) }}</td><td class="n">{{ i.avg_cost|money }}</td><td><input name="count_{{ i.id }}" class="right"></td></tr>{% endfor %}</table>
+<div class="head"><div><h1>Stocktake{% if loc_name %} at {{ loc_name }}{% endif %}</h1><p class="sub">Enter counted quantities; differences post to Inventory Adjustments. Leave blank to skip.</p></div></div>
+{% if locations %}<div class="card" style="padding:12px 16px"><form method="get" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0">
+<label for="loc" style="margin:0;font-weight:600">Location</label>
+<select id="loc" name="loc" onchange="this.form.submit()" style="width:auto;min-width:200px">{% for l in locations %}<option value="{{ l.id }}" {{ 'selected' if l.id == loc }}>{{ l.name }}</option>{% endfor %}</select>
+<span class="muted" style="font-size:13px">Count what's at this location only. "On hand" is what Riyeser has there.</span></form></div>{% endif %}
+<form method="post" class="card"><input type="hidden" name="loc" value="{{ loc or '' }}"><div class="fields"><div><label>Count date</label><input type="date" name="date" value="{{ today() }}"></div></div>
+<div class="tbl"><table><tr><th>SKU</th><th>Name</th><th class="n">On hand{% if loc_name %} here{% endif %}</th><th class="n">Avg cost</th><th class="n" style="width:140px">Counted</th></tr>
+{% for i in items %}<tr><td>{{ i.sku }}</td><td>{{ i.name }}</td><td class="n">{{ '%g'|format(i.qty_on_hand) }}</td><td class="n">{{ i.avg_cost|money }}</td><td><input name="count_{{ i.id }}" class="right" inputmode="decimal" aria-label="Counted {{ i.sku }}"></td></tr>{% endfor %}</table></div>
 <p><button class="btn pri">Post stocktake</button></p></form>
 {% endblock %}

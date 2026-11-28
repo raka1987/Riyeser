@@ -7,7 +7,7 @@ from flask import Flask, g, session, redirect, url_for, request, abort, flash, r
 from . import db as dbmod
 from .db import fmt_money, cents_str, get_db
 
-__version__ = "2.10.1"
+__version__ = "2.11.0"
 
 
 def create_app(test_config=None):
@@ -52,6 +52,12 @@ def create_app(test_config=None):
         if (request.endpoint or "").startswith("online_api."):  # Riyeser Central's local API: its own check
             from .views.online import api_guard
             return api_guard()
+        if (request.endpoint or "").startswith("kds.") and os.path.exists(app.config["DATABASE"]):
+            from .views.kds import kds_guard   # the kitchen screen: a paired device, or a signed-in user (below)
+            if kds_guard(app) is None:
+                return None
+            if not session.get("uid"):  # not paired and not signed in: pair this screen
+                return redirect(url_for("kds.pair"))
         if app.config["DEMO_MODE"]:
             if not demo_mode.demo_on():  # Central has left demo mode while this program was open
                 if request.endpoint != "static":
@@ -235,6 +241,8 @@ def create_app(test_config=None):
     app.register_blueprint(payroll.bp)
     app.register_blueprint(reports.bp)
     app.register_blueprint(pos.bp)
+    from .views import kds
+    app.register_blueprint(kds.bp)
     app.register_blueprint(bookings.bp)
     app.register_blueprint(links.bp)
     app.register_blueprint(help.bp)
@@ -288,7 +296,7 @@ def create_app(test_config=None):
 
 # Riyeser POS is the till plus what a shop needs to run it: products and stock, customers, users, help.
 # Everything else is Riyeser Accounting's, so POS sends people back to the till.
-POS_APP_AREAS = ("pos.", "inventory.", "contacts.", "companies.", "help.", "auth.", "backups.", "email.")
+POS_APP_AREAS = ("pos.", "inventory.", "contacts.", "companies.", "help.", "auth.", "backups.", "email.", "kds.")
 
 
 def _separate_app_redirect(endpoint):

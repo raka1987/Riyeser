@@ -9,6 +9,9 @@ table{width:100%;border-collapse:collapse}td{padding:2px 0;vertical-align:top}td
 <table>{% for l in lines %}<tr><td colspan="2">{{ l.description }}</td></tr>
 <tr><td>&nbsp; {{ '%g'|format(l.qty) }} x {{ l.unit_price|money }}{% if l.discount_pct %} -{{ '%g'|format(l.discount_pct) }}%{% endif %}</td><td class="n">{{ (l.net_amount + l.tax_amount)|money }}</td></tr>{% endfor %}</table>
 <hr><table><tr class="t"><td>TOTAL</td><td class="n">{{ s.total|money }}</td></tr>
+{% if parts %}<tr><td colspan="2">&nbsp;</td></tr><tr><td colspan="2"><b>Split bill ({{ parts|length }} parts)</b></td></tr>
+{% for p in parts %}<tr{% if part and p.id == part.id %} style="font-weight:bold"{% endif %}><td>&nbsp; {{ p.label }}{{ ' (this receipt)' if part and p.id == part.id }}</td><td class="n">{{ p.amount|money }} {{ 'paid' if p.paid_at else 'to pay' }}</td></tr>{% endfor %}
+{% if part %}<tr class="t"><td>{{ part.label|upper }} PAID</td><td class="n">{{ part.amount|money }}</td></tr>{% endif %}{% endif %}
 {% if tl.has_tax %}<tr><td>{{ tl.tax }} included</td><td class="n">{{ s.tax_total|money }}</td></tr>{% endif %}
 {% for t in tenders %}{% if t.method == 'cash' %}<tr><td>Cash</td><td class="n">{{ t.tendered|money }}</td></tr>
 <tr><td>Change</td><td class="n">{{ t.change_given|money }}</td></tr>

@@ -20,7 +20,7 @@
 <div class="tip"><span>ⓘ</span><div>Changing this never deletes sales, products or stock. It only changes what the till shows{% if not can_change %}. <b>Only an owner or administrator can change it.</b>{% else %}, and you can switch back at any time.{% endif %}</div></div>
 <form method="post" id="setupForm">
 <input type="hidden" name="mode_changed" id="modeChanged" value="0">
-<fieldset {{ 'disabled' if not can_change }} style="border:0;padding:0;margin:0">
+<fieldset {{ 'disabled' if not can_change }} style="border:0;padding:0;margin:0;min-width:0">
 <div class="card"><h2 style="margin-top:0">1 · What kind of business is this?</h2>
   <div class="ptypes">{% for k, m in modes.items() %}
     <label class="ptype"><input type="radio" name="mode" value="{{ k }}" {{ 'checked' if k == mode }} data-mode>
@@ -33,15 +33,17 @@
     <label class="ft"><div><b>{{ name }}</b><small>{{ help }}</small></div><input class="sw" type="checkbox" name="feature" value="{{ key }}" {{ 'checked' if key in on }} aria-label="{{ name }}"></label>{% endfor %}</div>
 </div>
 <div class="card"><h2 style="margin-top:0">3 · Tills</h2>
-  <p class="sub" style="margin-top:-4px">Give each register a name. Each sale records which till it was made on, and the till is picked at the top of the POS screen.</p>
-  <div class="tbl"><table><tr><th>Till name</th><th>Location</th><th></th></tr>
-  {% for t in tills %}<tr><td><input name="till_name_{{ t.id }}" value="{{ t.name }}" maxlength="40"></td><td><input name="till_loc_{{ t.id }}" value="{{ t.location or '' }}" maxlength="60" placeholder="e.g. Front counter"></td>
+  <p class="sub" style="margin-top:-4px">Give each register a name. Each sale records which till it was made on, and the till is picked at the top of the POS screen. Each till sells stock from its <b>stock location</b>{% if stock_locations|length < 2 %} (you have one: add more under <a href="{{ url_for('inventory.locations') }}">Stock locations</a>){% endif %}.</p>
+  <div class="tbl"><table><tr><th>Till name</th><th>Where it is</th><th>Sells stock from</th><th></th></tr>
+  {% for t in tills %}<tr><td><input name="till_name_{{ t.id }}" value="{{ t.name }}" maxlength="40" aria-label="Till name"></td><td><input name="till_loc_{{ t.id }}" value="{{ t.location or '' }}" maxlength="60" placeholder="e.g. Front counter" aria-label="Where the till is"></td>
+    <td><select name="till_stock_{{ t.id }}" aria-label="Stock location">{% for l in stock_locations %}<option value="{{ l.id }}" {{ 'selected' if l.id == t.location_id }}>{{ l.name }}</option>{% endfor %}</select></td>
     <td>{% if tills|length > 1 %}<label class="check"><input type="checkbox" name="till_remove_{{ t.id }}" value="1"> Remove</label>{% endif %}</td></tr>{% endfor %}
-  <tr><td><input name="new_till" maxlength="40" placeholder="+ Add another till, e.g. Till 2"></td><td><input name="new_till_loc" maxlength="60" placeholder="Location"></td><td></td></tr></table></div>
+  <tr><td><input name="new_till" maxlength="40" placeholder="+ Add another till, e.g. Till 2" aria-label="New till"></td><td><input name="new_till_loc" maxlength="60" placeholder="Where it is" aria-label="Where the new till is"></td>
+    <td><select name="new_till_stock" aria-label="Stock location for the new till">{% for l in stock_locations %}<option value="{{ l.id }}">{{ l.name }}</option>{% endfor %}</select></td><td></td></tr></table></div>
 </div>
-<div class="card"><h2 style="margin-top:0">4 · Card payments</h2>
-  <p class="sub" style="margin-top:-4px">Link each till to a card machine (EFTPOS): Manual, the Practice terminal, or a linked terminal (coming soon). Test it with a $1.00 payment.</p>
-  <a class="btn" href="{{ url_for('pos.card_setup') }}">Set up card payments</a></div>
+<div class="card"><h2 style="margin-top:0">4 · Card payments, cash drawer and kitchen</h2>
+  <p class="sub" style="margin-top:-4px">Link each till to a card machine (EFTPOS): Manual, the Practice terminal, or a linked terminal (coming soon). Open the cash drawer from the receipt printer. Send orders to printed dockets, a kitchen screen, or both.</p>
+  <div style="display:flex;gap:10px;flex-wrap:wrap"><a class="btn" href="{{ url_for('pos.card_setup') }}">Card payments</a><a class="btn" href="{{ url_for('pos.drawer_setup') }}">Cash drawer</a>{% if mode == 'restaurant' %}<a class="btn" href="{{ url_for('pos.kitchen_setup') }}">Kitchen: stations &amp; screen</a>{% endif %}<a class="btn" href="{{ url_for('inventory.locations') }}">Stock locations</a></div></div>
 {% if can_change %}<p class="actions" style="justify-content:flex-end"><a class="btn" href="{{ url_for('core.dashboard') }}">Cancel</a><button class="btn pri">Save POS setup</button></p>{% endif %}
 </fieldset>
 </form>

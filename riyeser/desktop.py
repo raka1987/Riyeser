@@ -86,6 +86,9 @@ def main(argv=None):
         atexit.register(remove_local_api, app)
     except OSError:
         pass
+    if is_pos_app():  # kitchen screens on the local network, when that was turned on (POS > Kitchen)
+        from .views.kds import autostart
+        autostart(app)
     print(f"{app_name} running at {url}  (company file: {app.config['DATABASE']}"
           f"{', demo mode' if app.config.get('DEMO_MODE') else ''})", flush=True)
 
