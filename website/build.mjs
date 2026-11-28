@@ -9,6 +9,7 @@ import { helpGuides } from './help.mjs';
 import { developerPages, DEV_PAGES } from './developers.mjs';
 import { connectSection, connectTeaser } from './connect.mjs';
 import { PRICE, STORAGE_GB, BUNDLES, separately, planPrice, usd } from './prices.mjs';
+import { STATUS, WHERE, NET, CHECKED, FACTS, FEATURES, COMPARE_ACCOUNTING, COMPARE_LINK, FAQ as PROG_FAQ, HARDWARE, COUNTRIES } from './content/features.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const OUT = process.env.OUT_DIR || join(ROOT, 'public');
@@ -43,13 +44,13 @@ const ALL_PROGRAMS = [
     one: `Invoicing, quotes, customers, stock reordering and expense claims for shops and sole traders. Free for 90 days, no card.`,
     pitch: 'Invoice, get paid and keep stock.' },
   { id: 'accounting', name: 'Riyeser Accounting Plus', short: 'Accounting Plus', icon: '📒', file: 'RiyeserAccountingPlus-Setup.exe',
-    one: `Full double-entry books: everything in Basics plus banking, payroll, journals, jobs and budgets. Free for 90 days, no card. You pay for Plus instead of Basics, never both.`,
+    one: `Complete double-entry accounting: everything in Basics plus bank reconciliation, journals, jobs, budgets and the full set of reports. Free for 90 days, no card. You pay for Plus instead of Basics, never both.`,
     pitch: 'Know who owes you, and who you owe.',
     shot: 'accounting.webp',
-    note: 'Built for Australian small businesses. Have your accountant check your setup before relying on it for tax.' },
+    note: 'Set up for Australian GST and BAS by default. Its built-in payroll is an Australian estimate only (not the ATO tax tables, and no Single Touch Payroll), so don\'t use it for real pay runs yet: use Riyeser Payroll, or your current payroll. Have your accountant check your setup before relying on it for tax.' },
   { id: 'pos', name: 'Riyeser POS', short: 'POS', icon: '🧾', file: 'RiyeserPOS-Setup.exe',
-    one: `A touch-friendly till for retail shops or cafes and restaurants, with card payments sent to your EFTPOS machine. Every sale goes straight into your books. Free for 90 days, no card.`,
-    pitch: 'Sell at the counter. Books done automatically.',
+    one: `Point-of-sale software for retail shops, cafés and restaurants: a touch-friendly till, with cash and card on your own EFTPOS machine. Every sale goes straight into your books. Free for 90 days, no card.`,
+    pitch: 'Sell at the counter. Your accounting records update automatically.',
     shot: 'pos-till.webp',
     note: 'Riyeser POS is its own app. It opens the same company file as Accounting Basics or Plus, but you don\'t need Accounting to use it.' },
   { id: 'bookings', name: 'Riyeser Bookings', short: 'Bookings', icon: '📅', file: 'RiyeserBookings-Setup.exe',
@@ -64,7 +65,7 @@ const ALL_PROGRAMS = [
   { id: 'payroll', name: 'Riyeser Payroll', short: 'Payroll', icon: '🕒', file: PAYROLL_WIN ? 'RiyeserPayroll-Setup.exe' : null,
     one: `Rosters, time clock, timesheets, pay runs, payslips and leave — and export every payslip as a PDF in one click. Free for 90 days, no card.`,
     pitch: 'Pay day without the paperwork.',
-    note: 'Check the PAYE and FNPF rates in Payroll rules against the current rules before you pay staff.' },
+    note: 'Built around Fiji\'s PAYE and FNPF, using the rates you enter in Payroll rules: check them against the current rules before you pay staff. Australian and New Zealand payroll (PAYG, super, Single Touch Payroll, KiwiSaver) are not built in.' },
   // Riyeser Documents (formerly Riyeser Desk Assistant; its old pages programs/desk-assistant.html and
   // help/desk-assistant.html forward here, see "old riyeser.com addresses"). Releases carry its installer
   // as RiyeserDocuments-Setup.exe and, for old links and older Centrals, RiyeserDeskAssistant-Setup.exe: the old name
@@ -81,9 +82,9 @@ const ALL_PROGRAMS = [
   // Riyeser Link Office: the business's phone lines / office phone system (one PC at the office; desk phones that ring
   // each other). It comes with Riyeser Link, so it never shows a price of its own (comesWith).
   { id: 'link-office', name: 'Riyeser Link Office', short: 'Link Office', icon: '☎', file: 'RiyeserLinkOffice-Setup.exe', comesWith: 'link',
-    one: 'Your business\'s phone lines: the office phone system. Install it on one PC at the office, plug in desk phones, and everyone gets an extension, with ring groups, and calls can be answered in the Riyeser Link app too. Staff call each other free inside the office. Comes with Riyeser Link.',
-    pitch: 'Desk phones that ring each other.',
-    note: 'Not yet: calls to and from outside phone numbers, and office phones away from the office. These phones can\'t call emergency services: keep a mobile or normal phone line for that.' },
+    one: 'Your internal office phone system for desk phones (no outside lines). Install it on one PC at the office, plug in desk phones, and everyone gets an extension, with ring groups, and calls can be answered in the Riyeser Link app too. Staff call each other free inside the office. Comes with Riyeser Link.',
+    pitch: 'Your internal business phone system.',
+    note: 'Not yet: calls to and from outside phone numbers (there are no phone lines or SIP trunks). Branches at other sites and phones at home can join through the Riyeser relay (beta, needs the internet). These phones can\'t call emergency services: keep a mobile or normal phone line for that.' },
   { id: 'pdf', name: 'Riyeser PDF', short: 'PDF', icon: '📕', file: 'RiyeserPDF-Setup.exe',
     one: 'Open, fill in, sign, combine and edit PDFs — even scanned ones.',
     pitch: 'Drawings and forms, done on the PC.',
@@ -97,14 +98,14 @@ const CARD = {
   central: ['Your home screen for every program.', 'Home screen and updates'],
   invoices: ['Quotes customers accept, invoices and getting paid.', 'Free invoicing'],
   'accounting-basics': ['Invoices, quotes, stock reordering and expense claims.', 'Invoicing and stock'],
-  accounting: ['Full books, banking, BAS and payroll.', 'Full books and banking'],
-  pos: ['A touch-friendly till for shops and cafes.', 'The till for shops and cafes'],
+  accounting: ['Complete books, bank reconciliation and BAS.', 'Complete accounting and bank reconciliation'],
+  pos: ['Point-of-sale software for retail and hospitality.', 'Point of sale for retail and hospitality'],
   bookings: ['Jobs, appointments, tables and on-site sign-off.', 'Jobs, appointments, on-site sign-off'],
   estimate: ['Measure on a plan, a photo or the map, then quote.', 'Measure and quote'],
   payroll: ['Rosters, timesheets, pay runs and payslips.', 'Rosters and pay runs'],
   documents: ['Scan, file and find every office document.', 'Scan, file and find documents'],
   link: ['Chat, calls and desk phones for your team.', 'Chat, calls and phones'],
-  'link-office': ['Your office phone system: desk phones and extensions.', 'Office phone system'],
+  'link-office': ['Your internal business phone system: desk phones and extensions.', 'Internal business phone system'],
   pdf: ['Open, fill in, sign and combine PDFs.', 'Fill, sign and edit PDFs'],
   services: ['Cables, pipes and ducts on your plans.', 'Services on your drawings'],
 };
@@ -137,8 +138,8 @@ const INCL = {
 };
 const inclOf = (m) => INCL[m] || [`${PRICE.users_included} users included`, `+${usd(PRICE.extra_user)} a month per extra user`];
 const inclLine = (m) => inclOf(m).join(' · ');
-/** Where space is tight (menu rows): "US$39/mo · 3 users incl." */
-const priceShort = (m) => `${usd(PRICE[m])}/mo · ${m === 'pos' ? '1 till incl.' : `${PRICE.users_included} users incl.`}`;
+/** Where space is tight (menu rows): "US$39/month · 3 users incl." */
+const priceShort = (m) => `${usd(PRICE[m])}/month · ${m === 'pos' ? '1 till incl.' : `${PRICE.users_included} users incl.`}`;
 const USERS_NOTE = `Every paid program includes ${PRICE.users_included} users (POS: 1 till and unlimited cashiers); extra users ${usd(PRICE.extra_user)} a month each. Your accountant signs in free.`;
 /** Where the two buttons go: create an account (or sign in), then Riyeser home opens "Add to my plan" for these programs. */
 const BUY_LINK = (mods, buy, extra = '') => `/link/?signup&add=${mods}${extra}${buy ? '&buy=1' : ''}`;
@@ -161,7 +162,7 @@ const INCLUDES = {
     'Money owed to you, overdue invoices and bills to pay, from Riyeser Accounting', 'Your last pay run, from Riyeser Payroll',
     'Recent activity, invoices to chase and shortcuts (open the till, new invoice, new booking, run payroll)',
     'One search box for your documents: by name or the words inside, from Riyeser Documents', 'Recent documents: pick up the files you opened last', 'A getting-started checklist',
-    'Demo mode: try every program with a made-up sample business', 'Your company and Riyeser licence in one place', 'Light and dark look'],
+    'Demo mode: try every program with a sample business', 'Your company and Riyeser licence in one place', 'Light and dark look'],
   invoices: ['Today, your home screen: unpaid invoices (overdue first), money in this week and the calls you said you\'d make', 'Quotes and tax invoices with your business details',
     'Quotes with a valid-until date: mark them accepted or declined, and late ones show as expired', 'Turn an accepted quote into an invoice in one click, or into a Riyeser Bookings job',
     'A page for each customer: every quote, invoice, payment and booking in one list, with notes and call-back reminders', 'Customers and customer statements',
@@ -181,15 +182,15 @@ const INCLUDES = {
     'Print any report or export it to CSV for Excel', 'Business overview: income, expenses, cash, overdue invoices, bills to pay and low stock',
     'Users and roles, and an audit trail', 'More than one company with one sign-in (extra companies charged separately)'],
   accounting: ['Everything in Accounting Basics', 'The Today screen, customer pages, expense claims and stock reordering, as in Basics', 'Bank reconciliation, with undo', 'Bank statement import (CSV): allocate or split each line in one click',
-    'Transfer money between accounts', 'Payroll in your books: employees, pay runs, payslips with year-to-date totals and leave',
+    'Transfer money between accounts', 'Payroll in your books: employees, pay runs and payslips (an Australian estimate for now: not for real pay runs until the ATO tax tables and Single Touch Payroll are in)',
     'General journal, reversing entries and search transactions', 'Jobs (job costing) and monthly budgets', 'Tax codes and a BAS / GST summary (G1, 1A, 1B, W1, W2 and more)',
     'Lock a period once it is lodged', 'Every report: Balance Sheet, Trial Balance, General Ledger, Budget vs Actual, cash movement, Job P&L and payroll summary'],
   pos: ['Retail or restaurant setup', 'Product tiles with photos, categories, Favourites, search and barcode scanning', 'Hold a sale and come back to it',
     'Tables, kitchen dockets and takeaway (restaurant setup)', 'Cash with the change worked out, or card',
-    'Card payments: press Card and the amount goes to the EFTPOS machine; when it\'s approved the receipt shows the card type, last 4 digits and auth code', 'Declined? Nothing is charged: try again or take another way to pay',
-    'Tips, cash out and surcharges on card, and split a sale between card and cash', 'Card refunds go back through the card machine',
+    'Card payments on your own EFTPOS machine: key in the amount, then tap Approved or Declined, and add the last 4 digits and auth code from the slip if you like', 'Declined? Try again or take another way to pay',
+    'Tips, cash out and surcharges on card, and split a sale between card and cash', 'Card refunds: done on your card machine and recorded on the till',
     'Protected against charging a card twice; if the till closes mid-payment, it picks up where it left off', 'Close of day: card totals by card type, to match the card machine\'s settlement',
-    'Each till set up its own way: Not linked, Manual (your own unlinked machine) or a Practice terminal for training and demos', 'Connections to card machine providers such as Windcave and Stripe are coming',
+    'Each till set up its own way: Not linked, Manual (your own unlinked machine) or a Practice terminal for training and demos', 'Linked card machines (Windcave, Stripe Terminal) are planned: not available yet',
     'Tax-invoice receipts to print',
     'Named tills (Till 1, Bar, Front counter), each opened with a float; every sale records its till', 'Refunds, voids and big discounts need a manager PIN or card, and stay in the audit trail', 'Close the till: count the drawer and print the Z-report',
     "Today's sales: takings, sales by hour, best sellers and how people paid", 'Today in the menu: today\'s sales, money in this week, low stock and the calls you said you\'d make',
@@ -204,7 +205,7 @@ const INCLUDES = {
     'Invoice this job: labour at the job type\'s or staff member\'s rate, plus parts', 'Jobs made from an accepted quote, already priced', 'Invoice a job in one click, in Riyeser Accounting or Invoices',
     'One list of finished jobs still waiting for an invoice', 'Today, your home screen: today\'s bookings and the calls you said you\'d make',
     'A page for each customer: bookings, quotes, invoices and payments in one list, with notes and call-back reminders',
-    'Opens the same company file as Accounting, Invoices and POS, so customers are shared', 'Customers booking online: coming soon'],
+    'Opens the same company file as Accounting, Invoices and POS, so customers are shared', 'Customers book online: a booking form on your website or your own riyeser.com booking page (beta: needs the internet, a Riyeser account and Riyeser Central on one PC)'],
   payroll: ['Weekly roster: shifts for each person and day, open shifts, copy last week, and drag a shift to move it',
     'Roster warnings for overlapping shifts, leave already booked, shifts over 12 hours and long weeks', 'Hours and estimated wages for each person and the week',
     'Publish the roster: staff see their shifts on the time clock and the Roster page, printed, or as a WhatsApp / SMS text',
@@ -242,14 +243,14 @@ const INCLUDES = {
     'Fill in forms', 'Sign, tick, cross, add the date or a stamp (Approved, Paid, Received…)', 'Draw, boxes, circles, lines and arrows for marking up drawings',
     "White-out, and Redact that removes what's underneath for good", 'Combine PDFs, reorder, rotate, delete, extract and split pages',
     'Page numbers and watermarks', 'Recognise the text in scanned pages', 'Make PDFs from pictures, Word and Excel, turn a PDF into Word, or save pages as pictures',
-    'Make a PDF smaller', 'Find words in a PDF'],
+    'Compress PDF files (make them smaller)', 'Find words in a PDF'],
 };
 /** A ✓ checklist, in the same style as the Accounting Basics / Plus comparison. */
 const inclList = (key) => `<ul class="edlist incl">${(INCLUDES[key] || []).map((t) => `<li>${esc(t)}</li>`).join('')}</ul>`;
 /** "What's included ▾" on the pricing page: opens the checklist under the program's name. */
 const inclDetails = (key, name) => `<details class="incd"><summary>What's included</summary><div class="incd-in" aria-label="What ${esc(name)} includes">${inclList(key)}</div></details>`;
 
-// ---------- screenshots: the real programs with a made-up sample business (assets/shots, each also as -900.webp) ----------
+// ---------- screenshots: the real programs with a sample business (assets/shots, each also as -900.webp) ----------
 // Taken with sample data only ("Coral Coast Trading (sample)", Riyeser Link's "Sample Plumbing" demo): no real people or customers.
 const SHOTS = {
   central: [['central-home', 1280, 800, 'Riyeser Central home screen in demo mode: tiles for Link, Invoices, Bookings, Books, POS, Payroll, Documents and PDF, with money owed, recent activity and shortcuts', 'Home screen, with money owed and recent activity'],
@@ -299,13 +300,16 @@ const SHOTS = {
     ['link-phone', 600, 1298, 'Riyeser Link on a phone: pinned chats, channels and direct messages', 'On a phone', 'tall']],
   // The desk phones page in Riyeser Link (shown in a Riyeser Link window: shotOf), where Link Office's phones are managed.
   'link-office': [['link-desk-phones', 1440, 900, 'Riyeser Link desk phones page: set-up steps for Riyeser Link Office and the server address to type into phones', 'Desk phones in Riyeser Link']],
+  estimate: [['estimate-list', 1440, 900, 'Riyeser Estimate in demo mode: a list of sample estimates for a roof, a fence, a bedroom, a bathroom and a living room, each with its status and quote', 'Your estimates, with their quotes'],
+    ['estimate-plan', 1440, 900, 'Measuring a sample bathroom plan in Riyeser Estimate: the floor drawn over the plan after setting the scale, with the floor and wall areas worked out', 'Measure on a plan'],
+    ['estimate-price', 1440, 900, 'Review the price in Riyeser Estimate: labour and materials worked out from the measurements, with rates, waste and amounts for a painting job', 'The price, from your measurements']],
   pdf: [['pdf-markup', 1280, 800, 'Riyeser PDF with a site plan marked up: a red circle, an arrow, a note and a tick', 'Marking up a drawing'],
     ['pdf-tools', 1280, 800, 'The Riyeser PDF Tools menu: convert, split, page numbers, watermark and make smaller', 'More tools']],
 };
 // Not lazy: there are only two to four small pictures, and lazy ones showed blank in full-page captures.
 const shotImg = (up, [f, w, h, alt]) => `<img src="${up}assets/shots/${f}-900.webp" srcset="${up}assets/shots/${f}-900.webp ${w > 900 ? 900 : w}w, ${up}assets/shots/${f}.webp ${w}w" sizes="(max-width: 640px) 92vw, (max-width: 1000px) 46vw, 560px" width="${w}" height="${h}" alt="${esc(alt)}" decoding="async">`;
 /** A small gallery; each picture opens bigger in the lightbox (no libraries). */
-const gallery = (id, up) => { const list = SHOTS[id]; if (!list || list.length < 2) return ''; /* one picture: it's already at the top */ return `<section class="c blk gal-sec" id="screens">${shead('See it in use', 'The real program, filled in with a made-up sample business. Click a picture to see it bigger.', 'Screenshots')}
+const gallery = (id, up) => { const list = SHOTS[id]; if (!list || list.length < 2) return ''; /* one picture: it's already at the top */ return `<section class="c blk gal-sec" id="screens">${shead('See it in use', 'The real program, filled in with a sample business. Click a picture to see it bigger.', 'Screenshots')}
   <div class="gal g${list.length % 3 ? 2 : 3}">${list.map((s) => `<figure${s[5] ? ` class="${s[5]}"` : ''}><button type="button" class="shot" data-full="${up}assets/shots/${s[0]}.webp" data-cap="${esc(s[4])}" aria-label="${esc(`See bigger: ${s[4]}`)}">${shotImg(up, s)}</button><figcaption>${esc(s[4])}</figcaption></figure>`).join('')}</div>
 </section>
 <dialog class="lightbox" id="lb" aria-label="Screenshot"><button type="button" class="lb-x" aria-label="Close">×</button><button type="button" class="lb-nav lb-prev" aria-label="Previous picture">‹</button><figure><img alt=""><figcaption></figcaption></figure><button type="button" class="lb-nav lb-next" aria-label="Next picture">›</button></dialog>
@@ -319,6 +323,54 @@ const freeInfo = (id) => { const f = FREE_INFO[id]; if (!f) return '';
   return `<div class="freeinfo"><div><b>Included free:</b> ${esc(f.inc)}</div>
     <div><b>Limits <span class="ii" title="${esc(f.lim ? 'The only limit on this free program' : 'No limits on this free program: no time limit, no card')}">ⓘ</span>:</b> ${f.lim ? `<span class="lim">${esc(f.lim)}</span>` : '<span class="nolim">No limits</span>'}${f.note ? ` <span class="muted">${esc(f.note)}</span>` : ''}</div>
     ${f.up ? `<div class="muted">${esc(f.up)}</div>` : ''}</div>`; };
+// ---------- the feature register (content/features.mjs): status badges, comparisons and each program's facts ----------
+for (const f of FEATURES) if (!STATUS[f[2]] || !FACTS[f[0]]) throw new Error(`features.mjs: unknown status or program in "${f[1]}"`);
+/** "US$:basic/month" in a register cell -> "US$25/month" (every number from PRICE, never typed twice). */
+const regText = (t) => String(t).replace(/US\$:(\w+)/g, (m, k) => { if (PRICE[k] == null) throw new Error(`features.mjs: no price ${k}`); return usd(PRICE[k]); });
+const stBadge = (s) => `<span class="st ${STATUS[s].cls}">${STATUS[s].label}</span>`;
+const yesNo = (v) => v === true ? '<span class="yn y"><span class="sr-only">Yes</span>✓</span>' : v === false ? '<span class="yn n"><span class="sr-only">No</span>—</span>' : esc(regText(v));
+/** A two-column comparison table from the register (Basics vs Plus, Link vs Link Office). */
+const compareTable = (rows, a, b, caption) => `<div class="ptable-wrap cmp-wrap" tabindex="0" role="region" aria-label="${esc(caption)}"><table class="ptable cmp stack"><caption class="sr-only">${esc(caption)}</caption>
+  <thead><tr><th scope="col">Feature</th><th scope="col">${esc(a)}</th><th scope="col">${esc(b)}</th></tr></thead>
+  <tbody>${rows.map(([f, x, y]) => `<tr><th scope="row">${esc(f)}</th><td data-label="${esc(a)}">${yesNo(x)}</td><td data-label="${esc(b)}">${yesNo(y)}</td></tr>`).join('')}</tbody></table></div>
+<p class="cmp-note">From the <a class="more" href="BASE_UP_features.html">feature register</a>, checked against the programs on ${esc(CHECKED.date)}.</p>`;
+const cmp = (up, ...args) => compareTable(...args).replace('BASE_UP_', up);
+const ACC_CMP = (up) => cmp(up, COMPARE_ACCOUNTING, 'Accounting Basics', 'Accounting Plus', 'Accounting Basics compared with Accounting Plus');
+const LINK_CMP = (up) => cmp(up, COMPARE_LINK, 'Riyeser Link', 'Riyeser Link Office', 'Riyeser Link compared with Riyeser Link Office');
+/** A program's register rows as a table: feature, status, where, internet. */
+const regRows = (rows) => `<div class="ptable-wrap reg-wrap" tabindex="0" role="region" aria-label="Features and their status"><table class="ptable reg stack"><thead><tr><th scope="col">Feature</th><th scope="col">Status</th><th scope="col">Runs on</th><th scope="col">Internet</th><th scope="col">Plan</th></tr></thead>
+  <tbody>${rows.map(([, f, s, w, n, plan]) => `<tr><th scope="row">${esc(f)}</th><td data-label="Status">${stBadge(s)}</td><td data-label="Runs on">${w.length ? esc(w.map((x) => WHERE[x]).join(', ')) : '—'}</td><td data-label="Internet">${s === 'no' || s === 'planned' ? '—' : esc(NET[n])}</td><td data-label="Plan">${esc(plan)}</td></tr>`).join('')}</tbody></table></div>`;
+/** "At a glance" on a program page: where it runs, the internet, the account, hardware, countries and version. */
+const glance = (p, up) => { const f = FACTS[p.id]; if (!f) return '';
+  const m = MOD[p.id]; const price = p.comesWith ? `Comes with ${withName(p)} (${usd(PRICE[MOD[p.comesWith]])}/month)` : m ? `${usd(PRICE[m])}/month per business · ${inclOf(m)[0]} · free for 90 days${p.firstUse ? ' from first use' : ''}` : 'Free forever';
+  const rows = [['Price', price], ['Runs on', f.runs], ['Internet', f.net], ['Riyeser account', f.account], ['Hardware', f.hw], ['Countries', f.countries], ['Version', `${f.version}, in release ${CHECKED.release}`]];
+  return `<dl class="glance">${rows.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>`; };
+/** What a program can't do yet (planned and not supported rows), so nobody is surprised after buying. */
+const notYet = (id) => { const rows = FEATURES.filter((f) => f[0] === id && (f[2] === 'planned' || f[2] === 'no' || f[2] === 'beta'));
+  return rows.length ? `<ul class="notyet">${rows.map(([, f, s]) => `<li>${stBadge(s)} ${esc(f)}</li>`).join('')}</ul>` : ''; };
+const progFaq = (id) => (PROG_FAQ[id] || []).length ? `<div class="faq">${PROG_FAQ[id].map(([q, a]) => `<details><summary>${esc(q)}</summary><p>${esc(a)}</p></details>`).join('')}</div>` : '';
+// Search titles (the brief's suggestions, used only where the claim is true: see the register).
+const SEO_TITLE = {
+  central: 'Free Business Dashboard for Windows – Riyeser Central', invoices: 'Free Invoicing Software – Riyeser Invoices',
+  'accounting-basics': 'Accounting & Bookkeeping Software – Riyeser Accounting Basics',
+  accounting: 'Offline Accounting & Bank Reconciliation – Riyeser Accounting Plus',
+  bookings: 'Job Scheduling & Online Booking Software – Riyeser Bookings', estimate: 'Construction Estimating & Takeoff Software – Riyeser Estimate',
+  payroll: 'Payroll, Rostering & Timesheet Software – Riyeser Payroll', pos: 'Retail & Restaurant Point-of-Sale Software – Riyeser POS',
+  link: 'Business Messaging & Team Communication – Riyeser Link', 'link-office': 'SIP & Internal Business Phone System – Riyeser Link Office',
+  documents: 'Document Management & OCR Software – Riyeser Documents', pdf: 'Free PDF Editor & Converter – Riyeser PDF',
+};
+/** A meta description of at most ~158 characters, cut at a sentence or word. */
+const metaDesc = (t) => { t = String(t).replace(/\s+/g, ' ').trim(); if (t.length <= 158) return t;
+  const s = t.slice(0, 158); const dot = s.lastIndexOf('. '); return dot > 90 ? s.slice(0, dot + 1) : s.slice(0, s.lastIndexOf(' ')).replace(/[,:;]$/, '') + '…'; };
+// Structured data (JSON-LD). Offers come from PRICE; no ratings or reviews (we have none to show).
+const ORG = { '@type': 'Organization', '@id': 'https://riyeser.com/#org', name: 'Riyeser Group', url: 'https://riyeser.com/', logo: 'https://riyeser.com/assets/logo.png', email: 'info@riyeser.com' };
+const crumbs = (list) => ({ '@type': 'BreadcrumbList', itemListElement: list.map(([name, path], i) => ({ '@type': 'ListItem', position: i + 1, name, item: `https://riyeser.com/${path}` })) });
+const appLd = (p) => { const m = MOD[p.id]; const f = FACTS[p.id] || {};
+  const offer = p.comesWith ? null : { '@type': 'Offer', price: m ? String(PRICE[m]) : '0', priceCurrency: 'USD', url: `https://riyeser.com/${m ? 'pricing.html' : `programs/${p.id}.html`}`,
+    ...(m ? { priceSpecification: { '@type': 'UnitPriceSpecification', price: String(PRICE[m]), priceCurrency: 'USD', unitText: 'month', referenceQuantity: { '@type': 'QuantitativeValue', value: 1, unitCode: 'MON' } } } : {}) };
+  return { '@type': 'SoftwareApplication', name: p.name, applicationCategory: 'BusinessApplication', operatingSystem: p.id === 'link' ? 'Windows 10, Windows 11, web browser' : 'Windows 10, Windows 11',
+    description: metaDesc(p.one), url: `https://riyeser.com/programs/${p.id}.html`, publisher: { '@id': 'https://riyeser.com/#org' }, ...(f.version ? { softwareVersion: f.version } : {}), ...(offer ? { offers: offer } : {}) }; };
+
 // ---------- home page "See it in action": each program's real screen with a short guided tour ----------
 // Each step points at a spot on a screenshot (x, y in % of that picture, picked by looking at it) with one plain line on
 // what it does for the business (checked against INCLUDES and the help guides). A step can show another screenshot of
@@ -344,10 +396,10 @@ const DEMO = [
       ['bookings-signoff', 30, 17, 'On site, the customer signs on screen and the job sheet locks.'],
       ['bookings-edit', 92, 13, "When the job's done, invoice it in one click."]] },
   { id: 'pos', label: 'POS', prog: 'pos', m: 'pos', finder: ['pos'],
-    head: 'Sell at the counter. Books done automatically.', ticks: ['For retail shops, or cafes and restaurants with tables and kitchen dockets', 'Cash with the change worked out, or card sent to your EFTPOS machine', 'Every sale lands in your books, with stock and GST updated'],
+    head: 'Sell at the counter. Your accounting records update automatically.', ticks: ['For retail shops, or cafés and restaurants with tables and kitchen dockets', 'Cash with the change worked out, or card on your own EFTPOS machine', 'Every sale lands in your books, with stock and GST updated'],
     steps: [['pos-till', 22, 55, 'Tap a product to sell it, or scan its barcode.'],
       ['pos-till', 79, 24, 'The sale adds up as you go. Hold it and come back later.'],
-      ['pos-card-waiting', 34, 38, "Press Card: the amount goes to the EFTPOS machine, and the sale finishes when it's approved."],
+      ['pos-card-waiting', 34, 38, 'Card: take it on your own EFTPOS machine, then tap Approved (shown: the practice terminal).'],
       ['pos-sales', 24, 28, "Today's takings, GST and best sellers, as you go."]] },
   { id: 'payroll', label: 'Payroll', prog: 'payroll', m: 'payroll', finder: ['payroll'], frame: 'payroll-run',
     head: 'Pay day without the paperwork.', ticks: ['A weekly roster, published to staff, and a time clock with a 4-digit PIN', 'Weekly, fortnightly or monthly pay runs, for unlimited employees', 'Payslips with year-to-date totals, printed, emailed or saved as PDFs'],
@@ -355,6 +407,13 @@ const DEMO = [
       ['payroll-timesheets', 47, 44, 'Staff clock in with a 4-digit PIN; hours land in timesheets.'],
       ['payroll-run', 60, 26, 'Run pay with PAYE and FNPF worked out for you.'],
       ['payroll-run', 77, 47, 'Payslips for everyone: print, email or save as PDFs.']] },
+  { id: 'estimate', label: 'Estimate', prog: 'estimate', m: 'estimate', finder: ['estimate'], frame: 'estimate-list',
+    head: 'Measure the job, send the quote.', ticks: ['Type in sizes, or measure on a plan, a photo or the map', 'Trade templates work out materials, waste and labour', 'One click makes the quote, ready for Riyeser Invoices'],
+    note: 'Riyeser Estimate is priced on its own: it isn\'t part of any bundle.',
+    steps: [['estimate-list', 30, 42, 'Every estimate in one list, with its status and quote.'],
+      ['estimate-plan', 40, 62, 'Open a plan, set the scale, then draw: areas are worked out.'],
+      ['estimate-plan', 86, 20, 'The totals update as you draw.'],
+      ['estimate-price', 50, 40, 'Labour and materials priced from your measurements.']] },
   { id: 'link', label: 'Riyeser Link', prog: 'link', m: 'calls', finder: ['link'], phone: 'link-phone', live: '/link/?demo',
     head: 'Your whole team, in one conversation.', ticks: ['Team chat and calls on the PC, in the browser and on phones', 'Office desk phones with Riyeser Link Office, included', 'Invite your team with one link'],
     steps: [['link-chat', 13, 23, 'A channel for each job, site or topic, plus direct messages.'],
@@ -362,8 +421,8 @@ const DEMO = [
       ['link-chat', 40, 64, `Share job sheets, photos and files (${STORAGE_GB.link} GB included).`],
       ['link-calls', 81, 60, 'Call a person or a whole branch, with no call charges.']] },
   { id: 'link-office', label: 'Link Office', prog: 'link-office', m: 'calls', finder: ['link-office'],
-    head: 'Desk phones that ring each other.', ticks: ['Each person gets an extension, like 101', 'Ring groups: "Front desk" rings several phones at once', 'Answer office calls in the Riyeser Link app too'],
-    note: 'Not yet: calls to and from outside phone numbers.',
+    head: 'Your internal business phone system.', ticks: ['Each person gets an extension, like 101', 'Ring groups: "Front desk" rings several phones at once', 'Answer office calls in the Riyeser Link app too'],
+    note: 'Not yet: calls to and from outside phone numbers, or emergency calls.',
     steps: [['link-desk-phones', 34, 28, 'Install it on one PC at the office and sign in.'],
       ['link-desk-phones', 30, 41, 'Plug in desk phones: they show up by themselves.'],
       ['link-desk-phones', 30, 48, 'Give each phone to a person: staff call each other free.'],
@@ -379,9 +438,9 @@ const DEMO = [
     steps: [['pdf-markup', 44, 70, 'Mark up drawings with circles, arrows and notes.'],
       ['pdf-markup', 4, 12, 'Sign, tick and date forms without printing.'],
       ['pdf-markup', 17, 7, 'Change the words in a PDF, or add your own.'],
-      ['pdf-tools', 21, 52, 'Combine, split, convert to Word or make smaller.']] },
+      ['pdf-tools', 21, 52, 'Combine, split, convert to Word or compress.']] },
   { id: 'central', label: 'Central', prog: 'central', finder: ['central'],
-    head: 'Start your day knowing exactly what needs doing.', ticks: ['Free forever', "Today's meetings and to-dos, and money owed to you", 'Try every program with a made-up sample business'],
+    head: 'Start your day knowing exactly what needs doing.', ticks: ['Free forever', "Today's meetings and to-dos, and money owed to you", 'Try every program with a sample business'],
     steps: [['central-home', 39, 28, 'Every Riyeser program you have, one click away.'],
       ['central-home', 73, 31, 'Money owed and overdue invoices, as soon as you open it.'],
       ['central-home', 72, 50, 'Add a program: it installs and updates itself.'],
@@ -404,10 +463,10 @@ const demoPrice = (d) => {
   const p = prog(d.prog);
   if (p.comesWith) return `<b>Comes with Riyeser Link</b> · free for 90 days, then <b>${usd(PRICE[d.m])}</b> a month`;
   if (!d.m) return '<b class="free">Free</b> forever · no card, no time limit';
-  return `<b class="ok">Free for 90 days</b>, then <b>${usd(PRICE[d.m])}</b> a month · ${esc(inclOf(d.m)[0])}`;
+  return `<b class="ok">Free for 90 days${p.firstUse ? ' from first use' : ''}</b>, then <b>${usd(PRICE[d.m])}</b> a month · ${esc(inclOf(d.m)[0])}`;
 };
 // ---------- "Watch the demo": a short screen recording of each program (assets/videos/<id>.mp4 and a .webp poster) ----------
-// Recorded from the real program filled in with the made-up sample business, with captions and no sound. [seconds, title]
+// Recorded from the real program filled in with the sample business, with captions and no sound. [seconds, title]
 // The video and its poster only load when someone opens the player.
 const VIDEOS = {
   invoices: [48, 'Riyeser Invoices: a quote, accepted, made into an invoice and printed'],
@@ -427,7 +486,7 @@ const mmss = (n) => `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`;
 const videoBtn = (vid, up, cls = 'btn s') => (VIDEOS[vid] ? `<button type="button" class="${cls} vbtn" data-src="${up}assets/videos/${vid}.mp4" data-poster="${up}assets/videos/${vid}.webp" data-title="${esc(VIDEOS[vid][1])}" aria-haspopup="dialog">${PLAY} Watch the demo <span class="vlen">${mmss(VIDEOS[vid][0])}</span></button>` : '');
 /** The video player (one per page): a modal dialog with the browser's own controls; Esc or × closes it and stops the video. */
 const videoBox = () => `<dialog class="vbox" id="vbox" aria-labelledby="vbox-h"><div class="vbox-top"><h2 id="vbox-h">Demo</h2><button type="button" class="vbox-x" aria-label="Close the video">×</button></div>
-<video controls playsinline preload="none" width="1280" height="800"></video><p class="vbox-note">No sound. A made-up sample business.</p></dialog>
+<video controls playsinline preload="none" width="1280" height="800"></video><p class="vbox-note">No sound. A sample business.</p></dialog>
 <script>(function(){var d=document.getElementById('vbox');if(!d)return;var v=d.querySelector('video'),h=document.getElementById('vbox-h'),x=d.querySelector('.vbox-x'),from=null;
 function open(b){from=b;h.textContent=b.getAttribute('data-title');var s=b.getAttribute('data-src');if(v.getAttribute('src')!==s){v.poster=b.getAttribute('data-poster');v.src=s}
 if(d.showModal)d.showModal();else d.setAttribute('open','');x.focus();var p=v.play();if(p&&p.catch)p.catch(function(){})}
@@ -441,7 +500,7 @@ function demoSection(up) {
   const img = (f, i, lazy, on, sizes) => { const k = SHOT_DIM[f];
     return `<img class="dm-img${on ? ' on' : ''}" data-k="${f}" src="${up}assets/shots/${f}-900.webp" srcset="${up}assets/shots/${f}-900.webp ${Math.min(900, k.w)}w, ${up}assets/shots/${f}.webp ${k.w}w" sizes="${sizes}" width="${k.w}" height="${k.h}" alt="${esc(k.alt)}"${lazy ? ' loading="lazy"' : ''} decoding="async">`; };
   return `<section class="demo" id="demo" aria-labelledby="demo-h"><div class="c">
-  <div class="shead"><span class="eyebrow">See it in action</span><h2 class="h2" id="demo-h">Watch each program do the work</h2><p class="sub">Real screens with a made-up sample business. Pick a program.</p></div>
+  <div class="shead"><span class="eyebrow">See it in action</span><h2 class="h2" id="demo-h">Watch each program do the work</h2><p class="sub">Real screens with a sample business. Pick a program.</p></div>
   <div class="dm-tabs" role="tablist" aria-label="Programs">${DEMO.map((d, i) => `<button type="button" role="tab" id="dm-t-${d.id}" aria-controls="dm-p-${d.id}" aria-selected="${i === 0}" tabindex="${i ? -1 : 0}" data-id="${d.id}"><img src="${up}assets/apps/${d.prog}.png" alt="" width="28" height="28">${esc(d.label)}</button>`).join('')}</div>
   ${DEMO.map((d, i) => { const p = prog(d.prog); const shots = [...new Set(d.steps.map((s) => s[0]))]; const k0 = SHOT_DIM[d.frame || shots[0]];
     const start = d.m ? `<a class="btn p" href="${BUY_LINK(d.m, false)}">Start free</a>` : `<a class="btn p" href="${dl(p, up)}">${WINLOGO} Download free</a>`;
@@ -556,6 +615,16 @@ const WINDL = `${WINLOGO} Download for Windows`;
 const SWOOSH = `<svg class="swoosh" viewBox="0 0 600 300" preserveAspectRatio="xMaxYMid slice" aria-hidden="true"><defs><linearGradient id="sw1" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="#7fb0ff"/><stop offset="1" stop-color="#2f7bff"/></linearGradient><linearGradient id="sw2" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="#2f7bff"/><stop offset="1" stop-color="#0846d8"/></linearGradient></defs>
 <path d="M330 300C380 170 450 60 600 40V0H560C430 20 340 150 270 300z" fill="#bcd5ff" opacity=".7"/><path d="M420 300C460 190 520 110 600 95V40C470 60 390 170 340 300z" fill="url(#sw1)" opacity=".85"/><path d="M500 300C530 230 565 185 600 170V95C530 115 470 200 430 300z" fill="url(#sw2)"/></svg>`;
 const bandHero = ({ eyebrow, title, lead, img = '', up = '', extra = '' }) => `<div class="band-hero">${img ? `<img class="bgimg" src="${up}assets/photos/${img}" alt="">` : SWOOSH}<div class="c"><div class="inner">${eyebrow ? `<span class="eyebrow">${eyebrow}</span>` : ''}<h1>${title}</h1>${lead ? `<p class="lead">${lead}</p>` : ''}${extra}</div></div></div>`;
+// Product categories on the home page (each program once; the order people think in).
+const CATEGORIES = [
+  ['Accounting & invoicing', 'Quotes, invoices, bills, stock and your books.', ['invoices', 'accounting-basics', 'accounting']],
+  ['Point of sale', 'The till for retail shops, cafés and restaurants.', ['pos']],
+  ['Bookings & quoting', 'Jobs, appointments, tables, and measured quotes.', ['bookings', 'estimate']],
+  ['Payroll & staff', 'Rosters, time clock, pay runs and payslips.', ['payroll']],
+  ['Business communications', 'Team chat and calls, and the office phone system.', ['link', 'link-office']],
+  ['Documents & PDF', 'Scan, file, find, fill in and sign.', ['documents', 'pdf']],
+  ['Your home screen', 'Every program in one place, kept up to date.', ['central']],
+];
 // The three industries: real photos, and only what the programs really do.
 const INDUSTRIES = [
   { id: 'retail', name: 'Retail & hospitality', icon: 'retail', photo: 'team-cafe.webp', short: 'Manage stock, sales records and staff pay.',
@@ -563,7 +632,7 @@ const INDUSTRIES = [
     h: 'Sales, stock and staff pay', p: 'Ring up sales on Riyeser POS, keep count of stock as it sells, and pay your team from their clock-in hours.',
     shot: 'accounting.webp', shotName: 'Riyeser Accounting', shotApp: 'accounting-basics', cta: ['accounting-basics', 'Explore Accounting Basics'],
     progs: [['bookings', ['Table bookings with party size and seats checked', 'See tonight at a glance, table by table', 'Customers shared with Riyeser POS']],
-      ['pos', ['A till for retail or restaurant: tables, kitchen dockets and held sales', 'Receipts print by themselves; close the till with cash and card totals', 'Manager PIN or card for voids, refunds and big discounts', 'Free for 90 days, no card']],
+      ['pos', ['A till for retail or restaurant: tables, kitchen dockets and held sales', 'Print a receipt in one tap; close the till with cash and card totals', 'Manager PIN or card for voids, refunds and big discounts', 'Free for 90 days, no card']],
       ['accounting-basics', ['Every till sale lands as a paid invoice, with GST right', 'Stock with average cost, stocktakes, and purchase orders for what\'s running low', 'Free for 90 days, no card']],
       ['payroll', ['A weekly roster, published to staff on the time clock or as a WhatsApp text', 'Staff clock in and out with a 4-digit PIN', 'Timesheets flow straight into the pay run', 'Payslips with year-to-date totals, printed, emailed or saved as PDFs']],
       ['central', ['What customers owe and what you owe, as soon as you open it', "Today's meetings and your to-do list", 'Every Riyeser program one click away']]] },
@@ -592,7 +661,7 @@ const HERO_SLIDES = [
   { img: 'hero-trades', alt: 'A tradie checking his phone on the back of his ute', where: 'On the road',
     pops: [['bookings', 'Riyeser Bookings', 'Jo Smith · 10:00 tomorrow', 'Hot water service · Confirmed', ''], ['invoices', 'Riyeser Invoices', 'INV-1047 paid', '$880.00 received', 'ok']] },
   { img: 'hero-cafe-call', alt: 'A café owner on the desk phone at her counter', where: 'At the counter',
-    pops: [['link', 'Riyeser Link', 'Call from Kitchen · ext 102', 'Answered on the desk phone', ''], ['link', 'Riyeser Link', 'Supplier delivery at 2pm', 'Message from the back office', '']] },
+    pops: [['link', 'Riyeser Link', 'Call from Kitchen · ext 102', 'Answered on the desk phone', ''], ['link', 'Riyeser Link', 'Supplier delivery at 2 pm', 'Message from the back office', '']] },
   { img: 'hero-florist', alt: 'A florist checking her phone beside her car full of bouquets', where: 'Out on deliveries',
     pops: [['invoices', 'Riyeser Invoices', 'Order paid', '$85.00 received', 'ok'], ['bookings', 'Riyeser Bookings', 'Wedding flowers · Sat 8:00', 'Delivery booked', '']] },
   { img: 'hero-cafe-till', alt: 'A café owner taking a payment on a tablet at the counter', where: 'Serving customers',
@@ -607,7 +676,7 @@ function homeHero(up) {
   <div class="c h3text">
     <span class="eyebrow">Riyeser</span>
     <h1>Your whole office.<br><span>Take it anywhere with you.</span></h1>
-    <p class="lead">Invoices, books, pay, bookings, the till, team chat and phones. All linked, on your PC and on the go.</p>
+    <p class="lead">Accounting, invoicing, payroll, bookings, point of sale and business communications. Connected in one business software platform, on your PC and on the go.</p>
     <div class="ctas"><a class="btn p big" href="${up}downloads.html">${WINDL}</a><a class="btn s big" href="/link/?signup">Create a free account</a></div>
     <p class="fine">Free tools forever · Paid programs free for 90 days · No card needed</p>
     <div class="h3dots" role="tablist" aria-label="Scenes">${HERO_SLIDES.map((sl, i) => `<button role="tab" aria-selected="${i === 0}" aria-label="${esc(sl.where)}" data-go="${i}"${i === 0 ? ' class="on"' : ''}><i></i><span>${esc(sl.where)}</span></button>`).join('')}</div>
@@ -671,7 +740,7 @@ const priceTag = (p) => `<b>${usd(PRICE[MOD[p.id]])}</b> a month · ${esc(inclLi
 const shead = (title, sub = '', eyebrow = '') => `<div class="shead">${eyebrow ? `<span class="eyebrow">${esc(eyebrow)}</span>` : ''}<h2 class="h2">${esc(title)}</h2>${sub ? `<p class="sub">${esc(sub)}</p>` : ''}</div>`;
 const firstSentence = (t) => t.split(/(?<=\.)\s+/)[0];
 /** A checklist card (program pages). With m (a PRICE key) it shows that price and the buy buttons. */
-const includedCard = (key, name, m, up, cls = '') => `<div class="inclcard${cls ? ` ${cls}` : ''}"${m ? ` id="${key}"` : ''}><div class="ih"><b>${esc(name)}</b><span class="ihp">${m ? `<b>${usd(PRICE[m])}</b> /month` : '<b class="free">Free</b> forever'}</span></div>
+const includedCard = (key, name, m, up, cls = '') => `<div class="inclcard${cls ? ` ${cls}` : ''}"${m ? ` id="${key}"` : ''}><div class="ih"><b>${esc(name)}</b><span class="ihp">${m ? `<b>${usd(PRICE[m])}</b>/month` : '<b class="free">Free</b> forever'}</span></div>
   <small class="ihq">${m ? `${esc(inclLine(m))} · free for 90 days` : 'No time limit, no card, no user charges'}</small>${inclList(key)}${m ? buyBtns(m) : ''}</div>`;
 /** The price card at the top of a program page. */
 const heroPrice = (p, up) => { const m = MOD[p.id];
@@ -694,13 +763,13 @@ const RELATED = {
   estimate: [['invoices', 'Its quotes become invoices in one click'], ['bookings', 'An accepted quote becomes a job'], ['central', 'Installs it and keeps it up to date']],
   payroll: [['accounting-basics', 'Pay runs brought into your books'], ['central', 'Your last pay run on your home screen']],
   documents: [['central', 'Search the office\'s documents from your home screen'], ['pdf', 'Open in Riyeser PDF: fill in, sign and edit a document']],
-  link: [['link-office', 'Your office phone system: desk phones that ring each other'], ['central', 'Unread counts on your home screen'], ['invoices', 'Type INV-1047 and it stands out']],
+  link: [['link-office', 'Your internal business phone system for desk phones'], ['central', 'Unread counts on your home screen'], ['invoices', 'Type INV-1047 and it stands out']],
   'link-office': [['link', 'See the desk phones, and answer office calls in the app (My phone)'], ['central', 'Installs it and keeps it up to date']],
   pdf: [['documents', 'Files and finds the office\'s PDFs, even scanned ones'], ['central', 'Your home screen for every program']],
 };
 /** A program card: icon, name, one line, then the price and "Learn more" pinned to the bottom (every card the same height). */
 const progCard = (p, up) => `<a class="card pcard2" href="${up}programs/${p.id}.html">${iconBox(p, up)}<h3>${esc(p.short === 'Central' ? 'Riyeser Central' : p.short)}</h3><p>${esc(p.card || p.one)}</p>
-<div class="cfoot"><span class="cp">${p.comesWith ? `<b class="with">${esc(withShort(p))}</b>` : p.free ? '<b class="free">Free</b>' : `<b>${usd(PRICE[MOD[p.id]])}</b> /month`}</span><span class="more">Learn more ${ARR}</span>
+<div class="cfoot"><span class="cp">${p.comesWith ? `<b class="with">${esc(withShort(p))}</b>` : p.free ? '<b class="free">Free</b>' : `<b>${usd(PRICE[MOD[p.id]])}</b>/month`}</span><span class="more">Learn more ${ARR}</span>
 <small class="cq">${p.comesWith ? 'No separate price' : p.free ? 'No time limit, no card' : esc(inclOf(MOD[p.id])[0])}</small></div></a>`;
 /** The last tile in each group, so the 3-column grid has no gaps: a quiet summary with a link to the prices. */
 const groupTile = (free, up) => free
@@ -735,20 +804,27 @@ fetch('${url}/rest/v1/rpc/track_visit',{method:'POST',keepalive:true,headers:{ap
 b:/Edg\//.test(u)?'Edge':/SamsungBrowser/.test(u)?'Samsung':/Firefox|FxiOS/.test(u)?'Firefox':/Chrome|CriOS/.test(u)?'Chrome':/Safari/.test(u)?'Safari':'Other',l:n.language,
 g:a[0]=='Australia'?a[0]:a[0]=='Pacific'?Z[a[1]]||'Pacific':/^(Asia|Europe|Africa)$/.test(a[0])?a[0]:a[0]=='America'?'Americas':'Other'})}).catch(function(){})}catch(e){}})()</script>`; })();
 
-function page({ path, title, description, active, body, noindex = false }) {
+// Search engine ownership: Google Search Console / Bing Webmaster Tools give a code for a <meta> tag. Put it in these
+// (or set GOOGLE_SITE_VERIFICATION / BING_SITE_VERIFICATION when building) and it goes on the home page only.
+const VERIFY = { google: process.env.GOOGLE_SITE_VERIFICATION || '', bing: process.env.BING_SITE_VERIFICATION || '' };
+function page({ path, title, description, active, body, noindex = false, jsonld = [], ogImage = 'assets/central-home.webp' }) {
   const depth = path.split('/').length - 1;
   const up = depth ? '../'.repeat(depth) : '';
+  const url = `${SITE}/${path === 'index.html' ? '' : path}`;
+  const ld = [...(path === 'index.html' ? [ORG, { '@type': 'WebSite', name: 'Riyeser', url: 'https://riyeser.com/', publisher: { '@id': 'https://riyeser.com/#org' } }] : []), ...jsonld];
     const html = `<!doctype html>
 <html lang="en" data-theme="light">
 <head>
 <meta charset="utf-8"><meta name="color-scheme" content="light">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)}</title>
-<meta name="description" content="${esc(description)}">${noindex ? '<meta name="robots" content="noindex">' : ''}
-<meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(description)}">
-<meta property="og:image" content="${SITE}/assets/central-home.webp"><meta property="og:url" content="${SITE}/${path === 'index.html' ? '' : path}">
-<link rel="canonical" href="${SITE}/${path === 'index.html' ? '' : path}">
-<link rel="icon" href="${up}assets/logo-r.png">
+<meta name="description" content="${esc(metaDesc(description))}">${noindex ? '<meta name="robots" content="noindex">' : ''}
+<meta property="og:type" content="website"><meta property="og:site_name" content="Riyeser"><meta property="og:locale" content="en_AU">
+<meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(metaDesc(description))}">
+<meta property="og:image" content="${SITE}/${ogImage}"><meta property="og:url" content="${url}">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${esc(title)}"><meta name="twitter:description" content="${esc(metaDesc(description))}"><meta name="twitter:image" content="${SITE}/${ogImage}">
+<link rel="canonical" href="${url}">
+<link rel="icon" href="${up}assets/favicon.png" type="image/png"><link rel="apple-touch-icon" href="${up}assets/logo-r.png">${path === 'index.html' && VERIFY.google ? `\n<meta name="google-site-verification" content="${esc(VERIFY.google)}">` : ''}${path === 'index.html' && VERIFY.bing ? `\n<meta name="msvalidate.01" content="${esc(VERIFY.bing)}">` : ''}${ld.length && !noindex ? `\n<script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', '@graph': ld }).replace(/</g, '\\u003c')}</script>` : ''}
 <link rel="stylesheet" href="${up}assets/site.css">
 ${path === 'index.html' && SERVICES_MOVED && ASBUILT ? `<script>/* As Built now lives at ${SERVICES_APP}/ - forward its old links: demo and sign-in links,
    project and QR links (#/p/...), sign-in emails (#access_token, ?code=) and the installed app (start screen icon). */
@@ -787,11 +863,11 @@ document.querySelectorAll('.links > .dd > a').forEach(function(a){a.addEventList
       <div><h3 class="fsub">Paid</h3>${PROGRAMS.filter((p) => !p.free).map((p) => `<a href="${up}programs/${p.id}.html">${p.short === 'Central' ? 'Riyeser Central' : p.short}</a>`).join('')}</div></div></div>
     <div class="flinks">
       <div><h2 class="fh">Industries</h2>${INDUSTRIES.map((i) => `<a href="${indLink(i, up)}">${esc(i.name)}</a>`).join('')}</div>
-      <div><h2 class="fh">Help</h2><a href="${up}help.html">Help Centre</a><a href="${up}help/start.html">Getting started</a><a href="${up}downloads.html">Downloads</a><a href="/link/?contact">Contact support</a><a class="fmail" href="mailto:${EMAIL}">${EMAIL}</a></div>
-      <div><h2 class="fh">Riyeser</h2><a href="${up}pricing.html">Pricing</a><a href="/link/?signup">Create an account</a><a href="${up}developers/">Developers</a><a href="${up}terms.html">Terms of use</a></div>
+      <div><h2 class="fh">Help</h2><a href="${up}help.html">Help Centre</a><a href="${up}help/start.html">Getting started</a><a href="${up}downloads.html">Downloads</a><a href="${up}hardware.html">Hardware</a><a href="${up}countries.html">Countries</a><a href="${up}releases.html">Release notes</a><a href="/link/?contact">Contact support</a><a class="fmail" href="mailto:${EMAIL}">${EMAIL}</a></div>
+      <div><h2 class="fh">Riyeser</h2><a href="${up}pricing.html">Pricing</a><a href="${up}features.html">What works today</a><a href="${up}trust.html">Trust &amp; security</a><a href="/link/?signup">Create an account</a><a href="${up}developers/">Developers</a><a href="${up}terms.html">Terms of use</a></div>
     </div>
   </div>
-  <div class="fbase"><span>© ${new Date().getFullYear()} Riyeser Group</span><span class="fwin"><span>For Windows 10 &amp; 11</span><span>Works offline</span><span>No account or card needed</span></span></div></div></footer>
+  <div class="fbase"><span>© ${new Date().getFullYear()} Riyeser Group</span><span class="fwin"><span>For Windows 10 &amp; 11</span><span>Most programs work offline</span><span>Free trials: no account or card</span></span></div></div></footer>
 <script>/* links inside cards and menus (data-href) */
 document.addEventListener('click',function(e){var x=e.target.closest&&e.target.closest('[data-href]');if(!x)return;e.preventDefault();e.stopPropagation();location.href=x.getAttribute('data-href')},true);
 document.addEventListener('keydown',function(e){var x=e.target.closest&&e.target.closest('[data-href]');if(x&&(e.key==='Enter'||e.key===' ')){e.preventDefault();location.href=x.getAttribute('data-href')}});</script>
@@ -834,13 +910,13 @@ const EDITIONS = [
       'Simple money in and money out', 'Works with Riyeser POS, the till app', 'Profit & Loss, GST summary, who owes you, sales and stock reports'] },
   { name: 'Accounting Plus', m: 'plus', app: 'accounting',
     blurb: 'Everything in Basics, plus the tools for full books.',
-    has: ['Everything in Accounting Basics', 'Bank reconciliation and bank statement import', 'Payroll and pay runs',
-      'General journal and search transactions', 'Jobs and budgets', 'Balance Sheet, Trial Balance and every report'] },
+    has: ['Everything in Accounting Basics', 'Bank reconciliation and bank statement import',
+      'General journal and search transactions', 'Jobs and budgets', 'Balance Sheet, Trial Balance and every report', 'Payroll in your books (an Australian estimate only: not for real pay runs yet)'] },
 ];
 /** The Accounting Basics / Plus comparison: two equal cards, each price on its own line, and a short note. */
 const editionsBlock = (up) => `
 <div class="plans eds">${EDITIONS.map((e, i) => `<div class="plan${i ? ' best' : ''}"><div class="k">${appImg(e.app, up)}<b>${esc(e.name)}</b><span class="badge${i ? '' : ' free'}">Free for 90 days</span></div>
-  <div class="price">${usd(PRICE[e.m])}<small> /month</small></div><div class="psub">per business · ${PRICE.users_included} users incl. · +${usd(PRICE.extra_user)} per extra user</div><p>${esc(e.blurb)}</p>
+  <div class="price">${usd(PRICE[e.m])}<small>/month</small></div><div class="psub">per business · ${PRICE.users_included} users incl. · +${usd(PRICE.extra_user)} per extra user</div><p>${esc(e.blurb)}</p>
   <ul class="edlist">${e.has.map((h) => `<li>${esc(h)}</li>`).join('')}</ul>${buyBtns(e.m)}</div>`).join('')}</div>
 <p class="ednote">You pay for one or the other, never both: Plus includes everything in Basics for ${usd(PRICE.plus - PRICE.basic)} a month more. Switch either way any time; your books carry over, and Plus-only records wait safely in Basics.</p>`;
 const ctaBlock = (up, title = 'Try Riyeser free', text = 'Download, install in one click, and keep everything on your own computer.') => `
@@ -850,14 +926,20 @@ const ctaBlock = (up, title = 'Try Riyeser free', text = 'Download, install in o
 
 // ---------- home ----------
 page({
-  path: 'index.html', title: 'Riyeser — your whole office. Take it anywhere with you.', active: '',
-  description: 'Riyeser is everything your small business runs on: invoices, books, payroll, bookings, the till, team chat and office phones, all linked. On your PC and on the go.',
+  path: 'index.html', title: 'Riyeser – All-in-One Small Business Software', active: '',
+  description: 'Riyeser: accounting, invoicing, payroll, bookings, point of sale and business communications for small businesses. Free tools, and paid programs free for 90 days.',
   body: (up) => `
 ${homeHero(up)}
 
+<section class="c cats-sec" aria-labelledby="cats-h">
+  <div class="shead"><span class="eyebrow">Business software</span><h2 class="h2" id="cats-h">Software for every part of your business</h2><p class="sub">Pick by what you need to do. Accounting, Invoices, Bookings, POS and Estimate share one company file, and every program shows up in Riyeser Central.</p></div>
+  <div class="cats">${CATEGORIES.map(([name, line, ids]) => `<div class="cat"><h3>${esc(name)}</h3><p>${esc(line)}</p><ul>${ids.filter((id) => PROGRAMS.some((p) => p.id === id)).map((id) => { const p = prog(id); return `<li><a href="${up}programs/${id}.html">${appImg(id, up, 'ci')}<span>${esc(p.short === 'Central' ? 'Riyeser Central' : p.short)}<small class="${p.free ? 'free' : p.comesWith ? 'with' : ''}">${p.free ? 'Free' : p.comesWith ? esc(withShort(p)) : `${usd(PRICE[MOD[id]])}/month`}</small></span></a></li>`; }).join('')}</ul></div>`).join('')}</div>
+  <p class="cats-more"><a class="more" href="#demo">See each program in action ${ARR}</a> · <a class="more" href="${up}features.html">What works today ${ARR}</a></p>
+</section>
+
 <section class="finder" id="find"><div class="c">
   <h2 class="h2">Find your program</h2>
-  ${grouped(PROGRAMS, (l) => `<div class="frow">${l.map((p) => `<a href="${up}programs/${p.id}.html"${demoTabOf[p.id] ? ` data-demo="${demoTabOf[p.id]}"` : ''}><img src="${up}assets/apps/${p.id}.png" alt="" width="96" height="96" loading="lazy"><span class="fname">${esc(p.short === 'Central' ? 'Central' : p.short)}</span><span class="fmeta"><small class="fprice${p.comesWith ? ' with' : p.free ? ' free' : ''}">${p.comesWith ? esc(withShort(p)) : p.free ? 'Free' : `${usd(PRICE[MOD[p.id]])}<span class="pm"> a month</span><span class="pmo">/mo</span>`}</small></span></a>`).join('')}</div>${l[0].free ? '' : `<p class="fnote">${esc(USERS_NOTE)}</p>`}`, (t) => `<p class="ghead">${esc(t)}</p>`)}
+  ${grouped(PROGRAMS, (l) => `<div class="frow">${l.map((p) => `<a href="${up}programs/${p.id}.html"${demoTabOf[p.id] ? ` data-demo="${demoTabOf[p.id]}"` : ''}><img src="${up}assets/apps/${p.id}.png" alt="" width="96" height="96" loading="lazy"><span class="fname">${esc(p.short === 'Central' ? 'Central' : p.short)}</span><span class="fmeta"><small class="fprice${p.comesWith ? ' with' : p.free ? ' free' : ''}">${p.comesWith ? esc(withShort(p)) : p.free ? 'Free' : `${usd(PRICE[MOD[p.id]])}<span class="pm">/month</span><span class="pmo">/mo</span>`}</small></span></a>`).join('')}</div>${l[0].free ? '' : `<p class="fnote">${esc(USERS_NOTE)}</p>`}`, (t) => `<p class="ghead">${esc(t)}</p>`)}
   ${connectTeaser()}
 </div></section>
 
@@ -902,7 +984,7 @@ ${connectSection(up)}
   <h2 class="h2 center">Frequently asked questions</h2>
   <div class="faq" style="margin-top:26px">
   <details><summary>What does it cost?</summary><p>Riyeser Central, Riyeser Documents, Riyeser Invoices and PDF are free forever. Every paid program is free for 90 days with no card. After that, each one is a set price per business — not per person — with 3 users included: Accounting Basics ${usd(PRICE.basic)} a month, Accounting Plus ${usd(PRICE.plus)} (it includes Basics), Bookings ${usd(PRICE.bookings)}, Riyeser Link ${usd(PRICE.calls)} (chat, calls and office phones), Payroll ${usd(PRICE.payroll)} (unlimited employees), POS ${usd(PRICE.pos)} (1 till, unlimited cashiers) and Riyeser Estimate ${usd(PRICE.estimate)} (free for 90 days from the first time you use it).${ASBUILT ? ` As Built, for the building industry, is ${usd(PRICE.as_built)}.` : ''} Extra users are ${usd(PRICE.extra_user)} a month each, for each program, and your accountant signs in free. Bundles save more: ${BUNDLES.map((x) => `${x.name} ${usd(x.price)}`).join(', ')}. All prices are in US dollars, and 2 months are free if you pay yearly. See <a class="more" href="${up}pricing.html">Pricing</a>.</p></details>
-  <details><summary>Does it need the internet?</summary><p>No. Everything works offline.${ASBUILT ? ' As Built can optionally sync to an online account so phones, clients and staff can see your projects.' : ' Riyeser Link (chat and calls) is the one part that runs online.'}</p></details>
+  <details><summary>Does it need the internet?</summary><p>Not for everyday work: Accounting, Invoices, Bookings, POS, Payroll, Estimate, Documents and PDF all work offline on your PC, and desk phones in the office keep calling each other. You need the internet to download and update programs, to buy and to check a paid plan (at least once every 30 days), and for Riyeser Link chat and calls, bookings and orders from your website, measuring on the map in Estimate and sending emails.${ASBUILT ? ' As Built can optionally sync to an online account.' : ''} See <a class="more" href="${up}features.html">what works today</a>.</p></details>
   <details><summary>What computer do I need?</summary><p>A PC with Windows 10 or 11.${ASBUILT ? ' As Built also works in any web browser, on phones and tablets.' : ' Riyeser Link also works in any web browser, on phones and tablets.'}</p></details>
   <details><summary>Where do I start?</summary><p>Download Riyeser Central. It's the home screen for every program and shows you what else you can add. The <a class="more" href="${up}help/start.html">Getting started guide</a> walks you through it.</p></details>
   <details><summary>What if I get stuck?</summary><p>The <a class="more" href="${up}help.html">Help Centre</a> has a step-by-step guide for every program, or email <a class="more" href="mailto:${EMAIL}">${EMAIL}</a> and a real person will reply.</p></details>
@@ -919,14 +1001,14 @@ page({
   body: (up) => `${bandHero({ eyebrow: 'Programs', title: 'All programs', lead: 'A complete range of Riyeser programs to run and support your business. Start with Riyeser Central and add what you need.' })}
 <section class="c blk first">${progGrid(PROGRAMS.filter((p) => p.id !== 'services'), up, (t) => `<div class="shead small"><h2>${esc(t)}</h2></div>`)}</section>
 ${ASBUILT ? `<section class="c blk">${shead('For the building industry', 'A separate program for trades and construction, priced on its own.')}<div class="grid pgrid">${progCard(prog('services'), up)}</div></section>` : ''}
-<section class="c blk" id="editions">${shead('Accounting Basics or Accounting Plus?', 'Two editions of the same books. Pick the one that fits today, and switch any time.', 'Accounting')}${editionsBlock(up)}</section>
+<section class="c blk" id="editions">${shead('Accounting Basics or Accounting Plus?', 'Two editions of the same books. Pick the one that fits today, and switch any time.', 'Accounting')}${editionsBlock(up)}<h3 class="cmp-h">Feature by feature</h3>${ACC_CMP(up)}</section>
 ${ctaBlock(up, 'Start with Riyeser Central', "It's the home screen for every program, and it keeps them all up to date.")}`,
 });
 
 // ---------- industries ----------
 for (const ind of INDUSTRIES) {
   page({
-    path: `industries/${ind.id}.html`, title: `${ind.name} — Riyeser`, active: 'industries',
+    path: `industries/${ind.id}.html`, title: `${ind.name} — Riyeser`, active: 'industries', jsonld: [crumbs([['Home', ''], [ind.name, `industries/${ind.id}.html`]])],
     description: `${ind.title}: ${ind.lead}`,
     body: (up) => `${bandHero({ eyebrow: 'Industries', title: esc(ind.title), lead: esc(ind.lead) })}
 <div class="c">
@@ -951,8 +1033,10 @@ for (const p of PROGRAMS.filter((x) => !x.custom)) {
   const m = MOD[p.id];
   const rel = (RELATED[p.id] || []).map(([id, why]) => [prog(id), why]).filter(([o]) => o && PROGRAMS.includes(o));
   page({
-    path: `programs/${p.id}.html`, title: `${p.name} — ${p.pitch}`, active: 'programs',
+    path: `programs/${p.id}.html`, title: SEO_TITLE[p.id] || `${p.name} — ${p.pitch}`, active: 'programs',
     description: `${p.name}: ${p.one}`,
+    ogImage: SHOTS[p.id] ? `assets/shots/${SHOTS[p.id][0][0]}.webp` : p.shot ? `assets/${p.shot}` : undefined,
+    jsonld: [appLd(p), crumbs([['Home', ''], ['Programs', 'programs.html'], [p.name, `programs/${p.id}.html`]])],
     body: (up) => `
 <div class="hero phero"><div class="c">
   <div>
@@ -968,11 +1052,17 @@ for (const p of PROGRAMS.filter((x) => !x.custom)) {
   <div class="inclcard wide">${inclList(p.id)}</div>
   ${p.note ? `<p class="pnote">${esc(p.note)}</p>` : ''}
 </section>
+${FACTS[p.id] ? `<section class="c blk" id="glance">${shead('At a glance', 'Where it runs, what it needs and what it doesn\'t do yet.', 'Good to know')}
+  <div class="glance-grid">${glance(p, up)}<div class="glance-side"><h3>Not yet, and new</h3>${notYet(p.id) || '<p class="muted">Nothing to flag: everything listed above is in the current release.</p>'}<p class="muted small">See every feature and its status on <a class="more" href="${up}features.html#${p.id}">What works today</a>.</p></div></div>
+</section>` : ''}
+${p.id === 'link' || p.id === 'link-office' ? `<section class="c blk" id="compare">${shead('Riyeser Link or Riyeser Link Office?', 'Riyeser Link is the chat and calls app. Riyeser Link Office is the office phone system for desk phones, and comes with it.', 'Compare')}${LINK_CMP(up)}</section>` : ''}
 ${gallery(p.id, up)}
-${p.id.startsWith('accounting') ? `<section class="c blk" id="editions">${shead('Accounting Basics or Accounting Plus?', 'Two editions of the same books. Pick the one that fits today, and switch any time.', 'Compare')}${editionsBlock(up)}</section>` : ''}
+${p.id.startsWith('accounting') ? `<section class="c blk" id="editions">${shead('Accounting Basics or Accounting Plus?', 'Two editions of the same books. Pick the one that fits today, and switch any time.', 'Compare')}${editionsBlock(up)}<h3 class="cmp-h">Feature by feature</h3>${ACC_CMP(up)}</section>` : ''}
 ${rel.length ? `<section class="c blk">${shead('Works with', 'Every Riyeser program shows up in Riyeser Central, your home screen for the whole business.')}
   <div class="wrow">${rel.map(([o, why]) => `<a href="${up}programs/${o.id}.html">${appImg(o.id, up)}<span><b>${esc(o.short === 'Central' ? 'Riyeser Central' : o.short)}</b><small>${esc(why)}</small></span>${ARR}</a>`).join('')}</div>
 </section>` : ''}
+${PROG_FAQ[p.id] ? `<section class="c blk" id="faq">${shead('Questions', '', 'FAQ')}<div style="max-width:920px">${progFaq(p.id)}
+  <p class="note" style="margin-top:18px">More help: the <a class="more" href="${up}help/${p.id}.html">${esc(p.short === 'Central' ? 'Riyeser Central' : p.short)} guide</a> · <a class="more" href="/link/?contact">Contact support</a> · <a class="more" href="mailto:${EMAIL}">${EMAIL}</a></p></div></section>` : ''}
 ${ctaBlock(up, p.file ? `Get ${p.name}` : 'Start with Riyeser Central')}
 ${videoOf(p.id) ? videoBox() : ''}`,
   });
@@ -1115,7 +1205,7 @@ page({
 <section class="c" style="padding-top:0">
   <h2 class="h2">Every program</h2><p class="sub">Or download a program on its own. Each one installs in one click and updates over the old version, so your information is kept.</p>
   ${grouped(PROGRAMS.filter((p) => p.id !== 'central'), (l) => l.map((p) => `<div class="dl">${iconBox(p, up)}<div><h3>${esc(p.name)} ${badgeOf(p)}</h3><p>${esc(p.one)} <a class="more" href="${up}programs/${p.id}.html">More</a></p>${p.comesWith ? `<p class="cprice">Comes with <a class="more" href="${withHref(p, up)}">${esc(withName(p))}</a>. No separate price: it switches on when your business has ${esc(withName(p))}.</p>` : p.free ? '' : `<p class="cprice">${priceTag(p)}</p>`}</div>${p.file ? `<a class="btn p" href="${dl(p, up)}">${WINLOGO} Download</a>` : `<a class="btn s" href="${dl(p, up)}">${p.link ? esc(p.linkLabel) : 'Early access'}</a>`}</div>`).join(''), (t) => `<h3 class="ghead">${esc(t)}</h3>`)}
-  <div class="note" style="margin-top:26px"><b>Windows says “Windows protected your PC”?</b> Click <b>More info</b>, then <b>Run anyway</b>. We're getting our programs signed so this goes away. The <a class="more" href="${up}help/start.html">Getting started guide</a> covers installing, updates and your licence.</div>
+  <div class="note" style="margin-top:26px"><b>Windows says “Windows protected your PC”?</b> Click <b>More info</b>, then <b>Run anyway</b>. Our installers aren't code-signed yet, which is why Windows asks. Each program installs just for you with no admin rights, except Riyeser Link Office, which installs for the whole PC and asks for permission once (it adds a firewall rule for the desk phones). The <a class="more" href="${up}help/start.html">Getting started guide</a> covers installing, updates and your licence.</div>
 </section>
 ${ctaBlock(up, 'Need a hand getting started?', 'Our step-by-step guides use the same button names you see on screen.')}`,
 });
@@ -1127,13 +1217,13 @@ ${ctaBlock(up, 'Need a hand getting started?', 'Our step-by-step guides use the 
   const P = PRICE;
   const ROWS = [
     ['basic', 'Accounting Basics', 'accounting-basics', 'Invoices, quotes, customers, stock, money in and out, GST and profit &amp; loss.'],
-    ['plus', 'Accounting Plus', 'accounting', 'Everything in Basics, plus bank reconciliation, statement import, payroll, BAS, journals, jobs and budgets. You pay for Plus <b>instead of</b> Basics, never both.'],
+    ['plus', 'Accounting Plus', 'accounting', 'Everything in Basics, plus bank reconciliation, statement import, BAS, journals, jobs and budgets. You pay for Plus <b>instead of</b> Basics, never both.'],
     ['bookings', 'Bookings', 'bookings', 'Jobs, appointments and table bookings on one calendar.'],
     ['estimate', 'Riyeser Estimate', 'estimate', 'Measure jobs on a plan, a photo or the map, and turn them into quotes.'],
     ['calls', 'Riyeser Link', 'link', `Chat, calls between your people and branches, office desk phones with <a class="more" href="programs/link-office.html">Riyeser Link Office</a>, and ${STORAGE_GB.link} GB of space for files shared in chat (not hosting).`],
-    ['link-office', 'Riyeser Link Office', 'link-office', 'Your business\'s phone lines: the office phone system, with desk phones, extensions and ring groups, answered on desk phones or in the Riyeser Link app.'],
+    ['link-office', 'Riyeser Link Office', 'link-office', 'Your internal office phone system (no outside lines): desk phones, extensions and ring groups, answered on desk phones or in the Riyeser Link app.'],
     ['payroll', 'Payroll', 'payroll', 'Time clock, timesheets, pay runs, payslips and leave. Staff who only clock in or see their payslips are free.'],
-    ['pos', 'POS', 'pos', 'The till for shops, cafes and restaurants. Every sale goes into your books.'],
+    ['pos', 'POS', 'pos', 'Point-of-sale software for shops, cafés and restaurants. Every sale goes into your books.'],
     ...(ASBUILT ? [['as_built', 'As Built', 'services', 'Services on your drawings, for the building industry. Doesn\'t need Accounting.']] : []),
   ];
   const CALC = ROWS.filter(([m]) => PRICE[m] != null);
@@ -1147,7 +1237,7 @@ ${ctaBlock(up, 'Need a hand getting started?', 'Our step-by-step guides use the 
   const big = BUNDLES.find((x) => x.popular) || BUNDLES[BUNDLES.length - 1];
   const bundleCard = (x, up) => `<div class="plan bundle${x.popular ? ' best' : ''}" id="bundle-${x.id}">${x.popular ? '<span class="tag">Most popular</span>' : ''}
     <div class="k"><b>${esc(x.name)}</b><small>${esc(x.who)}</small></div>
-    <div class="price">${usd(x.price)}<small> /month</small></div>
+    <div class="price">${usd(x.price)}<small>/month</small></div>
     <div class="psub"><s>${usd(separately(x))}</s> if bought one by one</div>
     <div class="psub"><b class="save">You save ${usd(separately(x) - x.price)} a month</b></div>
     <div class="psub">Or ${usd(x.price * 10)} a year: 2 months free</div>
@@ -1160,12 +1250,12 @@ ${ctaBlock(up, 'Need a hand getting started?', 'Our step-by-step guides use the 
     body: (up) => `
 ${bandHero({ title: 'Pricing', lead: `Start free. Pay only for the programs you use: one price per business per month, with ${P.users_included} users included in each. Take programs together in a bundle and pay less.` })}
 <section class="c" style="padding-bottom:10px">
-  <p class="usdnote" id="usd"><b>All prices in US dollars (US$)</b>, per business, per month. Any GST or local tax is shown before you pay. Pay yearly and get 2 months free.</p>
+  <p class="usdnote" id="usd"><b>All prices in US dollars (US$)</b>, per business, per month. Your bill shows the exact amount before you pay. Pay yearly and get 2 months free.</p>
   ${EARLY_BIRD ? `<div class="earlybox" id="early"><div class="big">🐣</div><div><b>Early bird: 50% off for your first 12 months</b><p>For the first 100 businesses to buy. Half price on each program, bundle and extra user for 12 months (extra companies in Accounting stay full price) — for example Accounting Basics is ${half(P.basic)} a month instead of ${usd(P.basic)}, and the ${esc(big.name)} bundle ${half(big.price)} instead of ${usd(big.price)} — then the normal price. The offer ends when 100 businesses have it.</p></div></div>` : ''}
 
   <div id="bundles">
   <h2 class="h2" style="margin-top:8px">Bundles</h2>
-  <p class="sub">Programs that work together, for one lower price. You can move up to a bigger bundle any time, and billing always gives you the bundle price when your programs make one.</p>
+  <p class="sub">Programs that work together, for one lower price. You can move up to a bigger bundle any time, and billing always gives you the bundle price when your programs make one. Riyeser Estimate isn't part of any bundle.</p>
   <p class="bswipe" aria-hidden="true">Swipe for more bundles →</p>
   <div class="plans bundles">${BUNDLES.map((x) => bundleCard(x, up)).join('')}</div>
   </div>
@@ -1209,7 +1299,7 @@ ${bandHero({ title: 'Pricing', lead: `Start free. Pay only for the programs you 
       <label class="yr" style="margin-top:12px"><input id="yearly" type="checkbox"> Pay yearly (10 months for 12)</label></div>
     <div class="out"><ul class="brk" id="per"></ul><div class="total" id="total"></div><div class="muted" id="note"></div><div class="bundleline" id="bline"></div>${EARLY_BIRD ? '<div class="ebline" id="eb"></div>' : ''}
       <div class="buybtns calcbtns" id="calcbuy"><a class="btn s" id="calcfree" href="${BUY_LINK('basic', false)}">Start free for 90 days</a><a class="btn p" id="calcpay" href="${BUY_LINK('basic', true)}">Buy this plan</a></div>
-      <p class="muted small" style="margin:10px 0 0">All prices in US dollars. Pay by PayPal (card or PayPal balance) or bank transfer.</p></div>
+      <p class="muted small" style="margin:10px 0 0">All prices in US dollars. Pay by bank transfer, or by PayPal (card or PayPal balance) where it is offered when you buy.</p></div>
   </div>
   </details>
 </section>
@@ -1218,6 +1308,8 @@ ${bandHero({ title: 'Pricing', lead: `Start free. Pay only for the programs you 
   <h2 class="h2">Accounting Basics or Accounting Plus?</h2>
   <details class="phfold" open><summary>Compare Basics and Plus</summary>
   ${editionsBlock(up)}
+  <h3 class="cmp-h">Feature by feature</h3>
+  ${ACC_CMP(up)}
   </details>
 </section>
 
@@ -1233,9 +1325,10 @@ ${ASBUILT ? `<section class="c" id="as-built" style="padding-top:0">
   <details class="phfold" open><summary>Show the questions ▾</summary>
   <details open><summary>Is it per person?</summary><p>No — per business. Each paid program is one price for the whole business, with ${P.users_included} users included. After that, each extra user is ${usd(P.extra_user)} a month for that program. For example, a business where 5 people use Accounting Plus and Riyeser Link, and 2 office staff run Payroll for 12 employees:</p><ul class="ex"><li>Accounting Plus: ${usd(P.plus)}, plus 2 extra users at ${usd(P.extra_user)} each (${usd(2 * P.extra_user)}) = <b>${usd(P.plus + 2 * P.extra_user)}</b></li><li>Riyeser Link: ${usd(P.calls)}, plus 2 extra users at ${usd(P.extra_user)} each (${usd(2 * P.extra_user)}) = <b>${usd(P.calls + 2 * P.extra_user)}</b></li><li>Payroll: ${usd(P.payroll)}. The 2 office staff are within the ${P.users_included} included, and the 12 employees who clock in are free = <b>${usd(P.payroll)}</b></li><li>Total: <b>${usd(P.plus + P.calls + P.payroll + 4 * P.extra_user)} a month</b></li></ul><p>Their accountant signs in free. The free programs have no user charges.</p></details>
   <details><summary>How do bundles work?</summary><p>A bundle is a set of programs for one lower price: Shop (Accounting Basics, POS and Riyeser Link) ${usd(BUNDLES[0].price)}, Office (Accounting Basics, Payroll and Riyeser Link) ${usd(BUNDLES[1].price)}, and Business (Accounting Plus, Bookings, Riyeser Link, Payroll and POS) ${usd(big.price)}. Each program in a bundle still includes ${P.users_included} users; extra users are ${usd(P.extra_user)} a month and extra tills ${usd(P.extra_till)}. You don't have to choose a bundle: when the programs you pick make one, you're charged the bundle price by itself. Move up to a bigger bundle any time. The early bird half price applies to bundles too.</p></details>
-  <details><summary>Why US dollars?</summary><p>Riyeser is used by businesses in more than one country, so one price in one currency keeps it simple and fair for everyone. Your bank or card changes it into your own currency when you pay. Any GST or local tax is shown before you pay.</p></details>
-  <details><summary>Basics or Plus?</summary><p>Start with Accounting Basics (${usd(P.basic)} a month) if you need invoices, stock and simple money in and out. Choose Accounting Plus (${usd(P.plus)} a month) for bank reconciliation, payroll in your books, BAS, journals, jobs and budgets. Plus includes everything in Basics, so you only ever pay for one: moving up is ${usd(P.plus - P.basic)} a month more, and your books carry straight over.</p></details>
+  <details><summary>Why US dollars?</summary><p>Riyeser is used by businesses in more than one country, so one price in one currency keeps it simple and fair for everyone. Your bank or card changes it into your own currency when you pay. Your bill shows the exact amount in US dollars before you pay.</p></details>
+  <details><summary>Basics or Plus?</summary><p>Start with Accounting Basics (${usd(P.basic)} a month) if you need invoices, stock and simple money in and out. Choose Accounting Plus (${usd(P.plus)} a month) for bank reconciliation, BAS, journals, jobs and budgets. Plus includes everything in Basics, so you only ever pay for one: moving up is ${usd(P.plus - P.basic)} a month more, and your books carry straight over.</p></details>
   <details><summary>Are the free programs really free?</summary><p>Yes. Riyeser Central, Riyeser Documents, Riyeser Invoices and Riyeser PDF are free forever, with no card, no time limit and no user charges. The paid programs are optional: add them only if you need them.</p></details>
+  <details id="link-compare"><summary>Riyeser Link or Riyeser Link Office?</summary><p>Riyeser Link Office comes with Riyeser Link: one price for both. Neither one calls outside phone numbers or emergency services.</p>${LINK_CMP(up)}</details>
   <details><summary>Is Riyeser Link free?</summary><p>Riyeser Link is now a paid program (${usd(P.calls)} a month, ${P.users_included} users included, free for 90 days). It covers everything in one: chat, calls, desk phones, Riyeser Link Office (your office phone system) and ${STORAGE_GB.link} GB of space for files shared in chat. Businesses that already used Riyeser Link get 90 free days from the change. If it isn't paid after that, your chats stay and can still be read; only sending new messages waits until Riyeser Link is added from your Riyeser home page. Nothing is deleted.</p></details>
   <details><summary>How does the free trial work?</summary><p>Every paid program — Accounting Basics, Accounting Plus, Bookings, Riyeser Link, Payroll, POS and Riyeser Estimate${ASBUILT ? ', and As Built for the building industry' : ''} — is free for 90 days (Riyeser Estimate from the first time you use it). No card. The programs show how many days are left, and when the trial ends nothing is deleted: you keep every record and can still look and print; only adding new work waits for a licence.</p></details>
   <details><summary>What happens when the free part runs out?</summary><p>Nothing is deleted and nothing is charged. Everything you made stays and can still be opened, and quotes, payments and reports keep working. Only new invoices (Basics), new till sales (POS), new messages and calls (Riyeser Link) or that program's screens (the others) wait until you buy it. They unlock straight away.</p></details>
@@ -1244,8 +1337,8 @@ ${ASBUILT ? `<section class="c" id="as-built" style="padding-top:0">
   <details><summary>How do extra companies work?</summary><p>Your plan includes one company in Riyeser Accounting. Groups, trusts and bookkeepers can add more for ${usd(P.extra_company)} a month per extra company, with one sign-in. If you stop paying for one, its books stay — they open read-only until you add it back.</p></details>
   <details><summary>How does paying yearly work?</summary><p>Pay for 10 months and get 12: the yearly price is 10 times the monthly price, so 2 months are free. It works the same for bundles.</p></details>
   ${EARLY_BIRD ? `<details><summary>How does the early bird offer work?</summary><p>The first 100 businesses to buy pay half price for their first 12 months, on each program, bundle and extra user (not on extra companies) — for example ${half(P.basic)} instead of ${usd(P.basic)} a month for Accounting Basics. After 12 months the normal price applies. Once 100 businesses have it, the offer ends; we won't extend it or run a fake countdown.</p></details>` : ''}
-  <details><summary>Can I cancel?</summary><p>Yes, any time. You keep everything you made, and can always open and export it.</p></details>
-  <details><summary>How do I buy?</summary><p>Press <b>Buy now</b> next to a program or bundle (or <b>Buy this plan</b> in the price calculator). Create your free Riyeser account, or sign in, and choose how many users and monthly or yearly. Then pay with <b>PayPal</b> (a card or your PayPal balance; it renews by itself until you cancel) or by <b>bank transfer</b> (we give you an invoice with the bank details and a reference; the program switches on when the money arrives). Your free days aren't lost: paid time starts when your 90-day trial ends. Questions? Email <a class="more" href="mailto:${EMAIL}?subject=${encodeURIComponent('Buying Riyeser')}">${EMAIL}</a>.</p></details>
+  <details><summary>Can I cancel?</summary><p>Yes, any time. Your programs keep working until the end of the time you've paid for. After that nothing is deleted: the records on your PC stay yours (with each program's daily backups), and Riyeser Link chats can still be read. Only new work in that program waits until it's paid again. See <a class="more" href="${up}trust.html">Trust &amp; security</a>.</p></details>
+  <details><summary>How do I buy?</summary><p>Press <b>Buy now</b> next to a program or bundle (or <b>Buy this plan</b> in the price calculator). Create your free Riyeser account, or sign in, and choose how many users and monthly or yearly. Then pay by <b>bank transfer</b>, or with <b>PayPal</b> where it is offered (a card or your PayPal balance; it renews by itself until you cancel), as shown when you buy. With bank transfer, we give you an invoice with the bank details and a reference, and the program switches on when the money arrives. Your free days aren't lost: paid time starts when your 90-day trial ends. Questions? Email <a class="more" href="mailto:${EMAIL}?subject=${encodeURIComponent('Buying Riyeser')}">${EMAIL}</a>.</p></details>
   </details>
 </section>
 <script>/* S2: on a phone the long parts start folded (a link to one of them opens it) */
@@ -1299,6 +1392,130 @@ c.addEventListener('input',function(){draw()});y.addEventListener('change',funct
   });
 }
 
+// ---------- what works today: the feature register as a page (content/features.mjs) ----------
+const infoPage = ({ path, title, h1, lead, description, body, eyebrow = '' }) => page({ path, title, description, active: '',
+  jsonld: [crumbs([['Home', ''], [h1, path]])], body: (up) => `${bandHero({ eyebrow, title: esc(h1), lead: esc(lead) })}${body(up)}` });
+infoPage({
+  path: 'features.html', title: 'What works today: Riyeser feature register', h1: 'What works today', eyebrow: 'Feature register',
+  lead: 'Every Riyeser program, what it does, where it runs, whether it needs the internet, and what isn\'t ready yet.',
+  description: 'The Riyeser feature register: each program\'s features marked Available, Beta, Planned or Not supported, with where it runs and whether it needs the internet.',
+  body: (up) => `<section class="c blk first">
+  <div class="legend">${Object.entries(STATUS).map(([k, s]) => `<p>${stBadge(k)} ${esc(s.note)}</p>`).join('')}</div>
+  <p class="muted small">Checked against the programs themselves on ${esc(CHECKED.date)} (release ${esc(CHECKED.release)}). "Available" means it is in that release; it is not a promise that it suits every business. Tax and payroll rules have not been independently checked.</p>
+  <nav class="jump" aria-label="Programs on this page">${PROGRAMS.filter((p) => FACTS[p.id]).map((p) => `<a href="#${p.id}">${appImg(p.id, up, 'ji')}${esc(p.short === 'Central' ? 'Central' : p.short)}</a>`).join('')}</nav>
+</section>
+${PROGRAMS.filter((p) => FACTS[p.id]).map((p) => `<section class="c blk reg-sec" id="${p.id}"><div class="reg-head">${appImg(p.id, up, 'ri')}<div><h2>${esc(p.name)}</h2><p class="muted">${esc(FACTS[p.id].runs)} · ${esc(FACTS[p.id].net)}</p></div><a class="more" href="${up}programs/${p.id}.html">About ${esc(p.short === 'Central' ? 'Central' : p.short)} ${ARR}</a></div>
+  ${regRows(FEATURES.filter((f) => f[0] === p.id))}</section>`).join('')}
+<section class="c blk" id="compare-accounting"><h2 class="h2">Accounting Basics or Accounting Plus?</h2>${ACC_CMP(up)}</section>
+<section class="c blk" id="compare-link"><h2 class="h2">Riyeser Link or Riyeser Link Office?</h2>${LINK_CMP(up)}</section>
+<section class="c blk"><p class="note">See something here that doesn't match the program? Email <a class="more" href="mailto:${EMAIL}?subject=${encodeURIComponent('Feature register')}">${EMAIL}</a> and we'll fix it.</p></section>`,
+});
+
+// ---------- trust & security: only what the code shows (no encryption, compliance or certification claims) ----------
+{
+  const ONLINE = [
+    ['Your Riyeser account', 'Your name, email address and business details, when you create an account', 'Riyeser\'s online database (Supabase)'],
+    ['Riyeser Link', 'Chat messages, files shared in chat (up to 20 GB per business) and who is in your team, so everyone sees them on every device', 'Riyeser\'s online database'],
+    ['Online connections', 'Bookings, orders and enquiries from your website wait in your online post box until your PC collects them; the prices, stock and free times you choose to publish', 'Riyeser\'s online database'],
+    ['Your plan and linked PCs', 'Which programs your business has, and for each linked PC its name and the Riyeser programs and versions on it', 'Riyeser\'s online database'],
+    ['Riyeser Link Office status', 'Every 5 minutes: the office PC\'s name and version, the desk phones and extensions, and how many calls are in progress. Never call audio, numbers dialled or recordings. Desk phone passwords stay on the office PC', 'Riyeser\'s online database'],
+    ['Downloads', 'Which program and release, the country, and the page the button was on. No IP address or browser details', 'Riyeser\'s online database'],
+    ['Website visits', 'The page, the site you came from, phone/tablet/desktop, browser, language and region. No cookies, and nothing is sent when your browser asks not to be tracked', 'Riyeser\'s online database'],
+    ['Support requests', 'What you write to us, and any screenshot or details you choose to send', 'Riyeser\'s online database'],
+  ];
+  const LOCAL = ['Accounting Basics and Plus, Invoices, Bookings, POS and Estimate: your company file, on your PC',
+    'Riyeser Payroll: staff, pay rates, bank details, timesheets and payslips, on the PC that runs it', 'Riyeser Documents: your documents, in ordinary Windows folders on your PC or a shared network folder you choose',
+    'Riyeser PDF: your PDFs stay where they are', 'Riyeser Link Office: extensions, desk phone passwords and call history, on the office PC'];
+  infoPage({
+    path: 'trust.html', title: 'Trust & security — Riyeser', h1: 'Trust & security', eyebrow: 'Your data',
+    lead: 'Where your records are kept, what goes online and why, backups, leaving, and what Riyeser support can and can\'t see.',
+    description: 'Where Riyeser keeps your records: on your own PC for books, payroll and documents; online only for your account, Riyeser Link and Online connections. Backups, export and support access.',
+    body: (up) => `<section class="c blk first trust">
+  <div class="tcards">
+    <a class="tcard" href="#local"><b class="tc-h">On your PC</b><p>Your books, payroll and documents</p></a>
+    <a class="tcard" href="#online"><b class="tc-h">Online</b><p>Your account, Riyeser Link and website connections</p></a>
+    <a class="tcard" href="#backups"><b class="tc-h">Backups</b><p>A copy every day, on your PC</p></a>
+    <a class="tcard" href="#leaving"><b class="tc-h">Export and leaving</b><p>Your records stay yours</p></a>
+    <a class="tcard" href="#support"><b class="tc-h">Support access</b><p>What Riyeser staff can and can't see</p></a>
+    <a class="tcard" href="#security"><b class="tc-h">Security</b><p>What we do, and what we don't claim</p></a>
+  </div>
+</section>
+<section class="c blk" id="local">${shead('What stays on your PC', 'The Windows programs keep your records on your own computer. They are not uploaded to Riyeser.')}
+  <ul class="ticks">${LOCAL.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>
+  <p class="muted" style="margin-top:14px">Riyeser Documents can keep its library on a shared network folder for the office. Emailing an invoice, quote or payslip goes through your own email settings, straight to the person you send it to.</p></section>
+<section class="c blk" id="online">${shead('What goes online, and why', 'Only these things leave your PC. They are kept in Riyeser\'s online database, run on Supabase.')}
+  <div class="ptable-wrap" tabindex="0" role="region" aria-label="What goes online"><table class="ptable stack"><thead><tr><th scope="col">What</th><th scope="col">What is kept online</th></tr></thead>
+  <tbody>${ONLINE.map(([a, b]) => `<tr><th scope="row">${esc(a)}</th><td data-label="Kept online">${esc(b)}</td></tr>`).join('')}</tbody></table></div></section>
+<section class="c blk" id="backups">${shead('Backups', 'Each Windows program backs itself up.')}
+  <ul class="ticks"><li>A backup every day, into <b>Documents\\Riyeser\\&lt;program&gt;\\Backups</b> on your PC. The last 30 are kept. Press <b>Back up now</b> any time.</li>
+  <li>Restoring shows what's in the backup first, and saves a copy of your records as they are now before putting the backup back.</li>
+  <li>Backups stay on your PC and aren't sent to Riyeser. Copy the Backups folder to a USB drive or your own cloud storage so a broken PC doesn't take them with it.</li></ul></section>
+<section class="c blk" id="leaving">${shead('Export, cancelling and leaving')}
+  <ul class="ticks"><li>Print or export reports to CSV (for Excel), and save invoices, quotes and payslips as PDFs.</li>
+  <li>When a trial ends or you cancel, nothing is deleted. Paid programs keep working until the end of the time you've paid for; then new work waits until it's paid again.</li>
+  <li>The records on your PC are yours to keep, with their backups, whatever happens to your plan.</li>
+  <li>To close your Riyeser account, or to ask what we hold about you, email <a class="more" href="mailto:${EMAIL}?subject=${encodeURIComponent('My Riyeser account')}">${EMAIL}</a>.</li></ul></section>
+<section class="c blk" id="support">${shead('What Riyeser support can and can\'t see')}
+  <div class="two-col"><div><h3>Support can see</h3><ul class="ticks"><li>Your account, business details and plan</li><li>Which Riyeser programs and versions are on your linked PCs</li><li>Your support requests and our replies</li><li>Riyeser Link Office's status summary (no calls or audio)</li></ul></div>
+  <div><h3>Support tools don't show</h3><ul class="ticks no"><li>Your books, invoices and customers (they're on your PC)</li><li>Payroll, pay rates and bank details (on your PC)</li><li>Your documents (on your PC)</li><li>Your Riyeser Link chat messages</li><li>Desk phone passwords</li></ul></div></div>
+  <p class="muted">Support can change desk phone settings only for one hour after an owner or admin presses <b>Let Riyeser help</b> on the Phones page, and every change is recorded in your business's history. Riyeser staff sign in with two-step sign-in, and what they do in Riyeser's support tools is recorded.</p></section>
+<section class="c blk" id="security">${shead('Security')}
+  <ul class="ticks"><li>Owners and admins of a business use two-step sign-in (a code from an app) for admin screens in Riyeser Link.</li>
+  <li>Each business only sees its own team, chats and connections.</li>
+  <li>Website keys for Online connections only work on the web addresses you list, and secret keys are refused in a browser.</li>
+  <li>Company files on your PC are ordinary files: Riyeser doesn't encrypt them. Protect the PC with a Windows password and, where you can, Windows device encryption (BitLocker).</li>
+  <li>Riyeser doesn't hold security or privacy certifications yet, and doesn't claim any.</li>
+  <li>Our Windows installers aren't code-signed yet, so Windows may warn you when you install. Download them only from riyeser.com.</li>
+  <li>Found a security problem? Email <a class="more" href="mailto:${EMAIL}?subject=${encodeURIComponent('Security')}">${EMAIL}</a>.</li></ul>
+  <p class="muted small">There is no public service status page yet. If Riyeser Link or Online connections seem down, check the <a class="more" href="${up}help.html">Help Centre</a> or email us. Read the <a class="more" href="${up}terms.html">terms of use</a>.</p></section>`,
+  });
+}
+
+// ---------- hardware: what's supported, and honestly what hasn't been tested ----------
+infoPage({
+  path: 'hardware.html', title: 'Hardware that works with Riyeser', h1: 'Hardware', eyebrow: 'Compatibility',
+  lead: 'Desk phones, receipt printers, scanners and card machines: how each one connects today, and what has been tested.',
+  description: 'Which desk phones, receipt printers, barcode scanners, card machines and scanners work with Riyeser programs, how they connect, and what has been tested.',
+  body: (up) => `<section class="c blk first">
+  <p class="note"><b>No device has been formally tested and listed yet.</b> The table says how each kind of device connects today. Before you buy hardware for Riyeser, ask us at <a class="more" href="mailto:${EMAIL}?subject=${encodeURIComponent('Hardware question')}">${EMAIL}</a>, and tell us what works for you so we can add it.</p>
+  <div class="ptable-wrap" tabindex="0" role="region" aria-label="Hardware" style="margin-top:22px"><table class="ptable stack"><thead><tr><th scope="col">Device</th><th scope="col">How it works today</th><th scope="col">Program</th><th scope="col">Tested models</th></tr></thead>
+  <tbody>${HARDWARE.map(([a, b, c, d]) => `<tr><th scope="row">${esc(a)}</th><td data-label="How it works today">${esc(b)}</td><td data-label="Program">${esc(c)}</td><td data-label="Tested models">${esc(d)}</td></tr>`).join('')}</tbody></table></div>
+  <p class="muted small" style="margin-top:14px">Every program needs a PC with Windows 10 or 11. Riyeser Link also works in a web browser and on phones. Mac and Linux aren't supported.</p>
+</section>`,
+});
+
+// ---------- countries: what the programs set up, not confirmed compliance ----------
+infoPage({
+  path: 'countries.html', title: 'Countries: Fiji, Australia, New Zealand and worldwide — Riyeser', h1: 'Countries', eyebrow: 'Worldwide',
+  lead: 'Riyeser is for small businesses anywhere, priced in US dollars. Here is what each program sets up for you in Fiji, Australia, New Zealand and other countries.',
+  description: 'What Riyeser sets up for Fiji, Australia, New Zealand and other countries: currency, sales tax, payroll and phones. Settings to check with your accountant, not confirmed compliance.',
+  body: (up) => `<section class="c blk first">
+  <p class="note"><b>These are settings, not a promise that your tax or payroll is right.</b> Tax and payroll rules in the programs have not been independently checked against each country's current rules. Have your accountant check your setup before you rely on it, and check pay rates before you pay staff.</p>
+  <p style="margin-top:16px"><b>Accounting, Invoices and POS are set up for Australian tax only.</b> They have a fixed ABN label and an Australian BAS / GST report, with GST worked out and rounded on each line. Fiji VAT and TIN, and New Zealand GST, IRD number and NZBN, aren't set up for you: you can add your own tax codes by hand, but the reports stay Australian.</p>
+  <div class="ptable-wrap" tabindex="0" role="region" aria-label="Countries" style="margin-top:22px"><table class="ptable ctable stack"><thead><tr><th scope="col">Area</th><th scope="col">Fiji</th><th scope="col">Australia</th><th scope="col">New Zealand</th><th scope="col">Other countries</th></tr></thead>
+  <tbody>${COUNTRIES.map(([a, ...v]) => `<tr><th scope="row">${esc(a)}</th>${v.map((x, i) => `<td data-label="${['Fiji', 'Australia', 'New Zealand', 'Other countries'][i]}">${esc(x)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+  <h2 class="h2" style="margin-top:40px">Everywhere else</h2>
+  <p>Every program works in any country: you choose your currency code, tax codes and time zone, and the free programs have no limits. The programs and help are in English (Australian spelling). Riyeser Link and Link Office never call outside phone numbers, so they don't depend on your country's phone network. See <a class="more" href="${up}features.html">what works today</a> for each program.</p>
+</section>`,
+});
+
+// ---------- release notes: what's in the newest release (refreshed from GitHub in the browser) ----------
+infoPage({
+  path: 'releases.html', title: 'Release notes — Riyeser', h1: 'Release notes', eyebrow: 'Updates',
+  lead: 'Which version of each Riyeser program is in the newest release. Riyeser Central installs updates for you.',
+  description: 'The newest Riyeser release and the version of each Windows program in it: Central, Accounting, Invoices, Bookings, POS, Estimate, Payroll, Documents, PDF, Link and Link Office.',
+  body: (up) => `<section class="c blk first">
+  <h2 class="h2">Release ${esc(CHECKED.release)}</h2>
+  <div class="ptable-wrap" tabindex="0" role="region" aria-label="Program versions" style="margin-top:16px"><table class="ptable stack"><thead><tr><th scope="col">Program</th><th scope="col">Version</th></tr></thead>
+  <tbody>${PROGRAMS.filter((p) => FACTS[p.id]).map((p) => `<tr><th scope="row"><a class="more" href="${up}programs/${p.id}.html">${esc(p.name)}</a></th><td data-label="Version">${esc(FACTS[p.id].version)}</td></tr>`).join('')}</tbody></table></div>
+  <div id="rel-live" hidden><h2 class="h2" style="margin-top:36px">Latest releases on GitHub</h2><ul class="rel-list" id="rel-list"></ul></div>
+  <p class="muted" style="margin-top:22px">Every release is published on <a class="more" href="https://github.com/raka1987/Riyeser/releases">GitHub</a>, where each installer is built and checked on Windows before it goes out. Detailed notes on what changed in each release aren't published yet; the <a class="more" href="${up}help.html">Help Centre</a> covers the newest features.</p>
+</section>
+<script>(function(){if(!window.fetch)return;fetch('https://api.github.com/repos/raka1987/Riyeser/releases?per_page=8').then(function(r){return r.ok?r.json():null}).then(function(list){if(!list||!list.length)return;
+var ul=document.getElementById('rel-list');list.filter(function(r){return !r.draft&&r.published_at}).forEach(function(r){var li=document.createElement('li'),a=document.createElement('a');a.href=r.html_url;a.className='more';a.textContent=r.tag_name;li.appendChild(a);
+var s=document.createElement('span');try{s.textContent=' · '+new Date(r.published_at).toLocaleDateString('en-AU',{day:'numeric',month:'long',year:'numeric'})}catch(e){}li.appendChild(s);ul.appendChild(li)});document.getElementById('rel-live').hidden=!ul.children.length}).catch(function(){})})()</script>`,
+});
+
 // ---------- help centre: a front page with search, and one guide per program (text in help.mjs) ----------
 {
   const guides = (up) => guidesFor({ EMAIL, SERVICES_APP, up });
@@ -1342,7 +1559,7 @@ ${searchScript(up)}
 
   G0.forEach((g0, gi) => {
     page({
-      path: `help/${g0.id}.html`, title: `${gName(g0)} help — Riyeser Help Centre`, active: 'help',
+      path: `help/${g0.id}.html`, title: `${gName(g0)} help — Riyeser Help Centre`, active: 'help', jsonld: [crumbs([['Home', ''], ['Help Centre', 'help.html'], [`${gName(g0)} help`, `help/${g0.id}.html`]])],
       description: `${gName(g0)} help: ${g0.intro}`,
       body: (up) => {
         const G = guides(up); const g = G[gi]; const prev = G[gi - 1]; const next = G[gi + 1];
@@ -1396,6 +1613,7 @@ const bookShell = (title) => withCsp(`<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex">
 <title>${title}</title>
 <meta name="description" content="Book online with a Riyeser business: choose a service and a free time.">
 <meta property="og:title" content="Book online">
@@ -1430,9 +1648,12 @@ redirectKeep('help/desk-assistant.html', '../help/documents.html', 'Riyeser Docu
 cpSync(join(ROOT, 'assets'), join(OUT, 'assets'), { recursive: true });
 const SUBFOLDER = BASE !== '/';
 if (!SUBFOLDER) writeFileSync(join(OUT, 'CNAME'), 'riyeser.com\n');
-if (!SUBFOLDER) writeFileSync(join(OUT, 'robots.txt'), `User-agent: *\nAllow: /\nSitemap: ${SITE}/sitemap.xml\n`);
-const urls = ['', 'programs.html', 'downloads.html', 'pricing.html', 'help.html', 'terms.html', ...INDUSTRIES.map((i) => `industries/${i.id}.html`), ...PROGRAMS.map((p) => `programs/${p.id}.html`), ...guidesFor({ EMAIL, SERVICES_APP, up: '' }).map((g) => `help/${g.id}.html`), ...DEV_PAGES.map(([p]) => (p === 'index' ? 'developers/' : `developers/${p}.html`))];
-writeFileSync(join(OUT, 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map((u) => `  <url><loc>${SITE}/${u}</loc></url>`).join('\n')}\n</urlset>\n`);
+// Riyeser HQ (staff only) and the old /team/ copy of Riyeser Link stay out of search engines. The Link app (/link/), the
+// download hand-off pages and the booking page shell carry a noindex tag instead, so crawlers can still read it.
+if (!SUBFOLDER) writeFileSync(join(OUT, 'robots.txt'), `User-agent: *\nAllow: /\nDisallow: /hq/\nDisallow: /team/\nSitemap: ${SITE}/sitemap.xml\n`);
+const urls = ['', 'programs.html', 'downloads.html', 'pricing.html', 'features.html', 'trust.html', 'hardware.html', 'countries.html', 'releases.html', 'help.html', 'terms.html', ...INDUSTRIES.map((i) => `industries/${i.id}.html`), ...PROGRAMS.map((p) => `programs/${p.id}.html`), ...guidesFor({ EMAIL, SERVICES_APP, up: '' }).map((g) => `help/${g.id}.html`), ...DEV_PAGES.map(([p]) => (p === 'index' ? 'developers/' : `developers/${p}.html`))];
+const LASTMOD = new Date().toISOString().slice(0, 10);
+writeFileSync(join(OUT, 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map((u) => `  <url><loc>${SITE}/${u}</loc><lastmod>${LASTMOD}</lastmod></url>`).join('\n')}\n</urlset>\n`);
 // Missing pages: the booking page's shell, which shows a business's booking page for /book/<address> and "That page
 // isn't here" for anything else (see the booking page above).
 writeFileSync(join(OUT, '404.html'), bookShell('Riyeser'));

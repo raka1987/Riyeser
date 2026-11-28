@@ -1,7 +1,9 @@
 # riyeser.com
 
-The Riyeser Group website: home, a page per program, Downloads, Pricing (Accounting Basics free for 50 invoices and POS for 500 sales, other paid programs free for 90 days, then per business per month), Help Centre and Terms.
+The Riyeser Group website: home, a page per program, Downloads, Pricing (free programs, and every paid program free for 90 days, then one price per business per month in US dollars), What works today (the feature register), Trust & security, Hardware, Countries, Release notes, Help Centre and Terms.
 
+- **Feature register**: `content/features.mjs` is the one list of what each program does, its status (Available, Beta, Planned, Not supported), where it runs, whether it needs the internet, and the Basics/Plus and Link/Link Office comparisons. Program pages, the comparisons and features.html are built from it: change a feature there.
+- **Search engines**: set `GOOGLE_SITE_VERIFICATION` / `BING_SITE_VERIFICATION` when building (or put the codes in `VERIFY` in `build.mjs`) to add the ownership tags to the home page.
 - **Edit**: page text lives in `build.mjs`; the Help Centre guides (one per program) in `help.mjs`; styling in `assets/site.css`; program icons in `assets/apps/`.
 - **Build**: `node website/build.mjs` → `website/public/` (plain HTML, works on any web host).
 - **Publish**: Actions → *Publish website* → *Run workflow* (the workflow lives on `main`; it builds this folder from `module/desk-assistant`).

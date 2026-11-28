@@ -22,12 +22,12 @@ const ARR = '<svg class="arr" viewBox="0 0 24 24" fill="none" stroke="currentCol
 
 const BENEFITS = [
   ['once', 'No double entry', 'A booking, order or quote request is typed once, by your customer. Riyeser files it in the right place: the calendar, a sale or invoice, the customer\'s page and your Today screen.'],
-  ['live', 'Free times & stock', 'Your website shows the times you really have free, your prices and what\'s in stock, kept up to date from Riyeser. A booked time is held at once, so nobody else can take it.'],
+  ['live', 'Availability and stock levels', 'Your website shows the times you really have free, your prices and what\'s in stock, kept up to date from Riyeser. A booked time is held at once, so nobody else can take it.'],
   ['paste', 'Works with any website', 'Copy one line of code into WordPress, Wix, Squarespace, Shopify or plain HTML. It takes your colours. Online shops and web developers connect with the Riyeser API.'],
-  ['lock', 'Secure keys, full trail', 'A website key only works on the web addresses you list, and secret keys never go in a browser. Everything that comes in is in the Activity list, and tests never touch your books.'],
+  ['lock', 'Secure access and audit trail', 'A website key only works on the web addresses you list, and secret keys never go in a browser. Everything that comes in is in the Activity list, and tests never touch your books.'],
 ];
 const TYPES = [
-  ['trades', 'Trades & services', 'Quote requests', 'Your contact form sends quote requests straight in, with the customer\'s details and a reminder to call back. With the API, customers can accept a quote and pay an invoice online.', ['invoices', 'accounting-basics']],
+  ['trades', 'Trades & services', 'Quote requests', 'Your contact form sends quote requests straight in, with the customer\'s details and a reminder to call back. With the API, your website can also record a quote accepted or an invoice paid online (taken by your own payment provider).', ['invoices', 'accounting-basics']],
   ['salon', 'Salons, clinics & studios', 'Online bookings', 'Clients pick a service, a person and a free time. It lands in your Bookings calendar for you to confirm, and on the client\'s page.', ['bookings']],
   ['cafe', 'Cafés & restaurants', 'Tables & orders', 'Take table bookings with the booking form, and pick-up or catering orders with an order button. Order requests wait for you to confirm.', ['bookings', 'pos']],
   ['shop', 'Shops & online stores', 'Orders & stock', 'Online shop orders become sales in Riyeser POS, or invoices in Accounting, and your shop shows your prices and what\'s in stock.', ['pos', 'accounting-basics']],
@@ -71,7 +71,7 @@ const bookingsMock = (up) => `<div class="cn-app" aria-label="Riyeser Bookings (
 export function connectSection(up) {
   return `<section class="conn" id="connect" aria-labelledby="cn-h">
 <div class="cn-band"><div class="c">
-  <div class="shead"><span class="eyebrow">Online connections</span><h2 class="h2" id="cn-h">Your website, connected to your whole business</h2>
+  <div class="shead"><span class="eyebrow">Online connections · new (beta)</span><h2 class="h2" id="cn-h">Your website, connected to your whole business</h2>
     <p class="sub">The one-stop shop for running your business: bookings, sales, quotes and payments from your website land straight in Riyeser. No copying, no double entry.</p></div>
   <div class="cn-stage">
     <div class="cn-site" aria-label="A sample salon website with the Riyeser booking form">
@@ -96,7 +96,7 @@ export function connectSection(up) {
   <h3 class="cn-th">Made for the way you sell</h3>
   <div class="cn-types">${TYPES.map(([k, who, what, p, apps]) => `<div class="cn-type"><div class="cn-tt"><span class="cn-ic">${ic(I[k])}</span><div><small>${esc(who)}</small><b>${esc(what)}</b></div></div><p>${esc(p)}</p>
     <div class="cn-into"><span>Lands in</span>${apps.map((a) => `<img src="${up}assets/apps/${a}.png" alt="${esc(APPNAME[a])}" title="${esc(APPNAME[a])}" width="26" height="26" loading="lazy">`).join('')}</div></div>`).join('')}</div>
-  <div class="cn-cta"><div><b>Connect your website in five steps</b><span>Online bookings need Riyeser Bookings; online orders and stock need Riyeser POS or Accounting. Every new business gets 90 days of each, free.</span></div>
+  <div class="cn-cta"><div><b>Connect your website in five steps</b><span>Online bookings need Riyeser Bookings; online orders and stock need Riyeser POS or Accounting. It needs the internet, a Riyeser account and Riyeser Central running on one PC. Every new business gets 90 days of each, free.</span></div>
     <div class="cn-btns"><a class="btn p" href="${up}help/online.html#setup">Connect your website ${ARR}</a><a class="btn s" href="${up}developers/">See the developer guide</a><a class="btn s" href="/link/?signup">Start free</a></div></div>
 </div>
 </section>

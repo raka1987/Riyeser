@@ -44,6 +44,13 @@ for (const dir of ['link', 'team']) {
   const f = join(OUT, 'team', 'index.html');
   writeFileSync(f, readFileSync(f, 'utf8').replace('</title>', `</title>\n<link rel="canonical" href="${SITE}/link/">`));
 }
+// The Link app is a sign-in and an app, not a page for search results: keep both copies out of search engines
+// (the program page riyeser.com/programs/link.html is the one to find).
+for (const dir of ['link', 'team']) {
+  const f = join(OUT, dir, 'index.html');
+  const html = readFileSync(f, 'utf8');
+  if (!/name="robots"/.test(html)) writeFileSync(f, html.replace('</title>', '</title>\n<meta name="robots" content="noindex">'));
+}
 // Cloudflare keeps files for hours, so give the Link and HQ scripts and styles a version stamp that changes with them.
 {
   const { createHash } = await import('node:crypto');

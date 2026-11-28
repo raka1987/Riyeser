@@ -24,9 +24,9 @@ export const LOWEST = Math.min(...PAID.map(([m]) => PRICE[m]));
 // Bundles: one price for the programs together. Each program in a bundle still includes 3 users (extra users US$7,
 // extra tills US$15). Billing picks the bundle by itself when the programs chosen contain one.
 export const BUNDLES = [
-  { id: 'shop', name: 'Shop', mods: ['basic', 'pos', 'calls'], price: 59, who: 'For shops, cafes and takeaways' },
+  { id: 'shop', name: 'Shop', mods: ['basic', 'pos', 'calls'], price: 59, who: 'For shops, cafés and takeaways' },
   { id: 'office', name: 'Office', mods: ['basic', 'payroll', 'calls'], price: 59, who: 'For offices with staff to pay' },
-  { id: 'business', name: 'Business', mods: ['plus', 'bookings', 'calls', 'payroll', 'pos'], price: 99, who: 'Everything, for the whole business', popular: true },
+  { id: 'business', name: 'Business', mods: ['plus', 'bookings', 'calls', 'payroll', 'pos'], price: 99, who: 'Books, bookings, pay, the till and Riyeser Link', popular: true },
 ];
 /** What a bundle's programs cost one by one. */
 export const separately = (b) => b.mods.reduce((n, m) => n + PRICE[m], 0);

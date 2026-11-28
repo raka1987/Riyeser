@@ -1240,3 +1240,98 @@ section.conn { padding: 0; scroll-margin-top: 76px; }
   .dlgo-card .btn.big { width: 100%; justify-content: center; }
   .dlgo-steps { grid-template-columns: 1fr; }
 }
+
+/* ---------- QA pass (November 2026): the feature register, comparisons, "At a glance", categories and info pages ---------- */
+.small { font-size: 14px; }
+.st { display: inline-block; font-size: 12.5px; font-weight: 800; padding: 3px 10px; border-radius: 99px; white-space: nowrap; line-height: 1.5; }
+.st-ok { background: var(--green-soft); color: #166534; }
+.st-beta { background: #e9e3ff; color: #4a2bb0; }
+.st-plan { background: #fff1d6; color: #7a4a00; }
+.st-no { background: #eef1f6; color: #3f4a60; }
+.yn { font-weight: 800; font-size: 17px; } .yn.y { color: #166534; } .yn.n { color: #5b6680; }
+.ptable.cmp th[scope="row"], .ptable.reg th[scope="row"] { font-weight: 600; color: var(--ink); text-align: left; text-transform: none; letter-spacing: 0; font-size: 15px; background: none; }
+.ptable.cmp td, .ptable.reg td { vertical-align: top; }
+.ptable.cmp thead th:not(:first-child) { min-width: 150px; }
+.ptable.reg td:nth-child(2) { white-space: nowrap; }
+.cmp-wrap, .reg-wrap { margin-top: var(--s3, 18px); }
+.cmp-note { color: var(--muted); font-size: 14px; margin: 10px 0 0; }
+.cmp-h { font-size: 22px; margin: 34px 0 4px; }
+.ptable-wrap:focus-visible { box-shadow: var(--ring); }
+.glance-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 28px; align-items: start; }
+.glance { margin: 0; border: 1px solid var(--line); border-radius: 16px; background: var(--card); overflow: hidden; }
+.glance > div { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 14px; padding: 13px 20px; border-top: 1px solid var(--line); }
+.glance > div:first-child { border-top: 0; }
+.glance dt { font-weight: 800; color: var(--ink); font-size: 15px; } .glance dd { margin: 0; color: var(--text); font-size: 15.5px; }
+.glance-side { border: 1px solid var(--line); border-radius: 16px; background: var(--soft); padding: 20px 22px; }
+.glance-side h3 { font-size: 19px; margin-bottom: 10px; }
+.notyet { list-style: none; padding: 0; margin: 0 0 12px; } .notyet li { padding: 7px 0; border-top: 1px solid var(--line); font-size: 15px; } .notyet li:first-child { border-top: 0; }
+.notyet .st { margin-right: 6px; }
+.legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px 22px; margin-bottom: 14px; }
+.legend p { margin: 0; font-size: 15px; }
+.jump { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.jump a { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 6px 14px 6px 8px; border: 1px solid var(--line); border-radius: 99px; background: var(--card); font-weight: 700; color: var(--ink); font-size: 15px; }
+.jump a:hover { border-color: var(--blue); }
+.jump .ji { width: 28px; height: 28px; border-radius: 7px; }
+.reg-sec { padding-top: 26px; padding-bottom: 6px; scroll-margin-top: 90px; }
+.reg-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; } .reg-head > div { flex: 1; min-width: 220px; }
+.reg-head h2 { font-size: 26px; } .reg-head p { margin: 4px 0 0; font-size: 15px; }
+.reg-head .ri { width: 48px; height: 48px; border-radius: 12px; }
+.tcards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+.tcard { display: block; border: 1px solid var(--line); border-radius: 16px; background: var(--card); padding: 18px 20px; box-shadow: var(--shadow-sm); }
+.tcard:hover { border-color: var(--blue); } .tcard h2 { font-size: 20px; margin-bottom: 4px; } .tcard p { margin: 0; color: var(--muted); font-size: 15px; }
+.trust ~ section { scroll-margin-top: 90px; }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; } .two-col h3 { font-size: 19px; }
+.ticks.no li::before { background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235b6680' stroke-width='3' stroke-linecap='round'%3E%3Cpath d='M6 6l12 12M18 6L6 18'/%3E%3C/svg%3E") center / 18px no-repeat; }
+.cats-sec { padding-top: 56px; padding-bottom: 8px; }
+.cats { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; }
+.cat { border: 1px solid var(--line); border-radius: 16px; background: var(--card); padding: 18px 18px 12px; box-shadow: var(--shadow-sm); }
+.cat h3 { font-size: 19px; margin-bottom: 4px; } .cat p { color: var(--muted); font-size: 14.5px; margin: 0 0 8px; }
+.cat ul { list-style: none; padding: 0; margin: 0; }
+.cat li a { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 4px 6px; border-radius: 10px; font-weight: 700; color: var(--ink); }
+.cat li a:hover { background: var(--soft); }
+.cat li a span { flex: 1; } .cat li small { font-weight: 700; color: var(--muted); font-size: 13.5px; white-space: nowrap; } .cat li small.free { color: #166534; }
+.cat .ci { width: 30px; height: 30px; border-radius: 8px; flex: none; }
+.cats-more { margin: 16px 0 0; font-size: 15.5px; }
+.rel-list { padding-left: 20px; } .rel-list li { margin: 6px 0; }
+.ctable th[scope="row"] { min-width: 150px; } .ctable td { min-width: 150px; vertical-align: top; }
+@media (max-width: 900px) { .glance-grid { grid-template-columns: 1fr; } }
+@media (max-width: 640px) {
+  .glance > div { grid-template-columns: 1fr; gap: 2px; padding: 12px 16px; }
+  .two-col { grid-template-columns: 1fr; }
+  .ptable.cmp thead th:not(:first-child) { min-width: 110px; }
+  .reg-head .more { width: 100%; }
+}
+/* every register table has the same columns, so the tables line up down the page; narrow screens scroll inside the box */
+.ptable.reg { table-layout: fixed; min-width: 760px; }
+.ptable.reg th:nth-child(1) { width: 44%; } .ptable.reg th:nth-child(2) { width: 15%; } .ptable.reg th:nth-child(3) { width: 13%; }
+.ptable.reg th:nth-child(4) { width: 13%; } .ptable.reg th:nth-child(5) { width: 15%; }
+.ptable.cmp { table-layout: fixed; min-width: 560px; } .ptable.cmp th:nth-child(1) { width: 40%; }
+.cat li a span { display: flex; flex-direction: column; line-height: 1.25; } .cat li a span small { margin-top: 2px; }
+.tcards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.tcard .tc-h { display: block; font-size: 20px; color: var(--ink); font-family: var(--display); font-weight: 800; margin-bottom: 4px; }
+@media (max-width: 900px) { .tcards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .tcards { grid-template-columns: 1fr; } }
+/* tablets (761-1000 px): the header ran 156 px past the screen at 768; the Download button moves out of the header there
+   (it is on every page's top band and footer call-to-action) */
+@media (max-width: 1000px) and (min-width: 761px) { .nav .right .btn { display: none; } .nav .c { gap: 14px; } }
+/* the phone menu button and breadcrumb links: at least 44 px to tap */
+.menu { min-width: 44px; min-height: 44px; }
+.crumbs a { display: inline-block; padding: 10px 0; }
+/* phones: the register, comparison and info tables become one card per row, each value with its column name */
+@media (max-width: 640px) {
+  .ptable.stack, .ptable.stack tbody, .ptable.stack tr, .ptable.stack th, .ptable.stack td { display: block; width: auto !important; min-width: 0 !important; }
+  .ptable.stack { table-layout: auto; min-width: 0; }
+  .ptable.stack thead { display: none; }
+  .ptable.stack tr { border: 1px solid var(--line); border-radius: 14px; background: var(--card); padding: 10px 14px; margin-bottom: 10px; }
+  .ptable.stack th[scope="row"] { padding: 2px 0 6px; border: 0; font-size: 15.5px; }
+  .ptable.stack td { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 10px; padding: 3px 0; border: 0; font-size: 14.5px; white-space: normal; }
+  .ptable.stack td::before { content: attr(data-label); font-weight: 700; color: var(--muted); font-size: 13px; }
+  .ptable.stack td:nth-child(2) { white-space: normal; }
+  .cmp-wrap, .reg-wrap { overflow: visible; }
+}
+.dm-pause { width: 44px; height: 44px; }
+@media (max-width: 640px) { .users.sm button { width: 44px; height: 44px; } .dl p .more { display: inline-block; padding: 10px 0; } }
+/* AA contrast (axe, 4.5:1): the hero cards' small labels, the demo calendar's lines, and the calculator's idle rows */
+.hfloat small { color: #56627e; }
+.cn-bk span, .cn-bk.one span { color: #3f4a5c; }
+.cmod .users.sm { opacity: .7; } .cmod .users.sm .ul, .cmod .users.sm input { color: #2c3a5a; }
