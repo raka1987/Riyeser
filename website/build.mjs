@@ -675,7 +675,7 @@ INDUSTRIES.push(
       ['documents', ['Scan, file and find receipts and papers', 'Find any document by a word inside it', 'Free forever']],
       ['invoices', ['Unlimited quotes, invoices, customers and payments', 'Turn an accepted quote into an invoice in one click', 'Print or save any invoice as a PDF', 'Free forever']],
       ['pdf', ['Fill in and sign forms', 'Combine, split and reorder pages', 'Free forever']]] },
-  { id: 'appointments', name: 'Appointment businesses', icon: 'calendar', photo: 'appointments-calendar.webp', short: 'Staff calendars, online bookings and reminder emails.',
+  { id: 'appointments', name: 'Appointment businesses', icon: 'calendar', photo: 'appointments-salon.webp', photoPos: '50% 22%', short: 'Staff calendars, online bookings and reminder emails.',
     title: 'Appointment Businesses', lead: 'Salons, studios and other businesses that work by appointment: every booking on one calendar, from one Windows PC.',
     h: 'Every appointment on one calendar', p: 'See each person\'s day and week with double-booking warnings, let customers book online from your website or your own riyeser.com booking page (beta), and send reminder emails the day before.',
     shot: 'shots/bookings-week.webp', shotName: 'Riyeser Bookings', shotApp: 'bookings', shotW: 1440, shotH: 585, cta: ['bookings', 'Explore Bookings'],
@@ -725,7 +725,7 @@ const STRIP = [['accounting', 'Accounting', 'programs.html#editions'], ['payroll
 const homeStrip = (up) => `<nav class="pstrip" aria-label="Riyeser programs"><div class="c"><div class="pstrip-in" tabindex="0" role="region" aria-label="Programs (scrolls sideways)"><ul>${STRIP.map(([id, label, href]) =>
   `<li><a href="${up}${href || `programs/${id}.html`}"><img src="${up}assets/apps/${id}.png" alt="" width="48" height="48">${esc(label)}</a></li>`).join('')}</ul></div></div></nav>`;
 // An industry card: a real photo (or an icon panel where there's no photo yet), two lines and an arrow.
-const solCard = (i, up) => `<a class="sol" href="${indLink(i, up)}">${i.photo ? `<img src="${up}assets/photos/${i.photo}" alt="" width="400" height="225" loading="lazy">` : `<span class="sol-ic" aria-hidden="true">${li(i.icon, '')}</span>`}
+const solCard = (i, up) => `<a class="sol" href="${indLink(i, up)}">${i.photo ? `<img src="${up}assets/photos/${i.photo}" alt="" width="400" height="225" loading="lazy"${i.photoPos ? ` style="object-position:${i.photoPos}"` : ''}>` : `<span class="sol-ic" aria-hidden="true">${li(i.icon, '')}</span>`}
   <span class="sol-t"><h3>${esc(i.title)}</h3><p>${esc(i.short)}</p></span><span class="sol-go" aria-hidden="true">${ARR}</span></a>`;
 const HOME_INDUSTRIES = ['trades', 'hospitality', 'retail', 'sole-traders', 'appointments', 'professional'];
 const indLink = (i, up) => `${up}industries/${i.id}.html`;
@@ -1068,7 +1068,7 @@ for (const ind of INDUSTRIES) {
   <div class="ind-split">
     <div class="t"><h2>${esc(ind.h)}</h2><p>${esc(ind.p)}</p>
       <a class="btn p" href="${up}programs/${ind.cta[0]}.html">${esc(ind.cta[1])} ${ARR}</a>
-      ${ind.photo ? `<div class="photo-card"><img src="${up}assets/photos/${ind.photoTall || ind.photo}" alt="" width="500" height="300" style="width:100%;max-height:300px;object-fit:cover"></div>` : ''}</div>
+      ${ind.photo ? `<div class="photo-card"><img src="${up}assets/photos/${ind.photoTall || ind.photo}" alt="" width="500" height="300" style="width:100%;max-height:300px;object-fit:cover${ind.photoPos ? `;object-position:${ind.photoPos}` : ''}"></div>` : ''}</div>
     ${winFrame(up, ind.shotApp, ind.shotName, ind.shot, `${ind.shotName} screenshot`, ind.shotW, ind.shotH)}
   </div>
 </div>
