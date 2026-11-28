@@ -337,10 +337,11 @@ jobs:
       - name: Central 1.9's Uninstall finds each program's own uninstaller (a tile's ⋯ menu)
         shell: pwsh
         run: |
+          # every program Windows lists (Accounting Plus replaces Accounting Basics when it installs over it)
           $hkcu = reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall" /s /reg:64 | Out-String
           $hklm = reg query "HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall" /s /reg:64 | Out-String
           Set-Content -Path C:\riy\out\uninstall-reg.txt -Value ($hkcu + "`n" + $hklm) -Encoding utf8
-          node -e "const u = require('./src/central/updates'); const fs = require('fs'); const t = fs.readFileSync('C:/riy/out/uninstall-reg.txt', 'utf8'); const r = JSON.parse(fs.readFileSync('C:/riy/out/admin-new.json', 'utf8')).results; const miss = []; for (const x of r) { const f = u.uninstallFromRegistry(t, x.id); console.log(x.id.padEnd(18), f ? f.command : '(none)'); if (!f) miss.push(x.id); } if (miss.length) { console.error('No uninstaller found for ' + miss.join(', ')); process.exit(1); }"
+          node -e "const u = require('./src/central/updates'); const fs = require('fs'); const t = fs.readFileSync('C:/riy/out/uninstall-reg.txt', 'utf8'); const listed = Object.keys(u.installedFromRegistry(t)).filter((id) => id !== 'central'); const miss = []; for (const id of listed) { const f = u.uninstallFromRegistry(t, id); console.log(id.padEnd(18), f ? f.command : '(none)'); if (!f) miss.push(id); } if (listed.length < 11) { console.error('Only ' + listed.length + ' programs are listed: ' + listed.join(', ')); process.exit(1); } if (miss.length) { console.error('No uninstaller found for ' + miss.join(', ')); process.exit(1); }"
       - name: The released Riyeser Central finds every program
         shell: pwsh
         run: |
