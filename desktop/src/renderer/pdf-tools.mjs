@@ -352,3 +352,14 @@ export function setPageOrder(L, doc, pages) {
   if (doc.pageCache && doc.pageCache.invalidate) doc.pageCache.invalidate();
   if (doc.pageMap && doc.pageMap.clear) doc.pageMap.clear();
 }
+
+/**
+ * QA (PDF-RED-02): clear a document's properties (title, author, subject, keywords, creator) and its XMP metadata,
+ * for a file being redacted. The XMP stream is only unlinked here: the editor's removeUnused() then drops it from the file.
+ */
+export function clearDocInfo(PDFLib, doc) {
+  const { PDFName } = PDFLib;
+  const info = doc.getInfoDict();
+  for (const k of ['Title', 'Author', 'Subject', 'Keywords', 'Creator']) info.delete(PDFName.of(k));
+  doc.catalog.delete(PDFName.of('Metadata'));
+}

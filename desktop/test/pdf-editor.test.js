@@ -121,6 +121,21 @@ test('M16: a damaged file says "This file looks damaged or incomplete. Try downl
 
 test('M15: Redact says the page becomes a picture, and offers Recognise text after saving', () => {
   const e = src('renderer/editor.js');
-  assert.match(e, /that page becomes a picture \(its other words can\\'t be searched or copied, and the file gets bigger\)\. Use Recognise text afterwards/);
+  assert.match(e, /that page becomes a picture \(its other words can\\'t be searched or copied, and the file gets bigger\)\. Its document properties \(title, author, subject, keywords\) are cleared too\. Use Recognise text afterwards/);
   assert.match(e, /now a picture, so its words can't be searched or copied\. <button class="primary" data-cmd="ocr">Recognise text<\/button>/);
+});
+
+test('QA PDF-RED-02: redacting clears the document properties and XMP metadata, which can repeat the hidden details', async () => {
+  const T = await tools();
+  const d = await L.PDFDocument.create(); d.addPage([595, 842]);
+  d.setTitle('Payslip Jo Sample'); d.setAuthor('HR'); d.setSubject('ACCT 12-3456-7890'); d.setKeywords(['tfn 123 456 789']);
+  d.catalog.set(L.PDFName.of('Metadata'), d.context.register(d.context.stream('<x:xmpmeta>ACCT 12-3456-7890</x:xmpmeta>', { Type: 'Metadata', Subtype: 'XML' })));
+  T.clearDocInfo(L, d);
+  const out = await L.PDFDocument.load(await d.save({ useObjectStreams: false }), { updateMetadata: false });
+  assert.strictEqual(out.getTitle(), undefined); assert.strictEqual(out.getAuthor(), undefined);
+  assert.strictEqual(out.getSubject(), undefined); assert.strictEqual(out.getKeywords(), undefined);
+  assert.strictEqual(out.catalog.get(L.PDFName.of('Metadata')), undefined);
+  // the editor uses it for redacted files, before removeUnused() drops the unlinked XMP stream
+  const e = src('renderer/editor.js');
+  assert.match(e, /st\.lastRedacted = orderList\.some\(\(e\) => \(st\.anns\[e\.src\] \|\| \[\]\)\.some\(\(a\) => a\.type === 'redact'\)\);\n  if \(st\.lastRedacted\) T\.clearDocInfo\(window\.PDFLib, doc\);\n  removeUnused\(doc\);/);
 });
