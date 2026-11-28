@@ -45,7 +45,7 @@ const BASE = (process.env.HQ_URL || 'http://127.0.0.1:8090').replace(/\/$/, '');
   // the Billing entity
   for (const [k, v] of [['name', 'Riyeser Pty Ltd'], ['address', '1 George St, Sydney NSW 2000'], ['tax_number', '12 345 678 901'], ['bank.account_name', 'Riyeser Pty Ltd'], ['bank.bank_name', 'Westpac'], ['bank.bsb', '032-000'], ['bank.account_number', '123456']]) await pg.fill(`#entf [name="${k}"]`, v);
   await pg.click('#entf .btn.p'); await pg.waitForTimeout(400);
-  // SEC-011 (the owner's decision): only the HQ Owner (Riki) enters or changes it; it's in force straight away
+  // SEC-011 (the owner's decision): only the HQ Owner (Sam) enters or changes it; it's in force straight away
   check((await flash()).includes('Billing entity saved') && !(await pg.$('#addbank')) && !(await pg.$('#entPending')), 'the Owner saved the bank details: in force, the reminder goes');
   await shot(pg, 'hq-entity-owner.png', '#entity');
   await pg.selectOption('#demoAs', 's3'); await pg.waitForTimeout(400); await pg.goto(`${BASE}/hq/?demo#/payments`); await pg.waitForSelector('#entity');

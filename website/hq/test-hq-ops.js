@@ -41,13 +41,13 @@ const fs = require('fs');
   await pg.click('.modal [data-close]');
   await pg.screenshot({ path: out + '/hq-support.png' });
 
-  // --- Refunds: approve 350 FJD (over 200) as Riki -> waits for a second approver; Riki can't; Finance Fi approves and marks it paid
+  // --- Refunds: approve 350 FJD (over 200) as Sam -> waits for a second approver; Sam can't; Finance Fi approves and marks it paid
   await tab('refunds'); await pg.waitForSelector('.rcard');
   console.log('refund queue filters:', await pg.evaluate(() => [...document.querySelectorAll('.chip')].map((x) => x.textContent.trim()).join(' | ')));
   await pg.click('[data-rf=rf1042] [data-ract=approve]'); await fill('#ar [name=reason]', 'Double charge confirmed in the bank statement'); await pg.click('#ar .btn.p'); await pg.waitForTimeout(300);
   console.log('after first approval:', (await pg.textContent('[data-rf=rf1042] .row')).replace(/\s+/g, ' ').trim());
   await tab('approvals'); await pg.click('[data-rf=rf1042] [data-ract=second]'); await pg.click('#sa .btn.p'); await pg.waitForTimeout(300);
-  console.log('Riki tries the second approval:', (await pg.textContent('#saerr')).trim()); await pg.click('.modal [data-close]');
+  console.log('Sam tries the second approval:', (await pg.textContent('#saerr')).trim()); await pg.click('.modal [data-close]');
   await as('Finance Fi (Finance)'); await tab('approvals');
   console.log('approvals badge:', await pg.textContent('[data-badge=approvals]'));
   await pg.click('[data-rf=rf1042] [data-ract=second]'); await pg.click('#sa .btn.p'); await pg.waitForTimeout(300);
@@ -57,8 +57,8 @@ const fs = require('fs');
   console.log('paid:', (await pg.textContent('[data-rf=rf1042]')).replace(/\s+/g, ' ').trim().slice(0, 220));
   await pg.screenshot({ path: out + '/hq-refunds.png' });
 
-  // --- Free periods (as Riki): 14 days applies straight away; 90 days waits; Finance Fi approves; seen in Approvals and the company panel
-  await as('Riki (Owner)'); await open('northside', 'w3'); await cptab('programs');
+  // --- Free periods (as Sam): 14 days applies straight away; 90 days waits; Finance Fi approves; seen in Approvals and the company panel
+  await as('Sam (Owner)'); await open('northside', 'w3'); await cptab('programs');
   const posBefore = (await pg.textContent('#licCard tr[data-mod=pos] .pill')).trim();
   await pg.click('[data-fix=offer]'); await pg.waitForSelector('#of'); await pg.selectOption('#of [name=kind]', 'trial'); await pg.check('#of input[value=pos]');
   await fill('#of [name=amount]', '14'); await pg.selectOption('#of [name=why]', 'goodwill'); await fill('#of [name=reason]', 'Sorry about the printer trouble'); await pg.click('#of .btn.p');
@@ -68,13 +68,13 @@ const fs = require('fs');
   await pg.waitForTimeout(400); console.log('90 days:', await pg.evaluate(() => [...document.querySelectorAll('.flash')].pop().textContent), '| Bookings now:', (await pg.textContent('#licCard tr[data-mod=bookings] .pill')).trim());
   console.log('company panel offers:', await pg.evaluate(() => [...document.querySelectorAll('#offCard tr')].slice(1).map((r) => r.innerText.replace(/\s+/g, ' ')).join(' || ')));
   await pg.screenshot({ path: out + '/hq-offers.png' }); await pg.click('#cpBack');
-  await tab('approvals'); console.log('Riki sees his own waiting:', (await pg.textContent('#ao')).includes('someone else needs to approve it'));
+  await tab('approvals'); console.log('Sam sees his own waiting:', (await pg.textContent('#ao')).includes('someone else needs to approve it'));
   await as('Finance Fi (Finance)'); await tab('approvals');
   console.log('approvals tiles:', await pg.evaluate(() => [...document.querySelectorAll('.tile')].map((t) => t.innerText.replace(/\n/g, ' | '))));
   await pg.click('#ao [data-oact=yes]'); await pg.waitForTimeout(400);
   console.log('after approval:', await pg.evaluate(() => [...document.querySelectorAll('.tile')].map((t) => t.innerText.replace(/\n/g, ' | ')).slice(1, 3)));
   await pg.screenshot({ path: out + '/hq-approvals.png' });
-  await as('Riki (Owner)'); await open('northside', 'w3'); await cptab('programs');
+  await as('Sam (Owner)'); await open('northside', 'w3'); await cptab('programs');
   console.log('Bookings after approval:', (await pg.textContent('#licCard tr[data-mod=bookings] .pill')).trim(), '| offers:', await pg.evaluate(() => [...document.querySelectorAll('#offCard tr td:nth-child(3)')].map((x) => x.innerText.replace(/\s+/g, ' ')).join(' | ')));
 
   // --- a fix-up tool: reset two-step for a person (identity check), then close as duplicate; the panel's own HQ history
@@ -100,7 +100,7 @@ const fs = require('fs');
   await tab('companies'); await pg.selectOption('#sf select', 'all'); await open('sample plumbing', 'w1');
   console.log('Help Desk tools:', await pg.evaluate(() => [...document.querySelectorAll('[data-fix]')].map((x) => x.textContent.trim()).join(', ')));
   await cptab('people'); console.log('reset 2FA buttons:', await pg.evaluate(() => document.querySelectorAll('[data-r2fa]').length));
-  await pg.click('#cpBack'); await as('Riki (Owner)');
+  await pg.click('#cpBack'); await as('Sam (Owner)');
   await tab('team'); console.log('settings:', await pg.evaluate(() => [...document.querySelectorAll('#setf input')].map((i) => i.name + '=' + i.value).join(', ')));
   await pg.screenshot({ path: out + '/hq-team.png', fullPage: true });
 
@@ -141,17 +141,17 @@ const fs = require('fs');
   // --- before team-chat.sql is re-run: the new screens say how to switch them on
   const p3 = await b.newPage(); p3.on('pageerror', (e) => errs.push('old db: ' + e.message));
   await p3.route('**/link/config.js*', (r) => r.fulfill({ contentType: 'text/javascript', body: 'window.RIYESER_TEAM={supabaseUrl:"https://fake.supabase.test",supabaseKey:"k"};' }));
-  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url'); const user = { id: 'u1', email: 'riki@riyeser.test', factors: [{ id: 'f1', factor_type: 'totp', status: 'verified' }] };
+  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url'); const user = { id: 'u1', email: 'sam@riyeser.test', factors: [{ id: 'f1', factor_type: 'totp', status: 'verified' }] };
   const tok = `${b64({ alg: 'HS256' })}.${b64({ sub: 'u1', aal: 'aal2', amr: [{ method: 'totp', timestamp: 1 }], exp: Math.floor(Date.now() / 1000) + 3600, role: 'authenticated' })}.sig`;
-  await p3.addInitScript((t) => localStorage.setItem('riyeser.hq.session', JSON.stringify({ access_token: t, token_type: 'bearer', expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) + 3600, refresh_token: 'r', user: { id: 'u1', email: 'riki@riyeser.test', factors: [{ id: 'f1', factor_type: 'totp', status: 'verified' }] } })), tok);
+  await p3.addInitScript((t) => localStorage.setItem('riyeser.hq.session', JSON.stringify({ access_token: t, token_type: 'bearer', expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) + 3600, refresh_token: 'r', user: { id: 'u1', email: 'sam@riyeser.test', factors: [{ id: 'f1', factor_type: 'totp', status: 'verified' }] } })), tok);
   const OLD = ['hq_me', 'hq_overview', 'hq_companies', 'hq_staff_list', 'hq_history', 'hq_downloads', 'hq_licences'];
   await p3.route('https://fake.supabase.test/**', (r) => { const u = new URL(r.request().url()); const fn = u.pathname.replace('/rest/v1/rpc/', '');
     const json = (body, status = 200) => r.fulfill({ status, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(body) });
     if (r.request().method() === 'OPTIONS') return r.fulfill({ status: 200, headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' } });
     if (u.pathname === '/auth/v1/user') return json(user);
-    if (fn === 'hq_me') return json({ role: 'owner', name: 'Riki', active: true, two_step: true });
+    if (fn === 'hq_me') return json({ role: 'owner', name: 'Sam', active: true, two_step: true });
     if (fn === 'hq_overview') return json({ companies: 1, versions: [], countries: [], signups_by_week: [], trials_ending: [] });
-    if (fn === 'hq_staff_list') return json([{ user_id: 'u1', display_name: 'Riki', role: 'owner', active: true, email: 'riki@riyeser.test', added_at: new Date().toISOString() }]);
+    if (fn === 'hq_staff_list') return json([{ user_id: 'u1', display_name: 'Sam', role: 'owner', active: true, email: 'sam@riyeser.test', added_at: new Date().toISOString() }]);
     if (u.pathname.startsWith('/rest/v1/rpc/') && !OLD.includes(fn)) return json({ code: 'PGRST202', message: `Could not find the function public.${fn}` }, 404);
     return json([]); });
   await p3.goto(BASE + '/hq/'); await p3.waitForSelector('.tiles', { timeout: 15000 });

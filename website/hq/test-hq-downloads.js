@@ -52,7 +52,7 @@ const DL = 'https://github.com/raka1987/riyeser-downloads/releases';
   // an older database without hq_real_downloads: a plain message, the raw counts still there
   const old = await ctx.newPage(); old.on('pageerror', (e) => errs.push('old db: ' + e.message));
   await old.route('**/link/config.js*', (r) => r.fulfill({ contentType: 'text/javascript', body: 'window.RIYESER_TEAM={supabaseUrl:"https://fake.supabase.test",supabaseKey:"k"};' }));
-  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url'); const user = { id: 'u1', email: 'riki@riyeser.test', factors: [{ id: 'f1', factor_type: 'totp', status: 'verified' }] };
+  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url'); const user = { id: 'u1', email: 'sam@riyeser.test', factors: [{ id: 'f1', factor_type: 'totp', status: 'verified' }] };
   const tok = `${b64({ alg: 'HS256' })}.${b64({ sub: 'u1', aal: 'aal2', amr: [{ method: 'totp', timestamp: 1 }], exp: Math.floor(Date.now() / 1000) + 3600, role: 'authenticated' })}.sig`;
   await old.addInitScript(([t, u]) => localStorage.setItem('riyeser.hq.session', JSON.stringify({ access_token: t, token_type: 'bearer', expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) + 3600, refresh_token: 'r', user: u })), [tok, user]);
   const OLD = ['hq_me', 'hq_overview', 'hq_companies', 'hq_staff_list', 'hq_history', 'hq_downloads', 'hq_licences'];
@@ -60,7 +60,7 @@ const DL = 'https://github.com/raka1987/riyeser-downloads/releases';
     const json = (body, status = 200) => r.fulfill({ status, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(body) });
     if (r.request().method() === 'OPTIONS') return r.fulfill({ status: 200, headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' } });
     if (u.pathname === '/auth/v1/user') return json(user);
-    if (fn === 'hq_me') return json({ role: 'owner', name: 'Riki', active: true, two_step: true });
+    if (fn === 'hq_me') return json({ role: 'owner', name: 'Sam', active: true, two_step: true });
     if (fn === 'hq_overview') return json({ companies: 1, versions: [], countries: [], signups_by_week: [], trials_ending: [] });
     if (u.pathname.startsWith('/rest/v1/rpc/') && !OLD.includes(fn)) return json({ code: 'PGRST202', message: `Could not find the function public.${fn}` }, 404);
     return json([]); });

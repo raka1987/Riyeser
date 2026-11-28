@@ -200,7 +200,7 @@ const BASE = (process.env.HQ_URL || 'http://127.0.0.1:8090').replace(/\/$/, '');
   await tab('health'); await pg.waitForSelector('#syshealth'); check(true, 'System Operations: System health');
   await tab('settings'); await pg.waitForSelector('#setf'); check(true, 'Admin: Settings');
   await pg.goto(`${BASE}/hq/?demo#/company/w3`); await pg.waitForSelector('.cpage'); console.log('header line:', await text('.cpline'));
-  check((await text('.cpline')).includes('Owner: Riki') && (await text('.cpline')).includes('Next renewal') && (await text('.cpline')).includes('Next follow-up'), 'header: Owner, Next renewal, Next follow-up');
+  check((await text('.cpline')).includes('Owner: Sam') && (await text('.cpline')).includes('Next renewal') && (await text('.cpline')).includes('Next follow-up'), 'header: Owner, Next renewal, Next follow-up');
   check((await text('#cptl')).includes('Add internal note') && (await text('#cptl')).includes('Send customer reply'), 'Customer timeline with Add internal note and Send customer reply');
   check((await pg.$$('#modsCard .mod')).length === 7 && !(await text('#modsCard')).includes('As Built') && (await text('#modsCard')).includes('Riyeser Estimate'), 'Enabled modules cards (Riyeser Estimate shown; As Built hidden: not paid or installed)');
   await pg.click('#cpMore'); await pg.click('[data-menu=owner]'); await pg.selectOption('#sof [name=staff]', { label: 'Help Desk' }); await pg.click('#sof .btn.p'); await pg.waitForSelector('#sof', { state: 'detached' }); await pg.waitForTimeout(300);
@@ -208,7 +208,7 @@ const BASE = (process.env.HQ_URL || 'http://127.0.0.1:8090').replace(/\/$/, '');
   await pg.selectOption('#demoAs', { label: 'Help Desk (Support)' }); await pg.waitForSelector('#main > *'); await tab('companies'); await pg.click('[data-view=mine]'); await pg.waitForTimeout(300);
   const mine = await pg.evaluate(() => [...document.querySelectorAll('#cl tr.click b')].map((x) => x.textContent)); console.log('Help Desk\'s customers:', await text('#ctotal'));
   check(mine.includes('Northside Dental') && mine.includes('Sample Plumbing'), 'My customers');
-  await pg.selectOption('#demoAs', { label: 'Riki (Owner)' }); await pg.waitForSelector('#main > *');
+  await pg.selectOption('#demoAs', { label: 'Sam (Owner)' }); await pg.waitForSelector('#main > *');
   await tab('support'); await pg.click('.tk'); await pg.waitForSelector('#rf'); check((await text('#rf')).includes('Reply to customer') && (await text('#rf')).includes('Internal note'), 'tickets: Reply to customer / Internal note');
 
   // --- phone width: no sideways scrolling

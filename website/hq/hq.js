@@ -304,8 +304,8 @@
     cos.forEach((c, i) => { c.owner_phone = c.owner_phone || `555 0${String(100 + i).padStart(3, '0')}`; c.hq_owner = ({ w1: 's2', w2: 's1', w3: 's1', w4: 's4' })[c.id] || (i % 3 === 0 ? 's2' : null);
       c.address = c.address || ({ Fiji: ['Suva', 'Nadi', 'Lautoka'][i % 3], Australia: 'Brisbane', 'New Zealand': 'Auckland', Samoa: 'Apia', Tonga: 'Nuku\'alofa' })[c.country] || ''; });
     let hn = 3; const handover = [{ id: 1, note: 'Northside Dental: call Priya back about the POS printer after 3 pm.', shift_date: new Date().toISOString().slice(0, 10), done: false, by: 'Help Desk', author: 's2', at: t(0.3) },
-      { id: 2, note: 'Two trials end in the next 3 days: check they have what they need.', shift_date: new Date().toISOString().slice(0, 10), done: false, by: 'Riki', author: 's1', at: t(0.2) }];
-    const staff = [{ user_id: 's1', display_name: 'Riki', role: 'owner', active: true, email: 'riki@riyeser.test', added_at: t(30), perms_add: [], perms_remove: [] },
+      { id: 2, note: 'Two trials end in the next 3 days: check they have what they need.', shift_date: new Date().toISOString().slice(0, 10), done: false, by: 'Sam', author: 's1', at: t(0.2) }];
+    const staff = [{ user_id: 's1', display_name: 'Sam', role: 'owner', active: true, email: 'sam@riyeser.test', added_at: t(30), perms_add: [], perms_remove: [] },
       { user_id: 's2', display_name: 'Help Desk', role: 'support', active: true, email: 'help@riyeser.test', added_at: t(5), perms_add: [], perms_remove: [] },
       { user_id: 's3', display_name: 'Finance Fi', role: 'finance', active: true, email: 'money@riyeser.test', added_at: t(4), perms_add: [], perms_remove: [] },
       { user_id: 's4', display_name: 'Senior Sione', role: 'senior', active: true, email: 'senior@riyeser.test', added_at: t(3), perms_add: [], perms_remove: [] },
@@ -381,12 +381,12 @@
         : Math.round(([...String(ws)].reduce((a, ch) => a + ch.charCodeAt(0), 0) % 10 + (c && c.people > 3 ? 8 : 1)) * 0.19 * GB);
       const limit = (20 + (extraGb[ws] || 0)) * GB; return { used, limit, pct: Math.round(used * 1000 / limit) / 10, plus, extra_gb: extraGb[ws] || 0 }; }
     let nid = 4;
-    const notes = { w1: [{ id: 1, kind: 'note', body: 'Called Alex: wants POS for the Lautoka branch next month.', at: t(2), by: 'Riki', author: 's1', pinned: false }],
-      w2: [{ id: 2, kind: 'call', direction: 'in', contact: 'Mere', body: 'Asked about yearly billing for the second cafe.', at: t(1), by: 'Riki', author: 's1', follow_up: new Date().toISOString().slice(0, 10), pinned: false },
+    const notes = { w1: [{ id: 1, kind: 'note', body: 'Called Alex: wants POS for the Lautoka branch next month.', at: t(2), by: 'Sam', author: 's1', pinned: false }],
+      w2: [{ id: 2, kind: 'call', direction: 'in', contact: 'Mere', body: 'Asked about yearly billing for the second cafe.', at: t(1), by: 'Sam', author: 's1', follow_up: new Date().toISOString().slice(0, 10), pinned: false },
         { id: 3, kind: 'note', body: 'Call Mere on the cafe landline before 10 am. Payroll runs on Thursdays. Ask for the PC name (Back office PC).', at: t(20), by: 'Help Desk', author: 's2', pinned: true }] };
-    const hist = [{ at: t(0.1), actor: 's1', who: 'Riki', action: 'customer.viewed', workspace_id: 'w1', details: { workspace_id: 'w1' } }, { at: t(2), actor: 's1', who: 'Riki', action: 'note.added', workspace_id: 'w1', details: { workspace_id: 'w1' } },
+    const hist = [{ at: t(0.1), actor: 's1', who: 'Sam', action: 'customer.viewed', workspace_id: 'w1', details: { workspace_id: 'w1' } }, { at: t(2), actor: 's1', who: 'Sam', action: 'note.added', workspace_id: 'w1', details: { workspace_id: 'w1' } },
       { at: t(3), actor: 's2', who: 'Help Desk', action: 'ticket.replied', workspace_id: 'w2', ticket: 'T-10235', details: { workspace_id: 'w2', ticket: 'T-10235' } },
-      { at: t(5), actor: 's1', who: 'Riki', action: 'staff.added', details: { email: 'help@riyeser.test', role: 'support' } }, { at: t(30), actor: null, who: 'Riyeser', action: 'staff.owner_made', details: { email: 'riki@riyeser.test' } }];
+      { at: t(5), actor: 's1', who: 'Sam', action: 'staff.added', details: { email: 'help@riyeser.test', role: 'support' } }, { at: t(30), actor: null, who: 'Riyeser', action: 'staff.owner_made', details: { email: 'sam@riyeser.test' } }];
     const log = (action, details = {}) => hist.unshift({ at: now(), actor, who: me().display_name, action, workspace_id: details.workspace_id || null, ticket: details.ticket || null, details });
     const daily = []; const assets = ['RiyeserCentral-Setup.exe', 'RiyeserAccountingBasics-Setup.exe', 'RiyeserPOS-Setup.exe', 'RiyeserInvoices-Setup.exe', 'RiyeserBookings-Setup.exe'];
     for (let d = 29; d >= 0; d--) assets.forEach((a, i) => daily.push({ day: t(d).slice(0, 10), asset: a, total: Math.round((30 - d) * (6 - i) * 1.7 + 20 * (6 - i)) }));
@@ -423,13 +423,13 @@
       mk('w3', 'Priya', 'priya@northside.test', 'signin', 'Lost my phone, can\'t sign in', 'waiting_customer', 1, t(1), [cm('Priya', 'New phone, and the authenticator app is gone. How do I get back in?', t(1)), sm('Help Desk', 'Sorry about that, Priya. We\'ll call you on the number on file to check it\'s you, then reset it.', h(20))]),
       mk('w4', 'Jone', 'jone@island.test', 'program', 'Payroll totals don\'t match the bank', 'waiting_us', 2, t(3), [cm('Jone', 'The pay run total is $12 more than what left the bank.', t(3)), sm('Help Desk', 'Escalated to Senior by Help Desk: needs a look at the rounding', t(2), true), sm(null, 'We\'ve passed this to our senior team. They\'ll reply here.', t(2))],
         { escalations: [{ from: 1, to: 2, by: 'Help Desk', reason: 'needs a look at the rounding', at: t(2) }] }),
-      mk(null, 'someone@example.test', 'someone@example.test', 'other', 'Do you support NZ GST?', 'done', 1, t(6), [cm('Customer', 'Thinking of switching. Do you handle NZ GST returns?', t(6)), sm('Riki', 'Yes: Accounting Plus does NZ GST returns.', t(5.8))], { product: 'accounting', resolved_at: t(5.8), rating: 5 }),
+      mk(null, 'someone@example.test', 'someone@example.test', 'other', 'Do you support NZ GST?', 'done', 1, t(6), [cm('Customer', 'Thinking of switching. Do you handle NZ GST returns?', t(6)), sm('Sam', 'Yes: Accounting Plus does NZ GST returns.', t(5.8))], { product: 'accounting', resolved_at: t(5.8), rating: 5 }),
       mk('w2', 'Mere', 'mere@harbour.test', 'program', 'Payroll export fails after update', 'investigating', 1, h(26), [
         cm('Mere', 'Since the 2.8.1 update yesterday, our payroll export fails with a timeout. It gets to around 90% then stops with "Export timed out".', h(26)),
-        sm('Riki', 'Thanks Mere. We can see the diagnostic report (DG-4821) and we\'re checking it now. We\'ll update you here by this afternoon.', h(25)),
+        sm('Sam', 'Thanks Mere. We can see the diagnostic report (DG-4821) and we\'re checking it now. We\'ll update you here by this afternoon.', h(25)),
         cm('Mere', 'Just confirming this is still happening for us this morning. We need to run payroll today, so a fix or workaround would be really helpful.', h(5)),
-        sm('Riki', 'Reproduced in a test workspace on Payroll 2.8.1. Export reaches ~90% then times out with the same error. Likely the export job changes in 2.8.1. Linked to the existing bug.', h(4.5), true),
-        call('Riki', 'out', 'Mere', 'Rang Mere: they can export by pay group for now. Promised an update after lunch.', h(4))],
+        sm('Sam', 'Reproduced in a test workspace on Payroll 2.8.1. Export reaches ~90% then times out with the same error. Likely the export job changes in 2.8.1. Linked to the existing bug.', h(4.5), true),
+        call('Sam', 'out', 'Mere', 'Rang Mere: they can export by pay group for now. Promised an update after lunch.', h(4))],
         { product: 'payroll', assignee: 's1', diag: 'DG-4821', work_blocked: true, priority: 'high', next_update_due: ahead(0), next_update_owner: 's1', planned_release: 'Payroll 2.8.2', bug_ref: 'BUG-7719', bug_url: 'https://github.com/raka1987/Riyeser/issues' }),
       mk('w3', 'Priya', 'priya@northside.test', 'program', 'Leave balance not updating', 'waiting_customer', 1, t(2), [cm('Priya', 'Annual leave balances didn\'t change after the last pay run.', t(2)),
         sm('Help Desk', 'Thanks Priya. Could you check Payroll → Settings → Leave and tell us whether "Accrue each pay run" is ticked?', t(1.5))], { product: 'payroll', assignee: 's2', next_update_due: ahead(30), next_update_owner: 's2' }),
@@ -442,7 +442,7 @@
     let rn = 1042; const refunds = [
       { id: 'rf' + rn, ref: 'R-' + rn++, workspace_id: 'w2', business: 'Harbour Cafe', requested_by_name: 'Mere', ticket_id: 'tk10235', ticket_ref: 'T-10235', for_what: 'Accounting Basics', period: 'November 2026', invoice_ref: 'INV-2211', amount: 350, currency: 'FJD', reason_category: 'duplicate', explanation: 'Charged twice in November.', status: 'submitted', created_at: h(5), needs_second: false },
       { id: 'rf' + rn, ref: 'R-' + rn++, workspace_id: 'w3', business: 'Northside Dental', requested_by_name: 'Priya', ticket_id: null, ticket_ref: null, for_what: 'POS', period: 'October 2026', invoice_ref: null, amount: 40, currency: 'AUD', reason_category: 'didnt_work', explanation: 'Didn\'t use it.', status: 'reviewing', created_at: t(2), needs_second: false },
-      { id: 'rf' + rn, ref: 'R-' + rn++, workspace_id: 'w1', business: 'Sample Plumbing', requested_by_name: 'Alex', ticket_id: null, ticket_ref: null, for_what: 'Payroll', period: 'September 2026', invoice_ref: null, amount: 20, currency: 'FJD', reason_category: 'cancelled', explanation: '', status: 'paid', created_at: t(40), decided_by_name: 'Riki', decision_reason: 'Cancelled on the 1st', amount_approved: 20, paid_at: t(38), paid_method: 'credit', needs_second: false }];
+      { id: 'rf' + rn, ref: 'R-' + rn++, workspace_id: 'w1', business: 'Sample Plumbing', requested_by_name: 'Alex', ticket_id: null, ticket_ref: null, for_what: 'Payroll', period: 'September 2026', invoice_ref: null, amount: 20, currency: 'FJD', reason_category: 'cancelled', explanation: '', status: 'paid', created_at: t(40), decided_by_name: 'Sam', decision_reason: 'Cancelled on the 1st', amount_approved: 20, paid_at: t(38), paid_method: 'credit', needs_second: false }];
     const credits = { w1: { FJD: 20 } };
     let on = 1002; const offers = [{ id: 'of1001', ref: 'O-1001', workspace_id: 'w3', business: 'Northside Dental', modules: ['pos'], kind: 'trial', length_amount: 14, length_unit: 'days', days: 14, reason_category: 'goodwill', reason: 'Printer trouble last week', status: 'applied', requested_by: 's2', requested_by_name: 'Help Desk', created_at: t(4), applied_at: t(4), ends_at: addDays(today(), 92) }];
     let en = 9; const emails = [
@@ -512,7 +512,7 @@
       : k.status === 'closed' ? 'That account is closed. Keep an open one.' : k.duplicate_of === ws ? 'That account is linked as a duplicate of this one.' : null);
     const rowOf = (f) => ({ ...f, decided_by_name: nameOf(f.decided_by) || f.decided_by_name, second_approver_name: nameOf(f.second_approver), waiting_second: !!(f.needs_second && !f.second_approver && ['approved', 'partly_approved'].includes(f.status)) });
     return {
-      async session() { return { user: { email: 'riki@riyeser.test' } }; }, async signIn() {}, async signOut() { location.href = '/hq/'; },
+      async session() { return { user: { email: 'sam@riyeser.test' } }; }, async signIn() {}, async signOut() { location.href = '/hq/'; },
       async aal() { return { currentLevel: 'aal2', nextLevel: 'aal2' }; }, async factors() { return [{ id: 'f' }]; }, async verify() {},
       async me() { const s = me(); return { role: s.role, name: s.display_name, active: true, two_step: true, perms: permsOf(s), id: s.user_id }; },
       asStaff(id) { actor = id; }, staffList: () => staff.slice(),

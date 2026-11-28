@@ -374,11 +374,11 @@ reset role;
 
 -- ===== Riyeser HQ (Riyeser's own staff)
 reset role;
-insert into auth.users values ('99999999-9999-9999-9999-999999999999', 'riki@riyeser.test'), ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'help@riyeser.test');
+insert into auth.users values ('99999999-9999-9999-9999-999999999999', 'sam@riyeser.test'), ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'help@riyeser.test');
 -- only the database owner (SQL Editor) can make the first owner: a normal signed-in user can't
 select pg_temp.as_user('99999999-9999-9999-9999-999999999999'); set role authenticated;
 do $$ begin
-  begin perform public.hq_make_owner('riki@riyeser.test', 'Riki'); raise exception 'made self owner';
+  begin perform public.hq_make_owner('sam@riyeser.test', 'Sam'); raise exception 'made self owner';
   exception when insufficient_privilege then null; end;
   begin perform public.hq_overview(); raise exception 'non-staff saw HQ';
   exception when others then assert sqlerrm like 'Riyeser HQ is for Riyeser staff%', sqlerrm; end;
@@ -386,7 +386,7 @@ do $$ begin
   exception when insufficient_privilege then null; end;
 end $$;
 reset role;
-select public.hq_make_owner('riki@riyeser.test', 'Riki');
+select public.hq_make_owner('sam@riyeser.test', 'Sam');
 -- owner with only a password: nothing; with two-step: everything
 select pg_temp.as_user_password_only('99999999-9999-9999-9999-999999999999'); set role authenticated;
 do $$ begin
@@ -465,7 +465,7 @@ do $$ begin
   begin perform public.hq_set_module(current_setting('test.ws_c')::uuid, 'pos', 'active', null, '2030-01-01'); raise exception 'customer set own licence';
   exception when others then assert sqlerrm like 'Riyeser HQ is for%', sqlerrm; end;
 end $$;
--- HQ (Riki, owner): Basics paid for a year, POS trial extended, Payroll cancelled; 2 extra users; yearly
+-- HQ (Sam, owner): Basics paid for a year, POS trial extended, Payroll cancelled; 2 extra users; yearly
 select pg_temp.as_user('99999999-9999-9999-9999-999999999999');
 select public.hq_set_module(:'ws_c', 'basic', 'active', null, (current_date + 365));
 select public.hq_set_module(:'ws_c', 'pos', 'trial', (current_date + 30), null);
@@ -2505,7 +2505,7 @@ do $$ begin
   begin perform public.hq_grant_storage(current_setting('lk.a')::uuid, 5, 'Big drawings'); raise exception 'support granted storage';
   exception when others then assert sqlerrm like 'Your HQ role%', sqlerrm; end;
 end $$;
-select pg_temp.as_user('99999999-9999-9999-9999-999999999999');   -- Riki (owner)
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999');   -- Sam (owner)
 do $$ declare j json; gb bigint := 1073741824; a uuid := current_setting('lk.a')::uuid; begin
   begin perform public.hq_grant_storage(a, 5, ''); raise exception 'no reason';
   exception when others then assert sqlerrm like 'Say why%', sqlerrm; end;
@@ -5059,7 +5059,7 @@ do $$ begin
 end $$;
 
 -- ===== HQ V2 first slice: US dollars only for new refunds and credits; test accounts left out of HQ's figures
--- (Riki is the HQ owner, signed in with two-step sign-in; tokens here have no session id, so the HQ session timer isn't used)
+-- (Sam is the HQ owner, signed in with two-step sign-in; tokens here have no session id, so the HQ session timer isn't used)
 reset role;
 -- an older refund in Fiji dollars (made before the rule): still there, can still be reviewed, approved and paid as credit
 alter table public.refund_requests disable trigger refund_requests_usd;
