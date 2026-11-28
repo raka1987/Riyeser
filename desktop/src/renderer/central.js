@@ -43,6 +43,7 @@ const P = {
   sheet: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 9h16M4 15h16M10 3v18"/>',
   people: '<circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5"/><circle cx="17" cy="9" r="2.4"/><path d="M16 14.2c2.4 0 4 1.5 4.5 4.3"/>',
   bolt: '<path d="M13 3L5 14h6l-1 7 8-11h-6z"/>',
+  update: '<path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/><path d="M12 8v5l3 2"/>',
 };
 const icon = (n, size) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"${size ? ` style="width:${size}px;height:${size}px"` : ''}>${P[n] || P.doc}</svg>`;
 const fileIcon = (n) => {
@@ -252,9 +253,12 @@ async function tileAction(a, id) {
   const p = programs.find((x) => x.id === id) || { full: id };
   closeMenus();
   if (a === 'update') {
+    const go = await askUpdate([id]); if (go !== 'now') return;
     updatingIds.add(id); renderTiles();
-    try { const r = await bridge.call('central:installUpdates', [id]); if (!r.restarting) toast(`${p.full} is up to date.`); updError = ''; } catch (e) { updError = e.message; toast(e.message); }
-    updatingIds.delete(id); await checkForUpdates(true);
+    const r = await runUpdates([id]);
+    if (r && !r.restarting && !(r.failed || []).length) toast(`${p.full} is up to date.`);
+    if (updFailed) safe(openUpdates);   // the reason, Try again and Get help are there
+    updatingIds.delete(id); renderTiles();
   }
   if (a === 'repair') {
     if (!(await askConfirm({ title: `Repair ${p.full}?`, body: `Central downloads ${p.full} again and installs it over the top. Your information is kept. ${p.full} closes for a moment if it's open.`, ok: 'Repair it' }))) return;
@@ -568,61 +572,153 @@ document.addEventListener('click', (e) => {
 
 // ---------- updates (Admin panel → Updates; a tile's ⋯ → Update) ----------
 let versions = null;
-const progName = (id) => (id === 'central' ? 'Riyeser Central' : NAMES()[id] || id);
-const DAYS = [[1, 'Mon'], [2, 'Tue'], [3, 'Wed'], [4, 'Thu'], [5, 'Fri'], [6, 'Sat'], [0, 'Sun']];
-const WHEN = [['outside', 'Outside work hours', 'Updates install by themselves only outside the work hours below, while each program is closed.'],
-  ['approve', 'Only when I approve', 'Nothing installs by itself. Install now under “Updates ready” when it suits you.'],
-  ['asap', 'As soon as possible', 'Each program updates as soon as it’s closed, any time of day.']];
-/** Admin → Updates: "When to install updates", this PC's work hours, "N updates ready" and the last automatic update. */
-function autoHtml(au) {
-  const h = au.hours || { days: [1, 2, 3, 4, 5], start: '08:00', end: '18:00' }; const dis = au.demo ? ' disabled' : '';
-  const line = au.demo ? 'Demo mode is on, so nothing updates by itself.' : au.last ? L9.autoLine(au.last, progName(au.last.id)) : 'Nothing updated by itself yet.';
-  const n = (au.ready || []).length; const can = who().who !== 'staff';
-  const ready = au.demo || (!n && !au.week) ? '' : `<div class="autoready"><div class="grow"><b>${au.week ? 'Updates have been waiting a week' : `${n} update${n === 1 ? '' : 's'} ready`}</b>
-    <small>${au.week ? 'Install now or leave the PC on overnight.' : au.mode === 'approve' ? 'They wait for your approval. Open programs update once they’re closed.' : `They install by themselves after work hours (after ${esc(h.end)}). Install now, or leave them for tonight.`}</small></div>
-    ${can ? `<button class="btn sm" data-autoapprove>Install now</button>${au.week ? '' : '<button class="btn sm s" data-autotonight>Tonight</button>'}` : '<small>Updates are waiting for an administrator.</small>'}</div>`;
-  return `<div class="autorow"><b class="autoh">When to install updates</b>
-    <div class="autowhen" role="radiogroup" aria-label="When to install updates">${WHEN.map(([v, t, d]) => `<label class="setrow"><input type="radio" name="updwhen" value="${v}"${au.mode === v ? ' checked' : ''}${dis}><span><b>${t}${v === 'outside' ? ' <span class="rec">recommended</span>' : ''}</b><small>${d}</small></span></label>`).join('')}</div>
-    <div class="workh"${au.mode === 'outside' ? '' : ' hidden'}><span class="lbl">Work hours on this PC</span>
-      <span class="days">${DAYS.map(([d, t]) => `<label class="day"><input type="checkbox" data-wday="${d}"${h.days.includes(d) ? ' checked' : ''}${dis}><span>${t}</span></label>`).join('')}</span>
-      <span class="hrs"><input type="time" id="whstart" value="${esc(h.start)}" aria-label="Work starts"${dis}> to <input type="time" id="whend" value="${esc(h.end)}" aria-label="Work ends"${dis}></span></div>
-    <p class="lbl autonote">${au.mode === 'outside' ? (au.inWork ? 'It’s work time now: updates wait until after work. ' : 'It’s outside work hours now: updates can install. ') : ''}Downloads happen in the background at any time. Nothing pops up.</p></div>
-    ${ready}<p class="lbl autolast" id="admautolast">${esc(line)}</p>`;
+let updFailed = null;   // the last Update all that didn't finish: { ids, failed: [{ name, message, fix }] } (Try again, Get help)
+const updBoxes = () => ['#updates', '#updpbanner'].map((q) => $(q)).filter(Boolean);
+function updFailHtml(f) {
+  const real = f.failed.filter((x) => x.reason !== 'waiting'); const wait = f.failed.filter((x) => x.reason === 'waiting');
+  const title = real.length === 1 ? `${real[0].name} didn't update` : `${real.length} updates didn't finish`;
+  return `<div style="font-size:24px">⚠</div><div class="grow"><b>${esc(title)}</b>
+    ${real.map((x) => `<div class="lbl updfail">${real.length > 1 ? `<b>${esc(x.name)}:</b> ` : ''}${esc(x.message)}${x.fix ? ` ${esc(x.fix)}` : ''}</div>`).join('')}
+    ${f.done && f.done.length ? `<div class="lbl">Updated: ${esc(f.done.join(', '))}.</div>` : ''}${wait.map((x) => `<div class="lbl">${esc(x.message)}</div>`).join('')}</div>
+    <button class="go" data-updretry>Try again</button><button class="btn sm s" data-act="gethelp">Get help</button>`;
 }
 function renderUpdates() {
-  const box = $('#updates');
   const list = upd.updates || [];
-  if (!list.length && !updating) { box.hidden = true; return; }
-  box.hidden = false;
-  if (updating) return; // progress is drawn by the update-progress events
-  box.innerHTML = `<div style="font-size:24px">⬆</div><div class="grow"><b>${list.length === 1 ? 'An update is ready' : `${list.length} updates are ready`}</b>
-    <div class="lbl">${list.map((u) => `${esc(u.name)}${u.self ? ' (this app)' : ''} ${esc(u.from)} → ${esc(u.to)}`).join(' · ')}${auto && !auto.demo ? `<br>${auto.mode === 'asap' ? 'These install by themselves as soon as each program is closed.' : auto.mode === 'approve' ? 'These wait for an owner or admin to approve them.' : 'These install by themselves after work hours, while each program is closed.'}` : ''}</div></div>
-    <button class="go" id="updall">Update ${list.length === 1 ? '' : 'all'}</button>`;
-  $('#updall').addEventListener('click', () => safe(async () => {
-    updating = true;
-    box.innerHTML = '<div style="font-size:24px">⬇</div><div class="grow"><b id="updmsg">Getting ready…</b><div class="prog"><i id="updbar"></i></div><div class="lbl">Your information is kept. Programs being updated will close for a moment.</div></div>';
-    try {
-      const r = await bridge.call('central:installUpdates', null);
-      if (r.restarting) { $('#updmsg').textContent = 'Riyeser Central is restarting to finish updating…'; return; }
-      toast(`Updated ${r.done.length} program${r.done.length === 1 ? '' : 's'}.`); updError = '';
-    } catch (e) { updError = e.message; toast(e.message); }
-    updating = false;
-    await checkForUpdates(true);
-  }));
+  for (const box of updBoxes()) {
+    // the Updates panel has its own list and buttons: its banner only shows progress and what didn't update
+    if ((!list.length || box.id === 'updpbanner') && !updating && !updFailed) { box.hidden = true; continue; }
+    box.hidden = false;
+    if (updating) continue; // progress is drawn by the update-progress events
+    if (updFailed) { box.innerHTML = updFailHtml(updFailed); continue; }
+    box.innerHTML = `<div style="font-size:24px">⬆</div><div class="grow"><b>${list.length === 1 ? 'An update is ready' : `${list.length} updates are ready`}</b>
+      <div class="lbl">${list.map((u) => `${esc(u.name)}${u.self ? ' (this app)' : ''} ${esc(u.from)} → ${esc(u.to)}`).join(' · ')}${auto && !auto.demo ? `<br>${auto.mode === 'asap' ? 'These install by themselves as soon as each program is closed.' : auto.mode === 'approve' ? 'These wait for an owner or admin to approve them.' : 'These install by themselves after work hours, while each program is closed.'}` : ''}</div></div>
+      <button class="go" data-updall>Update ${list.length === 1 ? '' : 'all'}</button>`;
+    if (box.id === 'updates') box.querySelector('[data-updall]').id = 'updall';
+  }
 }
+/**
+ * Update all (ids null) or some programs: the banner follows each step; a failure stays in the banner with its plain
+ * reason, Try again and Get help (and in Needs attention) until it's fixed. -> the result, or null when it didn't run.
+ */
+async function runUpdates(ids) {
+  if (updating) return null;
+  updating = true; updFailed = null;
+  for (const box of updBoxes()) {
+    box.hidden = false;
+    box.innerHTML = '<div style="font-size:24px">⬇</div><div class="grow"><b data-updmsg>Getting ready…</b><div class="prog"><i data-updbar></i></div><div class="lbl">Your information is kept. Programs being updated will close for a moment.</div></div>';
+  }
+  let r = null;
+  try {
+    r = await bridge.call('central:installUpdates', ids);
+    if (r.restarting) { document.querySelectorAll('[data-updmsg]').forEach((m) => { m.textContent = 'Riyeser Central is restarting to finish updating…'; }); return r; }
+    const failed = r.failed || [];
+    if (failed.length) {
+      const nm = (id) => (programs.find((p) => p.id === id) || {}).full || id;
+      updFailed = { ids, failed, done: (r.done || []).map(nm) }; updError = failed.map((x) => `${x.name}: ${x.message}`).join(' ');
+    } else { toast(`Updated ${r.done.length} program${r.done.length === 1 ? '' : 's'}.`); updError = ''; }
+  } catch (e) {
+    updFailed = { ids, failed: [{ name: 'Updates', message: e.message, fix: 'Click Try again. If it happens again, click Get help.' }] }; updError = e.message;
+  } finally { updating = false; }
+  // drawn now, not only after the next check: a check that fails (offline, GitHub busy) must never leave the banner on
+  // its last "Downloading … 100%" (what Central 1.9.0 did)
+  renderUpdates(); renderHome(); if ($('#upddlg').open) renderUpdPanel();
+  await checkForUpdates(true);
+  return r;
+}
+// ---------- the Updates panel (avatar menu → Updates): no Admin panel needed to see or start updates ----------
+const updIds = (v) => [...new Set(['central', ...Object.keys((v && v.installed) || {}), ...programs.filter((p) => p.status === 'installed').map((p) => p.id)])]
+  .filter((id) => id === 'central' || programs.some((p) => p.id === id && p.status !== 'missing')).sort(byOrder);
+function renderUpdPanel() {
+  const v = versions || { installed: {}, latest: {} };
+  if (appVersion && !(v.installed || {}).central) v.installed = { ...(v.installed || {}), central: appVersion };
+  const rows = L9.updateRows({ versions: v, updates: upd.updates, ids: updIds(v), names: Object.fromEntries(programs.map((p) => [p.id, p.full || p.name])) });
+  const n = rows.filter((r) => r.update).length; const line = L9.scheduleLine(auto);
+  $('#updpbody').innerHTML = `<div class="tblwrap"><table class="tbl wide updtbl"><tr><th>Program</th><th>On this PC</th><th>Newest</th><th>Status</th><th></th></tr>
+    ${rows.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.installed || '—')}</td><td>${esc(r.newest || '—')}</td><td>${r.update ? '<span class="warn">Update available</span>' : r.newest ? '<span class="ok">Up to date</span>' : `<span class="lbl">${esc(r.status)}</span>`}</td>
+      <td>${r.update ? `<button class="btn sm s" data-updone="${esc(r.id)}"${updating ? ' disabled' : ''}>Update</button>` : ''}</td></tr>`).join('')}</table></div>
+    ${line ? `<p class="lbl updsched">${esc(line)} · <button class="lnk" data-updwhen>Change</button></p>` : ''}
+    <div class="row"><button class="btn sm s" data-updcheck${updating ? ' disabled' : ''}>Check now</button>${n ? `<button class="btn sm" data-updall${updating ? ' disabled' : ''}>Update all</button>` : ''}</div>
+    <p class="lbl">${upd.checkedAt ? `Checked ${esc(whenAgo(upd.checkedAt))}. ` : ''}Your information is kept when a program updates.</p>`;
+}
+async function openUpdates() {
+  closeMenus();
+  const d = $('#upddlg'); renderUpdates(); renderUpdPanel(); if (!d.open) d.showModal();
+  [versions, auto] = await Promise.all([bridge.call('central:versions', false).catch(() => versions), bridge.call('central:autoUpdate').catch(() => auto)]);
+  renderUpdates(); renderUpdPanel();
+}
+/**
+ * "Update now?" each time Update or Update all is pressed: Update now, Set a time… (Tonight, or a time picked) or
+ * Cancel. During work hours a person who isn't an owner or admin unlocks 🔒 Admin first (central:updateGate).
+ * -> 'now' (go ahead), 'scheduled' or null.
+ */
+function askUpdate(ids) {
+  return new Promise((resolve) => {
+    const d = document.createElement('dialog'); d.className = 'licdlg askdlg upconfirm';
+    let answer = null; let scheduled = '';
+    const ask = () => {
+      d.innerHTML = `<div class="askbody"><h2>Update now?</h2><p>The programs being updated will close for about a minute. Save your work first.</p><div class="werr" data-uperr hidden role="alert"></div>
+        <div class="wrow"><button class="btn s" data-upconfirm="cancel">Cancel</button><button class="btn s" data-upconfirm="later">Set a time…</button><button class="btn" data-upconfirm="now">Update now</button></div></div>`;
+      d.querySelector('[data-upconfirm="now"]').focus();
+    };
+    const later = () => {
+      const t = new Date(Date.now() + 3600000); const hh = String(t.getHours()).padStart(2, '0');
+      d.innerHTML = `<div class="askbody"><h2>When should it update?</h2>
+        <label class="setrow"><input type="radio" name="upwhen" value="tonight" checked><span><b>Tonight (after hours)</b><small>${esc(L9.scheduleLine({ ...(auto || {}), mode: 'outside', inWork: true, tonight: null }).replace('Automatic updates: tonight, ', 'Tonight, '))}</small></span></label>
+        <label class="setrow"><input type="radio" name="upwhen" value="at"><span><b>At a time</b><small><input type="time" data-uptime value="${hh}:00" aria-label="Update at"></small></span></label>
+        <div class="werr" data-uperr hidden role="alert"></div>
+        <div class="wrow"><button class="btn s" data-upconfirm="back">Back</button><button class="btn" data-upconfirm="schedule">Schedule</button></div></div>`;
+      d.querySelector('[data-uptime]').addEventListener('focus', () => { d.querySelector('input[value=at]').checked = true; });
+    };
+    const err = (m) => { const e = d.querySelector('[data-uperr]'); e.textContent = m; e.hidden = false; };
+    d.addEventListener('click', async (e) => {
+      const b = e.target.closest('[data-upconfirm]'); if (!b) return;
+      const k = b.dataset.upconfirm;
+      if (k === 'cancel') { d.close(); return; }
+      if (k === 'later') { later(); return; }
+      if (k === 'back') { ask(); return; }
+      if (k === 'now') {
+        const g = await bridge.call('central:updateGate').catch(() => ({}));
+        if (g.needsAdmin && !(await adminReady())) {
+          err('It’s work hours, so an owner or admin approves updates. Unlock 🔒 Admin and press Update now again, or pick a time after work with Set a time…');
+          const row = d.querySelector('.wrow'); if (!row.querySelector('[data-upconfirm="unlock"]')) row.insertAdjacentHTML('afterbegin', '<button class="btn s" data-upconfirm="unlock">Unlock 🔒 Admin</button>');
+          return;
+        }
+        answer = 'now'; d.close(); return;
+      }
+      if (k === 'unlock') { d.close(); openAdmin('updates'); return; }
+      if (k === 'schedule') {
+        const at = d.querySelector('input[name=upwhen]:checked').value === 'at' ? (() => {
+          const [h, m] = (d.querySelector('[data-uptime]').value || '23:00').split(':').map(Number); const x = new Date(); x.setHours(h, m, 0, 0);
+          if (x.getTime() < Date.now() - 60000) x.setDate(x.getDate() + 1);   // earlier than now: tomorrow at that time
+          return x.getTime(); })() : 0;
+        try { auto = await bridge.call('central:scheduleUpdates', ids, at); } catch (x) { err(x.message); return; }
+        scheduled = L9.scheduleLine(auto); answer = 'scheduled'; d.close();
+      }
+    });
+    d.addEventListener('close', () => { d.remove(); if (scheduled) { toast(scheduled); renderHome(); if ($('#upddlg').open) renderUpdPanel(); } resolve(answer); });
+    ask(); document.body.appendChild(d); d.showModal(); d.querySelector('[data-upconfirm="now"]').focus();
+  });
+}
+document.addEventListener('click', (e) => {
+  if (e.target.closest('[data-updall]')) { safe(async () => { if (await askUpdate(null) === 'now') await runUpdates(null); }); return; }
+  const one = e.target.closest('[data-updone]');
+  if (one) { const id = one.dataset.updone; safe(async () => { if (await askUpdate([id]) === 'now') await runUpdates([id]); }); return; }
+  if (e.target.closest('[data-updcheck]')) { safe(async () => { versions = await bridge.call('central:versions', true); await checkForUpdates(true, false); renderUpdPanel(); }); return; }
+  if (e.target.closest('[data-updwhen]')) { $('#upddlg').close(); openAdmin('updates'); return; }
+  if (e.target.closest('[data-updretry]')) { const ids = updFailed && updFailed.ids; updFailed = null; safe(() => runUpdates(ids || null)); }
+});
 async function checkForUpdates(force, quiet = true) {
   try { upd = await bridge.call('central:updates', force); } catch (e) { if (!quiet) toast(e.message); return; }
   (upd.updates || []).sort((a, b) => byOrder(a.id, b.id));
-  renderUpdates(); renderHome();
+  renderUpdates(); renderHome(); if ($('#upddlg') && $('#upddlg').open) renderUpdPanel();
   if (adminOpen()) { versions = await bridge.call('central:versions', false).catch(() => versions); renderAdminSection('updates'); }
   if (!quiet) toast(upd.updates.length ? `${upd.updates.length} update${upd.updates.length === 1 ? '' : 's'} available.` : upd.note || 'Everything is up to date.');
 }
 bridge.on('update-progress', (p) => {
   const tl = document.querySelector(`#tiles [data-tile="${p.id}"] .tl`);
-  if (tl && updatingIds.has(p.id)) tl.textContent = p.stage === 'downloading' ? `Updating… ${Math.round(p.pct * 100)}%` : 'Updating…';
-  const msg = $('#updmsg'); const bar = $('#updbar'); if (!msg) return;
-  msg.textContent = p.stage === 'downloading' ? `Downloading ${p.name}… ${Math.round(p.pct * 100)}%` : p.stage === 'installing' ? (p.elevate ? `Installing ${p.name}… Windows will ask for permission: choose Yes` : `Installing ${p.name}…`) : `Restarting Riyeser Central…`;
-  bar.style.width = `${Math.round((p.stage === 'downloading' ? p.pct : 1) * 100)}%`;
+  if (tl && updatingIds.has(p.id)) tl.textContent = p.stage === 'downloading' ? `Updating… ${Math.round(p.pct * 100)}%` : p.stage === 'failed' ? 'Didn\'t update' : 'Updating…';
+  document.querySelectorAll('[data-updmsg]').forEach((m) => { m.textContent = L9.updateStep(p); });
+  document.querySelectorAll('[data-updbar]').forEach((b) => { b.style.width = `${Math.round((p.stage === 'downloading' ? p.pct : 1) * 100)}%`; });
 });
 
 // ---------- demo mode: practice data for Sample Trading Co (%APPDATA%\Riyeser\demo.json) ----------
@@ -1000,6 +1096,7 @@ function renderAvMenu() {
   const s = coState(); const a = who();
   const head = `<div class="mhead"><b>${esc((s.company && s.company.your_name) || (demoState.on ? 'Ricky (demo)' : s.signedIn ? s.signedIn.split('@')[0] : 'Not signed in'))}</b><small>${esc(s.signedIn || (a.who === 'individual' ? 'On this PC' : a.business))}</small></div>`;
   $('#avmenu').innerHTML = `${head}<button role="menuitem" data-av="account">${icon('user', 16)}Your account</button><button role="menuitem" data-av="settings">${icon('gear', 16)}Settings</button>
+    <button role="menuitem" data-av="updates">${icon('update', 16)}Updates${(upd.updates || []).length ? ` <span class="nb">${upd.updates.length}</span>` : ''}</button>
     <button role="menuitem" data-av="help">${icon('help', 16)}Help</button>${a.who === 'individual' ? `<button role="menuitem" data-av="manage">${icon('pc', 16)}Manage this PC</button>` : ''}<hr>
     ${s.signedIn ? `<button role="menuitem" data-w="signout">${icon('out', 16)}Sign out</button>` : `<button role="menuitem" data-w="link">${icon('key', 16)}Sign in</button>`}`;
 }
@@ -1033,7 +1130,7 @@ document.addEventListener('click', (e) => {
   if (!e.target.closest('#pop, #pill, [data-chip]') && !$('#pop').hidden) closePop();
   if (!e.target.closest('#tmenu, [data-tmenu]') && !e.target.closest('#avmenu, #avbtn')) closeMenus();
   const av = e.target.closest('[data-av]');
-  if (av) { const a = av.dataset.av; closeMenus(); if (a === 'account') openAccount(); if (a === 'settings') openSettings(); if (a === 'help') openHelp(); if (a === 'manage') openAdmin('overview'); return; }
+  if (av) { const a = av.dataset.av; closeMenus(); if (a === 'account') openAccount(); if (a === 'settings') openSettings(); if (a === 'help') openHelp(); if (a === 'updates') safe(openUpdates); if (a === 'manage') openAdmin('overview'); return; }
   const tm = e.target.closest('[data-tmenu]');
   if (tm) { e.stopPropagation(); if (menuFor === tm.dataset.tmenu) return closeMenus(true); const r = tm.getBoundingClientRect(); openTileMenu(tm.dataset.tmenu, { x: r.left, y: r.bottom + 4 }); return; }
   const ta = e.target.closest('[data-tact]');

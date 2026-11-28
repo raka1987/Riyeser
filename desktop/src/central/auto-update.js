@@ -106,9 +106,23 @@ const covers = (a, u) => !!(a && a.items && a.items[u.id] === u.to);
 function timeGate(u, { when = {}, state, now }) {
   const mode = MODES.includes(when.mode) ? when.mode : 'outside';
   if (mode === 'asap' || covers(state.approval, u)) return null;
+  // "Set a time…" (the Update now? box): a time someone picked; from then on it may install, work hours or not
+  if (covers(state.tonight, u) && state.tonight.after) return now >= state.tonight.after ? null : 'scheduled';
   const work = inWorkHours(now, when.hours, when.tz);
   if (mode === 'outside') return work ? 'work-hours' : null;
   return covers(state.tonight, u) && !work ? null : 'approval';   // "Only when I approve" (Tonight: the next window)
+}
+
+/**
+ * "Tonight (after hours)": the end of today's work hours in the PC's time zone (ms), or now when that's past or today
+ * isn't a work day. A shift past midnight (22:00–06:00) ends tomorrow morning.
+ */
+function afterWork(now, hours) {
+  const h = workHours(hours);
+  if (!inWorkHours(now, h)) return now;
+  const d = new Date(now); const [eh, em] = h.end.split(':').map(Number);
+  const end = new Date(d.getFullYear(), d.getMonth(), d.getDate(), eh, em, 0, 0).getTime();
+  return end > now ? end : end + 24 * 3600 * 1000;
 }
 
 // Why an update is waiting (shown quietly in Admin → Updates)
@@ -125,6 +139,7 @@ const WAITING = {
   'prompt-today': 'Needs Windows permission: asked again tomorrow',
   'after-others': 'Installs after the other programs',
   'next-start': 'Installs the next time Riyeser Central starts',
+  scheduled: 'Scheduled',
   'till-open': 'Installs once the till shift is closed',
   unsent: 'Installs once waiting online news has gone out',
 };
@@ -435,12 +450,17 @@ function createAutoUpdater(deps, options = {}) {
     save((x) => { for (const k of Object.keys(items)) delete x.items[k]; return x; });
     return tick();
   }
-  /** "Tonight": leave them for the next time outside work hours (the item goes quiet). */
-  function tonight({ by = '' } = {}) {
-    const s = state(); const items = Object.fromEntries((s.pending || []).map((p) => [p.id, p.to]));
-    save((x) => ({ ...x, tonight: { by: by || 'this PC', at: d.now(), items },
-      history: [{ kind: 'tonight', by: by || 'this PC', at: d.now(), ids: Object.keys(items), how: 'tonight' }, ...(x.history || [])].slice(0, opts.historyKeep) }));
-    d.log({ id: 'central', stage: 'tonight', how: 'tonight', detail: `by ${by || 'this PC'}` });
+  /**
+   * "Tonight": leave them for the next time outside work hours (the item goes quiet). From the Update now? box's
+   * "Set a time…": items ({ id: version }, default every update waiting) and after (the time picked, ms): they install
+   * from then on, as soon as each program is closed.
+   */
+  function tonight({ by = '', items: only = null, after = null } = {}) {
+    const s = state(); const items = only && typeof only === 'object' ? { ...only } : Object.fromEntries((s.pending || []).map((p) => [p.id, p.to]));
+    const at = Number(after) > 0 ? Number(after) : null;
+    save((x) => ({ ...x, tonight: { by: by || 'this PC', at: d.now(), items, ...(at ? { after: at } : {}) },
+      history: [{ kind: 'tonight', by: by || 'this PC', at: d.now(), ids: Object.keys(items), how: at ? `scheduled for ${new Date(at).toISOString()}` : 'tonight' }, ...(x.history || [])].slice(0, opts.historyKeep) }));
+    d.log({ id: 'central', stage: 'tonight', how: at ? 'scheduled' : 'tonight', detail: `by ${by || 'this PC'}${at ? ` for ${new Date(at).toISOString()}` : ''}` });
     changed();
     return summary();
   }
@@ -474,5 +494,5 @@ function createAutoUpdater(deps, options = {}) {
   return { check, tick, atStart, retry, approve, tonight, summary, start, stop, state, busy: () => !!running };
 }
 
-module.exports = { STATE, DEFAULTS, WAITING, MODES, WORK_DEFAULT, COMPANY_FILE, busyFrom, runningIds, tally, modeOf, approverFrom, workHours, localParts, inWorkHours, timeGate, covers,
+module.exports = { afterWork, STATE, DEFAULTS, WAITING, MODES, WORK_DEFAULT, COMPANY_FILE, busyFrom, runningIds, tally, modeOf, approverFrom, workHours, localParts, inWorkHours, timeGate, covers,
   blockedBy, decide, selfAtStart, lastLine, createAutoUpdater, read };

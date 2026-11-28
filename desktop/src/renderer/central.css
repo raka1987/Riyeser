@@ -454,6 +454,7 @@ table.ot td:nth-child(2) { min-width: 260px; } table.ot td:nth-child(3) { min-wi
 /* the first run's card is a little tighter, so the list and its buttons fit a 1280 screen at 125% */
 .wcard:has(.frsteps) { padding: 24px 32px; } .wcard:has(.frsteps) .wlogo { margin-bottom: 10px; } .wcard:has(.frsteps) h1 { font-size: 24px; } .wcard:has(.frsteps) .wsub { margin-bottom: 14px; }
 .grid:focus { outline: none; }
+.banner .updfail { margin-top: 4px; } .banner [data-act="gethelp"] { margin-left: -4px; }
 /* Admin → Updates: "When to install updates", work hours, "N updates ready", the last automatic update, why one is waiting */
 .autorow { padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
 .autoh { display: block; font-size: 13.5px; margin-bottom: 8px; }
@@ -475,3 +476,14 @@ table.ot td:nth-child(2) { min-width: 260px; } table.ot td:nth-child(3) { min-wi
 .autolast { margin: 8px 2px 4px; }
 .tbl td .uwhy { display: block; color: var(--muted); font-size: 12px; white-space: normal; line-height: 1.35; }
 .attacts { display: inline-flex; gap: 6px; flex-shrink: 0; }
+/* Updates (avatar menu → Updates): the programs, their versions and status, Check now / Update / Update all */
+.upddlg { width: min(680px, 94vw); } .upddlg .setbody { max-height: calc(100vh - 140px); overflow-y: auto; }
+.upddlg .banner { border: 1px solid var(--line); border-radius: 12px; margin-bottom: 12px; }
+.upddlg .tblwrap { overflow-x: auto; }
+.updtbl th:nth-child(1) { width: 34%; } .updtbl th:nth-child(2), .updtbl th:nth-child(3) { width: 15%; } .updtbl th:nth-child(4) { width: 21%; } .updtbl th:nth-child(5) { width: 15%; }
+.updtbl td { vertical-align: middle; } .updtbl td:last-child { text-align: right; }
+.updsched { margin: 10px 2px; }
+.avmenu .nb { margin-left: auto; font-size: 11px; font-weight: 700; background: var(--warn-soft); color: var(--warn); border-radius: 99px; padding: 0 7px; }
+.upconfirm .wrow { flex-wrap: wrap; }
+.upconfirm .setrow + .setrow { margin-top: 8px; } .upconfirm .askbody > .setrow:last-of-type { margin-bottom: 8px; }
+.upconfirm .setrow input[type=time] { width: auto; height: auto; font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 3px 6px; margin-top: 4px; }

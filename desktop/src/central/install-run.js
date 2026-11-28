@@ -79,8 +79,9 @@ function spawnErrorCode(err) {
  *   startError: why Windows didn't start it (a Windows code like 740 / 1223 / 225, 'missing' or 'timeout'), or null
  * spawn: child_process.spawn (or a stand-in in tests). retryElevated: when a normal start needs permission, ask for it.
  */
-function runInstaller({ file, args, elevate = false, spawn, timeoutMs = 15 * 60 * 1000, retryElevated = true, now = Date.now }) {
+function runInstaller({ file, args, elevate = false, spawn, timeoutMs = 15 * 60 * 1000, retryElevated = true, now = Date.now, onElevate = null }) {
   const once = (up) => new Promise((resolve) => {
+    if (up && onElevate) { try { onElevate(); } catch { /* only tells the window */ } }   // "Windows is asking for permission"
     const plan = launchPlan({ file, args, elevate: up });
     const t0 = now(); let out = ''; let done = false;
     const finish = (r) => { if (done) return; done = true; clearTimeout(timer); resolve({ ...r, elevated: up, ms: now() - t0, output: out.slice(-2000) }); };
@@ -264,5 +265,44 @@ function logEntry(e) {
   return `${new Date(e && e.at ? e.at : Date.now()).toISOString()} install ${JSON.stringify(pick)}`;
 }
 
-module.exports = { CODES, PS_MARK, PS_FAILED, elevatedScript, launchPlan, spawnErrorCode, runInstaller, installFailure, notFoundAfterInstall,
+// ---------- "Update all" (Admin → Updates): what to say when a step before the installer didn't work ----------
+// Central 1.9.0 threw these straight to the window: a four-second toast, the banner back to "N updates are ready" and
+// nothing in the install log, so it looked as if Update all just stopped after "Downloading … 100%". Now each one is a
+// plain reason with a fix, written to the install log, and the banner keeps it with Try again and Get help.
+const AV_GONE = /ENOENT|EPERM|EBUSY|EACCES/;
+/**
+ * A failure while downloading or checking an update -> { ok: false, reason, message, fix, code }.
+ * stage: 'download' | 'check'. err: the Error (its .code or message). name: "Riyeser Accounting Basics".
+ */
+function updateFailure(stage, err, { name = 'The program' } = {}) {
+  const e = err || {}; const what = String(e.code || e.message || '');
+  if (e.failure) return e.failure;
+  if (AV_GONE.test(what)) {
+    return { ok: false, reason: 'blocked', code: e.code || null,
+      message: `Windows Security (or your antivirus) took the ${name} update away as soon as it was downloaded, so it didn't install.`,
+      fix: 'Click Try again. If it happens again, allow it in Windows Security → Protection history, or download it from riyeser.com.' };
+  }
+  if (stage === 'download') {
+    return { ok: false, reason: 'download', code: e.code || null,
+      message: `Couldn't download the ${name} update: ${e.message || 'the connection stopped'}`,
+      fix: 'Check the internet connection and click Try again.' };
+  }
+  return { ok: false, reason: 'check', code: e.code || null,
+    message: e.message || `The ${name} update couldn't be checked, so it wasn't installed. Nothing was changed.`,
+    fix: 'Click Try again. If it happens again, click Get help.' };
+}
+/**
+ * Run fn() again while the file is held by an antivirus scan (EBUSY / EPERM / EACCES): a few tries a couple of seconds
+ * apart. A missing file (ENOENT) isn't retried: it's gone. -> fn's result, or its last error.
+ */
+async function whileScanned(fn, { tries = 8, waitMs = 2000, sleep = (ms) => new Promise((ok) => setTimeout(ok, ms)) } = {}) {
+  for (let i = 1; ; i++) {
+    try { return await fn(); } catch (e) {
+      if (i >= tries || !/EBUSY|EPERM|EACCES/.test(String(e && (e.code || e.message)))) throw e;
+      await sleep(waitMs);
+    }
+  }
+}
+
+module.exports = { updateFailure, whileScanned, CODES, PS_MARK, PS_FAILED, elevatedScript, launchPlan, spawnErrorCode, runInstaller, installFailure, notFoundAfterInstall,
   BATCH_MARK, batchScript, parseBatch, runElevatedBatch, STAGES, step, stateText, logEntry, isInno };

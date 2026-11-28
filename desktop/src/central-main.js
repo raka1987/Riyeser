@@ -7,6 +7,7 @@ const updates = require('./central/updates');
 const autoUpdate = require('./central/auto-update');
 const installerCheck = require('./central/installer-check');
 const installRun = require('./central/install-run');
+const updateRun = require('./central/update-run');
 const licence = require('./core/licence');
 const trialGuard = require('./core/trial-guard');
 const prices = require('./core/prices');
@@ -232,15 +233,28 @@ async function updateStatus(force) {
   if (!r.latest) return { checkedAt: Date.now(), updates: [], note: r.note };
   return { checkedAt: Date.now(), release: r.latest.name, updates: updates.availableUpdates(r.installed || {}, r.latest) };
 }
-async function download(url, file, onProgress) {
+async function download(url, file, onProgress, { stallMs = 90 * 1000 } = {}) {
   if (!updates.ALLOWED_DOWNLOAD.test(url)) throw new Error('Refusing to download from an unexpected address.');
   const res = await net.fetch(url, { headers: { 'User-Agent': 'Riyeser-Central' } });
   if (!res.ok || !res.body) throw new Error(`Download failed (${res.status}).`);
   const total = +res.headers.get('content-length') || 0; let got = 0;
   const out = fs.createWriteStream(file);
+  // a write that fails (the antivirus holding the file, a full disk) rejects here instead of waiting for ever
+  let writeError = null; const failed = new Promise((_, no) => out.on('error', (e) => { writeError = e; no(e); }));
+  failed.catch(() => {});
   const reader = res.body.getReader();
-  for (;;) { const { done, value } = await reader.read(); if (done) break; got += value.length; out.write(Buffer.from(value)); onProgress(total ? got / total : 0); }
-  await new Promise((r) => out.end(r));
+  const stalled = () => new Promise((_, no) => setTimeout(() => no(new Error('The download stopped part-way.')), stallMs).unref());
+  try {
+    for (;;) {
+      const { done, value } = await Promise.race([reader.read(), stalled(), failed]);
+      if (done) break;
+      got += value.length;
+      if (!out.write(Buffer.from(value))) await Promise.race([new Promise((ok) => out.once('drain', ok)), failed]);
+      onProgress(total ? got / total : 0);
+    }
+    await Promise.race([new Promise((ok) => out.end(ok)), failed]);
+  } catch (e) { try { reader.cancel(); } catch { /* closed */ } out.destroy(); throw e; }
+  if (writeError) throw writeError;
   if (total && fs.statSync(file).size !== total) throw new Error('The download was incomplete. Please try again.');
 }
 /** S58: refuse to run an installer that isn't the one Riyeser published (installer-check.js has the rule). */
@@ -265,8 +279,10 @@ function installError(f) { const e = new Error(f.fix ? `${f.message} ${f.fix}` :
  * Run a downloaded installer quietly and wait for it (install-run.js): programs that install for the whole PC go
  * through the Windows permission prompt. Throws an installError with a plain message when it didn't work.
  */
-async function runInstaller(file, args, name, { id, version, elevate = false } = {}) {
-  const r = await installRun.runInstaller({ file, args, elevate, spawn });
+async function runInstaller(file, args, name, { id, version, elevate = false, onElevate = null } = {}) {
+  // the Windows permission prompt comes to the front only for the program in front: Central, just before it's asked
+  const front = () => { try { if (win && !win.isDestroyed()) { if (win.isMinimized()) win.restore(); win.focus(); } app.focus({ steal: true }); } catch { /* best effort */ } if (onElevate) onElevate(); };
+  const r = await installRun.runInstaller({ file, args, elevate, spawn, onElevate: front });
   const f = installRun.installFailure(r, { name, args });
   installLog({ id, version, file: path.basename(file), stage: f.ok ? 'ran' : 'failed', elevated: r.elevated, retried: r.retried, firstError: r.firstError,
     code: r.code, startError: r.startError, reason: f.reason, ms: r.ms, detail: r.detail });
@@ -342,34 +358,39 @@ async function manualUpdatesWhenFree(ids) {
   manualUpdating = true;
   try { return await installUpdates(ids); } finally { manualUpdating = false; }
 }
+/** "Update all" (and a tile's Update): central/update-run.js has the steps and the rules. */
 async function installUpdates(ids) {
   const st = await updateStatus(false);
   const latest = (await checkUpdates(false)).latest;   // the cached release, with its signed list
   const todo = st.updates.filter((u) => !ids || ids.includes(u.id)).sort((a, b) => a.self - b.self); // Central last
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'riyser-update-'));
-  const done = [];
-  for (const u of todo) {
-    const file = path.join(dir, path.basename(new URL(u.url).pathname));
-    send('update-progress', { id: u.id, name: u.name, stage: 'downloading', pct: 0 });
-    await download(u.url, file, (pct) => send('update-progress', { id: u.id, name: u.name, stage: 'downloading', pct }));
-    await verifyDownload(file, u.file || path.basename(file), u.digest, latest);
-    if (process.platform !== 'win32') throw new Error('Updates install on Windows only.');
-    if (u.self) {
-      // Central updates itself: close, install quietly, then open again.
-      send('update-progress', { id: u.id, name: u.name, stage: 'restarting', pct: 1 });
-      const cmd = `timeout /t 2 /nobreak >nul & "${file}" /S & start "" "${process.execPath}"`;
-      spawn('cmd.exe', ['/d', '/c', cmd], { detached: true, stdio: 'ignore', windowsHide: true, windowsVerbatimArguments: true }).unref();
-      setTimeout(() => app.quit(), 300);
-      done.push(u.id);
-      return { done, restarting: true };
-    }
-    send('update-progress', { id: u.id, name: u.name, stage: 'installing', pct: 1, elevate: !!u.elevate });
-    await runInstaller(file, u.args, u.name, { id: u.id, version: u.to, elevate: !!u.elevate });
-    done.push(u.id);
-    programsReporter.soon();   // the new version, soon after it's installed
+  const prog = (u) => PROGRAMS.filter((p) => p.id === u.id);
+  let r;
+  try {
+    r = await updateRun.runUpdates(todo, {
+      fileFor: (u) => path.join(dir, path.basename(new URL(u.url).pathname)),
+      download: (u, file, onPct) => download(u.url, file, onPct),
+      verify: (u, file) => verifyDownload(file, u.file || path.basename(file), u.digest, latest),
+      closeProgram: (u) => (prog(u).length ? freshstart.closePrograms({ programs: prog(u), locate, launch }) : null),
+      reopen: (u) => { const exe = locate(prog(u)[0]); if (exe) launch(exe); },
+      install: (u, file, onElevate) => runInstaller(file, u.args, u.name, { id: u.id, version: u.to, elevate: !!u.elevate, onElevate }),
+      selfInstall: (u, file) => {
+        // Central updates itself: close, install quietly, then open again.
+        const cmd = `timeout /t 2 /nobreak >nul & "${file}" /S & start "" "${process.execPath}"`;
+        spawn('cmd.exe', ['/d', '/c', cmd], { detached: true, stdio: 'ignore', windowsHide: true, windowsVerbatimArguments: true }).unref();
+        setTimeout(() => app.quit(), 300);
+      },
+      tell: (u, x) => send('update-progress', { id: u.id, name: u.name, ...x }),
+      log: installLog,
+      reported: () => programsReporter.soon(),   // the new version, soon after it's installed
+    });
+  } finally {
+    // the self-update's installer runs from this folder after Central has closed, so it stays then
+    if (!(r && r.restarting)) { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* temp folder */ } }
   }
-  store.set('updateCheck', null);
-  return { done, restarting: false };
+  // checked again next time; kept when something didn't update, so Try again doesn't need GitHub to answer first
+  if (r && !(r.failed || []).length) store.set('updateCheck', null);
+  return r;
 }
 
 // ---------- automatic updates (central/auto-update.js has the rules) ----------
@@ -916,7 +937,34 @@ function registerIpc() {
   setTimeout(resumeIfOnline, 15 * 1000); setInterval(resumeIfOnline, 2 * 60 * 1000);
   handle('firstrun:resume', () => { resumeIfOnline(); return true; });
   handle('central:updates', (force) => updateStatus(!!force));
-  handle('central:installUpdates', (ids) => manualUpdatesWhenFree(ids));
+  // Update now (the Update now? box): during work hours an owner or admin approves it, the same rule as Install now
+  const workGate = async () => {
+    if (demoOn() || !autoUpdate.inWorkHours(Date.now(), updateWhen().hours)) return { inWork: false, by: null };
+    try { return { inWork: true, by: await approver() }; } catch (e) { return { inWork: true, by: null, needsAdmin: true, message: e.message }; }
+  };
+  handle('central:updateGate', () => workGate());
+  handle('central:installUpdates', async (ids) => {
+    const g = await workGate();
+    if (g.needsAdmin) throw new Error('It’s work hours, so an owner or admin approves updates. Unlock 🔒 Admin and try again, or pick a time after work with Set a time…');
+    if (g.by) installLog({ id: 'central', stage: 'approved', how: 'update now', detail: `during work hours, by ${g.by}` });
+    return manualUpdatesWhenFree(ids);
+  });
+  // Set a time… (the Update now? box): Tonight (after work hours) or a time picked. A time inside work hours needs the
+  // same approval as Update now. -> the automatic updates' summary (its tonight.after is the time)
+  handle('central:scheduleUpdates', async (ids, at) => {
+    const st = await updateStatus(false);
+    const items = Object.fromEntries(st.updates.filter((u) => !ids || ids.includes(u.id)).map((u) => [u.id, u.to]));
+    if (!Object.keys(items).length) throw new Error('Everything is up to date.');
+    const hours = updateWhen().hours; let after = Number(at) || 0;
+    if (!after) after = autoUpdate.afterWork(Date.now(), hours);   // Tonight (after hours)
+    if (after < Date.now() - 60000) throw new Error('Choose a time later today or tomorrow.');
+    let by = 'this PC';
+    if (!demoOn() && autoUpdate.inWorkHours(after, hours)) by = await approver();
+    if (!autoUpdater) throw new Error('Updates can be scheduled in the installed Riyeser Central on Windows.');
+    autoUpdater.tonight({ by, items, after });
+    setTimeout(() => autoUpdater.tick(), 1000);
+    return autoUpdater.summary();
+  });
   // Admin panel → Updates: "When to install updates", work hours, the last automatic update, what's waiting and why,
   // "N updates ready" with Install now / Tonight, Try again
   const noAuto = () => ({ mode: updateWhen().mode, hours: updateWhen().hours, demo: demoOn(), allowed: false, last: null, history: [], waiting: {}, attention: [], pending: [], ready: [], week: false, counts: {} });

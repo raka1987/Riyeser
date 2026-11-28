@@ -17,8 +17,17 @@ on:
   workflow_dispatch:
     inputs:
       job:
-        description: "all, windows (build and check the installers), central-install (installs every program from the latest release the way Central does), link-ip (Link Office follows a new address on a real adapter) or relay (the Riyeser relay as a Windows service, two sites calling through it)"
+        description: "all, windows (build and check the installers), central-install (installs every program from the latest release the way Central does), link-ip (Link Office follows a new address on a real adapter) relay (the Riyeser relay as a Windows service, two sites calling through it) or update-all (an older released Central presses Update all)"
         default: all
+      central:
+        description: "update-all only: JSON list of released, built"
+        default: '["released"]'
+      scenarios:
+        description: "update-all only: JSON list of plain, apps-open, limited, av-delete, av-lock"
+        default: '["plain"]'
+      from_tag:
+        description: "update-all only: the release whose Central and Accounting family are installed first (then Central's Update all takes them to the latest release)"
+        default: riyeser-2026.11.28-64
   workflow_call:
     inputs:
       job:
@@ -334,7 +343,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: "22" }
       - name: Unit tests (install state machine and detection, first run's install queue, automatic updates)
-        run: node --test test/central-install.test.js test/central-first-run.test.js test/central-auto-update.test.js
+        run: node --test test/central-install.test.js test/central-first-run.test.js test/central-auto-update.test.js test/central-update-run.test.js
       - name: Windows permission settings on this runner
         shell: pwsh
         run: |
@@ -581,3 +590,144 @@ jobs:
             ${{ runner.temp }}/relay-check.json
             ${{ runner.temp }}/relay-service.log
             ${{ runner.temp }}/natpmp-requests.log
+
+  # Admin → Updates → "Update all", pressed in a REAL installed Central: an older release's Central and Accounting family
+  # (Accounting Basics, Bookings, Estimate, POS) installed first, then Central's own button takes all five to the latest
+  # release, Central last. The window is driven over Chromium's debugging port (scripts/central-update-all-check.js),
+  # so it's the same click, the same main-process handler and the same banner the owner sees.
+  update-all:
+    if: inputs.job == 'update-all'
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # plain: a clean PC. apps-open: the four programs are open when Update all is pressed. limited: Central runs with
+        # the standard-user token (UAC on, like the owner's PC). av-delete / av-lock: the antivirus takes the downloaded
+        # installer away, or holds it, the moment it's saved (what Windows Security does to a new unsigned installer).
+        scenario: ${{ fromJSON(inputs.scenarios || '["plain"]') }}
+        # released: the released Central (from_tag). built: Central built from this branch, numbered as the older
+        # version, so it offers (and installs) the latest release's Central over itself: the new build updating itself.
+        central: ${{ fromJSON(inputs.central || '["released"]') }}
+    defaults:
+      run:
+        working-directory: desktop
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SCENARIO: ${{ matrix.scenario }}
+      FROM_TAG: ${{ inputs.from_tag || 'riyeser-2026.11.28-64' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - uses: actions/setup-python@v5
+        if: matrix.central == 'built'
+        with: { python-version: "3.12" }
+      - name: Build Central from this branch (numbered as the older release's Central)
+        if: matrix.central == 'built'
+        shell: pwsh
+        run: |
+          npm ci
+          python -m pip install --quiet pillow
+          $old = (gh release download $env:FROM_TAG --repo $env:OLD_REPO --pattern versions.json --output - | ConvertFrom-Json).central
+          Write-Host "Built as Central $old"
+          (Get-Content scripts/builder.config.js -Raw) -replace "name: 'riyeser-central', version: '[^']+'", "name: 'riyeser-central', version: '$old'" | Set-Content scripts/builder.config.js
+          node scripts/package-win.js central
+          Get-ChildItem dist-central -Filter "RiyeserCentral-Setup-*.exe" | Format-Table Name, Length | Out-String | Write-Host
+      - name: Install the older release (Central and the Accounting family)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force C:\riy\old, C:\riy\out | Out-Null
+          foreach ($f in "RiyeserCentral-Setup.exe", "RiyeserAccountingBasics-Setup.exe", "RiyeserBookings-Setup.exe", "RiyeserEstimate-Setup.exe", "RiyeserPOS-Setup.exe") {
+            gh release download $env:FROM_TAG --repo $env:OLD_REPO --dir C:\riy\old --pattern $f --clobber
+            if ($LASTEXITCODE -ne 0) { throw "Couldn't download $f from $env:FROM_TAG" }
+          }
+          Start-Process C:\riy\old\RiyeserCentral-Setup.exe -ArgumentList "/S" -Wait
+          if ("${{ matrix.central }}" -eq "built") {
+            $b = Get-ChildItem dist-central -Filter "RiyeserCentral-Setup-*.exe" | Select-Object -First 1
+            Write-Host "This branch's Central over it:" $b.Name
+            Start-Process $b.FullName -ArgumentList "/S" -Wait
+          }
+          foreach ($f in "RiyeserAccountingBasics", "RiyeserBookings", "RiyeserEstimate", "RiyeserPOS") {
+            $p = Start-Process "C:\riy\old\$f-Setup.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait -PassThru
+            Write-Host "$f exit code" $p.ExitCode
+          }
+          Get-Process -Name "Riyeser*" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Riyeser*" | Format-Table DisplayName, DisplayVersion -AutoSize | Out-String | Write-Host
+          Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Riyeser*" | Select-Object DisplayName, DisplayVersion | ConvertTo-Json | Set-Content C:\riy\out\installed-before.json
+      - name: Press Update all in the installed Central
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter "Riyeser Central.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $exe) { throw "Riyeser Central isn't installed" }
+          Write-Host "Central:" $exe.FullName $exe.VersionInfo.ProductVersion "scenario:" $env:SCENARIO
+          if ($env:SCENARIO -eq "apps-open") {
+            foreach ($n in "Riyeser Accounting Basics", "Riyeser Bookings", "Riyeser Estimate", "Riyeser POS") { Start-Process "$env:LOCALAPPDATA\Programs\$n\$n.exe" }
+            Start-Sleep -Seconds 25
+            Get-Process -Name "Riyeser*" | Format-Table Name, Id, Path -AutoSize | Out-String | Write-Host
+          }
+          if ($env:SCENARIO -like "av-*") {
+            # the antivirus stand-in: as soon as a downloaded installer is complete, take it away (or hold it for 90 s)
+            Start-Job -ArgumentList $env:SCENARIO, $env:TEMP -ScriptBlock { param($mode, $tmp)
+              $seen = @{}
+              for ($i = 0; $i -lt 3000; $i++) {
+                Get-ChildItem $tmp -Directory -Filter "riy*-update-*" -ErrorAction SilentlyContinue | ForEach-Object { Get-ChildItem $_.FullName -Filter "*.exe" -ErrorAction SilentlyContinue } | ForEach-Object {
+                  if ($seen[$_.FullName] -or $_.Name -notlike "RiyeserAccountingBasics*" -or $_.Length -lt 31000000) { return }
+                  $seen[$_.FullName] = 1
+                  try {
+                    if ($mode -eq "av-delete") { Remove-Item $_.FullName -Force; "deleted $($_.FullName)" | Add-Content C:\riy\out\av.log }
+                    else { $h = [IO.File]::Open($_.FullName, 'Open', 'Read', 'None'); "locked $($_.FullName)" | Add-Content C:\riy\out\av.log; Start-Sleep -Seconds 90; $h.Close() }
+                  } catch { "couldn't $mode $($_.FullName): $($_.Exception.Message)" | Add-Content C:\riy\out\av.log }
+                  $global:doneOnce = $true
+                }
+                if ($global:doneOnce) { break }
+                Start-Sleep -Milliseconds 20
+              }
+            } | Out-Null
+          }
+          if ($env:SCENARIO -eq "limited") {
+            $node = (Get-Command node).Source
+            "@`"$($exe.FullName)`" --remote-debugging-port=9339" | Set-Content C:\riy\central-limited.cmd -Encoding ascii
+            runas /trustlevel:0x20000 "C:\riy\central-limited.cmd"
+            node scripts/central-update-all-check.js "--exe=$($exe.FullName)" --attach --out=C:\riy\out\update-all --minutes=30 --retry
+          } else {
+            node scripts/central-update-all-check.js "--exe=$($exe.FullName)" --out=C:\riy\out\update-all --minutes=30 --retry
+          }
+          Write-Host "check exit code" $LASTEXITCODE
+          # Central's own update: it closed, its installer runs, then it opens again. Wait for Windows' list to say so.
+          for ($i = 0; $i -lt 60; $i++) {
+            $c = Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Riyeser Central*" | Select-Object -First 1
+            if ($c.DisplayVersion -and $c.DisplayVersion -ne "$($exe.VersionInfo.ProductVersion)".Trim()) { break }
+            Start-Sleep -Seconds 5
+          }
+          Start-Sleep -Seconds 15
+          $global:LASTEXITCODE = 0
+      - name: What's installed now, and Central's install log
+        if: always()
+        shell: pwsh
+        run: |
+          Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Riyeser*" | Format-Table DisplayName, DisplayVersion -AutoSize | Out-String | Write-Host
+          Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Riyeser*" | Select-Object DisplayName, DisplayVersion | ConvertTo-Json | Set-Content C:\riy\out\installed-after.json
+          $log = "$env:APPDATA\Riyeser Central\logs\install.log"
+          if (Test-Path $log) { Copy-Item $log C:\riy\out\install.log; Get-Content $log | Write-Host } else { Write-Host "No install.log" }
+          if (Test-Path C:\riy\out\av.log) { Get-Content C:\riy\out\av.log | Write-Host }
+          if (Test-Path C:\riy\out\update-all\update-all.json) { Get-Content C:\riy\out\update-all\update-all.json | Write-Host }
+          Get-Process -Name "Riyeser*" -ErrorAction SilentlyContinue | Format-Table Name, Id, Path -AutoSize | Out-String | Write-Host
+      - name: All five updated (this branch's Central; the released one only shows what it did)
+        if: matrix.central == 'built'
+        shell: pwsh
+        run: |
+          $before = Get-Content C:\riy\out\installed-before.json -Raw | ConvertFrom-Json
+          $after = Get-Content C:\riy\out\installed-after.json -Raw | ConvertFrom-Json
+          $same = @()
+          foreach ($n in "Riyeser Central", "Riyeser Accounting Basics", "Riyeser Bookings", "Riyeser Estimate", "Riyeser POS") {
+            $b = ($before | Where-Object { $_.DisplayName -like "$n *" }).DisplayVersion; $a = ($after | Where-Object { $_.DisplayName -like "$n *" }).DisplayVersion
+            Write-Host "$n $b -> $a"
+            if (-not $a -or $a -eq $b) { $same += $n }
+          }
+          if ($same.Count) { throw "Not updated: $($same -join ', ')" }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: update-all-${{ matrix.central }}-${{ matrix.scenario }}
+          path: C:\riy\out\
+          if-no-files-found: ignore
