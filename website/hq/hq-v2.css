@@ -144,6 +144,7 @@ a.k2:hover { border-color: #9db8f5; box-shadow: 0 10px 26px -20px rgba(11,92,255
 .f2 { display: flex; flex-direction: column; gap: 5px; font-size: 13px; font-weight: 600; color: var(--v2-ink); min-width: 0; } .grow2 { flex: 1 1 240px; }
 .f2 input, .f2 select { height: 38px; border: 1px solid #cfd8e6; border-radius: 10px; padding: 0 10px; background: #fff; font-size: 14px; min-width: 0; }
 #takmsg .st2 { margin: 12px 0 0; }
+@media (max-width: 640px) { .tak2 .f2 { flex: 1 1 100%; } .tak2 .btn2 { width: 100%; justify-content: center; } }
 
 /* tablets and phones: the menu slides in from the left */
 @media (max-width: 1100px) { .g2c, .g2c.wide { grid-template-columns: minmax(0, 1fr); } }

@@ -436,7 +436,7 @@
     const r = await soft(X.api.testAccounts()); const el = document.getElementById('tal'); if (!el) return;
     if (!r.ok) { el.innerHTML = stateBox(r.missing ? 'unknown' : 'error', r.missing ? 'Needs a database update' : 'Couldn’t load', esc(r.missing ? 'Run the latest team-chat.sql to switch on test accounts.' : X.plain(r.e))); return; }
     const list = r.v || [];
-    el.innerHTML = `<h2>Marked accounts <small>${X.num(list.length)} · Live · ${esc(loadedAt(t0))}</small></h2>${list.length ? `<div class="tw2"><table class="tbl t2"><tr><th>Business</th><th>Company ID</th><th>Kind</th><th>Since</th><th></th></tr>
+    el.innerHTML = `<h2>Marked accounts <small>${X.num(list.length)} · Live · ${esc(loadedAt(t0))}</small></h2>${list.length ? `<div class="tw2"><table class="tbl t2"><tr><th>Business</th><th>Company ID</th><th>Kind</th><th>Joined Riyeser</th><th></th></tr>
       ${list.map((c) => `<tr><td><button class="lnk" data-goco="${esc(c.id)}"><b>${esc(c.name)}</b></button><small>${esc(c.country || '')}</small></td><td class="nowrap">${esc(c.company_code || '')}</td>
         <td>${pill2('unk', (KINDS.find((x) => x[0] === c.account_kind) || [0, c.account_kind])[1])}</td><td class="nowrap">${esc(X.day(c.created_at))}</td>
         <td><button class="btn2 sm" data-real="${esc(c.id)}" data-code="${esc(c.company_code || '')}" data-name="${esc(c.name)}">Mark as a real customer</button></td></tr>`).join('')}</table></div>`
