@@ -54,6 +54,29 @@ const CONTRAST = () => {
     check(!low.length, `download page: text at least 4.5:1 ${low.map(([t, c]) => `"${t}" ${c.toFixed(2)}`).join(', ')}`);
     check(await pg.$eval('#dlst', (e) => e.getAttribute('role') === 'status' && e.getAttribute('aria-live') === 'polite'), 'download page: the "starting / started" line is announced');
     await axe(pg, '/download/pos.html'); await pg.close(); }
+  // ---- the signing page (/sign/?t=…, a pretend "sign" function): headings in order, Skip first, every control named,
+  //      small grey text at least 4.5:1, and the adopt-a-signature dialog
+  { const pg = await b.newPage({ viewport: { width: 1280, height: 900 } }); pg.on('pageerror', (e) => errs.push('/sign/: ' + e.message));
+    const T = 'a'.repeat(64);
+    const PDF = Buffer.from('JVBERi0xLjQKMSAwIG9iajw8L1R5cGUvQ2F0YWxvZy9QYWdlcyAyIDAgUj4+ZW5kb2JqCjIgMCBvYmo8PC9UeXBlL1BhZ2VzL0tpZHNbMyAwIFJdL0NvdW50IDE+PmVuZG9iagozIDAgb2JqPDwvVHlwZS9QYWdlL1BhcmVudCAyIDAgUi9NZWRpYUJveFswIDAgNTk1IDg0Ml0+PmVuZG9iagp0cmFpbGVyPDwvUm9vdCAxIDAgUj4+CiUlRU9GCg==', 'base64');
+    await pg.route('https://*.supabase.co/functions/v1/sign/**', (r) => { const a = new URL(r.request().url()).pathname.split('/').pop(); const h = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Expose-Headers': 'X-Doc-Sha256' };
+      if (r.request().method() === 'OPTIONS') return r.fulfill({ status: 204, headers: { ...h, 'Access-Control-Allow-Headers': 'content-type' } });
+      if (a === 'doc') return r.fulfill({ status: 200, headers: { ...h, 'Content-Type': 'application/pdf' }, body: PDF });
+      return r.fulfill({ status: 200, headers: { ...h, 'Content-Type': 'application/json' }, body: JSON.stringify({ state: 'ready', request: { title: 'Sample agreement', sender: 'Alex', company: 'Sample Co', expires_at: '2026-12-31T00:00:00Z', pages: 1 },
+        signer: { name: 'Pat Client' }, message: 'Please sign.', fields: [{ id: 's1', kind: 'signature', signer: 1, page: 1, x: 0.1, y: 0.7, w: 0.3, h: 0.06 }, { id: 'n1', kind: 'name', signer: 1, page: 1, x: 0.5, y: 0.7, w: 0.3, h: 0.04 }] }) }); });
+    await pg.addInitScript(CONTRAST); await pg.goto(BASE + '/sign/?t=' + T); await pg.waitForSelector('.fld.k-name input');
+    const jumps = await pg.$$eval('h1, h2, h3, h4', (hs) => { const out = []; let last = 0; for (const h of hs) { const n = Number(h.tagName[1]); if (last && n > last + 1) out.push(h.tagName); last = n; } return out; });
+    check(!jumps.length, `signing page: heading levels in order ${jumps.join(' ')}`);
+    const unnamed = await pg.$$eval('button, input, textarea', (els) => els.filter((e) => e.offsetParent && !(e.getAttribute('aria-label') || e.textContent.trim() || (e.labels && e.labels.length) || e.closest('label'))).map((e) => e.outerHTML.slice(0, 60)));
+    check(!unnamed.length, `signing page: every control has a name ${unnamed.join(' ')}`);
+    const low = await pg.$$eval('.muted, .meta, .from, .small, .legal', (els) => els.filter((e) => e.offsetParent && e.textContent.trim()).map((e) => [e.textContent.trim().slice(0, 30), window.__contrast(e)]).filter(([, c]) => c < 4.5));
+    check(!low.length, `signing page: small grey text at least 4.5:1 ${low.map(([t, c]) => `"${t}" ${c.toFixed(2)}`).join(', ')}`);
+    await pg.keyboard.press('Tab');
+    check(await pg.evaluate(() => document.activeElement.textContent.trim() === 'Skip to the document' && !!document.getElementById('main')), 'signing page: Tab first reaches "Skip to the document"');
+    await axe(pg, '/sign/ (signing)');
+    await pg.click('#adopt'); await pg.waitForSelector('.modal #padS');
+    check(await pg.$eval('.modal', (m) => m.getAttribute('role') === 'dialog' && m.getAttribute('aria-modal') === 'true' && !!m.getAttribute('aria-labelledby')), 'signing page: the signature dialog is a named, modal dialog');
+    await axe(pg, '/sign/ (adopt a signature)'); await pg.close(); }
   // ---- the hosted booking page (/book/): headings in order, every control named, contrast of the business's colour
   { const pg = await page('/book/?b=demo'); await pg.waitForSelector('[data-svc]');
     await pg.click('[data-svc=CUT]'); await pg.waitForSelector('.times [data-slot]'); await pg.click('.times [data-slot="0"]'); await pg.waitForSelector('#f-name');

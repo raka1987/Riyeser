@@ -289,7 +289,7 @@
     for (let i = 6; i <= 118; i += 6) mods['g' + i] = { basic: { status: 'active', paid_until: t(-20 - i).slice(0, 10), paid_since: t(i % 50).slice(0, 10) }, ...(i % 12 ? {} : { pos: { status: 'active', paid_until: t(-40 - i).slice(0, 10), paid_since: t(i % 30).slice(0, 10) } }) };
     mods.w1.basic.paid_since = t(120).slice(0, 10); mods.w2.basic.paid_since = t(200).slice(0, 10); mods.w2.pos.paid_since = t(20).slice(0, 10); mods.w2.calls.paid_since = t(35).slice(0, 10);
     const plans = { w2: { extra_users: 6, extra_companies: 0, billing: 'yearly', early_bird: true } };
-    const settings = { 'support.overdue_hours': 24, 'support.escalate_hours': 48, 'refunds.two_person_threshold': 200, 'offers.self_limit_days': 31, 'billing.grace_days': 7 };
+    const settings = { 'support.overdue_hours': 24, 'support.escalate_hours': 48, 'refunds.two_person_threshold': 200, 'offers.self_limit_days': 31, 'billing.grace_days': 7, 'sign.free_per_month': 10 };
     // payments in the demo: Harbour Cafe pays by PayPal, Sample Plumbing has a bank transfer invoice waiting, one PayPal payment failed
     let entity = { name: 'Riyeser', address: '', tax_label: 'ABN', tax_number: '', email: 'info@riyeser.com', bank: { account_name: '', bank_name: '', bsb: '', account_number: '', swift: '', note: '' } };
     const bOrders = [
@@ -2728,6 +2728,7 @@
         <label class="f"><span>Refunds over this need two approvals (any currency)</span><input type="number" min="1" name="refunds.two_person_threshold" value="${esc(settings['refunds.two_person_threshold'])}"></label>
         <label class="f"><span>Free periods up to this many days apply straight away</span><input type="number" min="1" name="offers.self_limit_days" value="${esc(settings['offers.self_limit_days'])}"></label>
         ${settings['billing.grace_days'] != null ? `<label class="f"><span>After a failed PayPal payment, programs keep working this many days</span><input type="number" min="1" name="billing.grace_days" value="${esc(settings['billing.grace_days'])}"></label>` : ''}
+        ${settings['sign.free_per_month'] != null ? `<label class="f"><span>Riyeser PDF: free signing requests a business can send each month</span><input type="number" min="1" name="sign.free_per_month" value="${esc(settings['sign.free_per_month'])}"></label>` : ''}
         <div><button class="btn p">Save settings</button></div></form></div>` : ''}`);
     m.querySelectorAll('[data-role]').forEach((sel) => sel.onchange = async () => { const s = staff.find((x) => x.user_id === sel.dataset.role);
       try { await api.setStaff(s.user_id, sel.value, s.active); team(); } catch (err) { alert(plain(err)); team(); } });

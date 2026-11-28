@@ -56,6 +56,7 @@ app.whenReady().then(async () => {
   registerInstalledApp(APP_INFO).catch(() => {});
   require('./core/ocr').configure({ cacheDir: path.join(app.getPath('userData'), 'ocr') });
   registerPdfIpc({ handle, store, openEditor, getTheme: () => store.get('theme', 'system'), setTheme: (t) => { store.set('theme', t); applyTheme(t); } });
+  require('./sign-request-ipc').registerSignRequest({ handle, store, electron: require('electron'), openEditor });   // Ask someone to sign
   handle('app:info', () => ({ standalone: true }));
   handle('app:uninstall', () => runUninstall(APP_INFO));
   openEditor(pdfArg(process.argv) || null);

@@ -10012,10 +10012,12 @@ begin
     update sign_signers set copy_hash = sign_hash(tok), copy_until = now() + make_interval(days => days) where id = s.id;
     perform sign_email(req, s.email, 'sign.completed', 'Everyone has signed: your copy is ready',
       'Hello ' || s.name || E',\n\nEveryone has signed "' || r.title || E'". Download your copy, with its certificate of completion, here (the link works for '
-        || days || E' days):\nhttps://riyeser.com/sign/?t=' || tok || E'\n\nThis is an electronic signature with an audit trail, sent through Riyeser for ' || r.sender_name || '.');
+        || days || E' days):\nhttps://riyeser.com/sign/?t=' || tok || E'\n\nThe signed file''s SHA-256 fingerprint: ' || sign_pub_complete.sha256
+        || E'\n\nThis is an electronic signature with an audit trail, sent through Riyeser for ' || r.sender_name || '.');
   end loop;
   perform sign_email(req, (select email::text from auth.users where id = r.created_by), 'sign.completed', 'Everyone has signed your document',
     'Hello ' || r.sender_name || E',\n\nEveryone has signed "' || r.title || E'". Open Riyeser PDF → Sent for signing to download the signed copy with its certificate of completion.'
+      || E'\n\nThe signed file''s SHA-256 fingerprint: ' || sign_pub_complete.sha256
       || E'\n\nThe files are kept until ' || sign_day(now() + make_interval(days => r.keep_days)) || ', then deleted. You can change that in Riyeser PDF.');
   return jsonb_build_object('state', 'completed');
 end $$;
